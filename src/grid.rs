@@ -5,7 +5,8 @@ use std::cmp::Ordering;
 use std::ops::Range;
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, h_flex, menu::ContextMenuExt as _, v_flex};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, menu::ContextMenuExt as _, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -823,7 +824,7 @@ impl Grid {
         div()
             .relative()
             .flex_none()
-            .h(theme::GRID_ROW + theme::SPACE_12)
+            .h(header_height(theme::BADGE_LINE, theme::SPACE_8))
             .w_full()
             .overflow_hidden()
             .bg(theme.table_head)
@@ -867,8 +868,24 @@ impl Grid {
                             .px(theme::SPACE_8)
                             .overflow_hidden()
                             .whitespace_nowrap()
-                            .child(div().text_size(theme::UI_SM).text_color(theme.foreground).child(columns[s].name.to_string()))
-                            .child(div().text_size(theme::UI_SM).child(columns[s].data_type.to_string()))
+                            .child({
+                                let m = header_model(&columns[s]);
+                                h_flex()
+                                    .gap(theme::SPACE_4)
+                                    .h(theme::BADGE_LINE)
+                                    .text_size(theme::UI_SM)
+                                    .text_color(theme.foreground)
+                                    .when(m.pk, |d| d.child(Icon::new(IconName::KeyRound).size_3().text_color(theme.muted_foreground)))
+                                    .child(m.name)
+                            })
+                            .child(
+                                div()
+                                    .h(theme::BADGE_LINE)
+                                    .font_family(theme.mono_font_family.clone())
+                                    .text_size(theme::UI_SM)
+                                    .text_color(theme.muted_foreground)
+                                    .child(header_model(&columns[s]).data_type),
+                            )
                             .context_menu({
                                 let focus = self.focus.clone();
                                 move |menu, _, _| {
@@ -878,22 +895,29 @@ impl Grid {
                                 }
                             }),
                     )
-                    .when(self.source.row_count() <= CLIENT_SORT_MAX, |d| {
+                    .child({
+                        let avail = sort_availability(self.source.row_count());
                         let glyph = match self.sort {
                             Some((sc, true)) if sc == s => "↑",
                             Some((sc, false)) if sc == s => "↓",
                             _ => "↕",
                         };
-                        d.child(
-                            div()
-                                .id(("sort", s))
-                                .px(theme::SPACE_4)
-                                .text_size(theme::UI_SM)
-                                .when(glyph == "↕", |d| d.text_color(theme::text_disabled(theme)))
-                                .hover(|d| d.text_color(theme.foreground))
-                                .on_click(cx.listener(move |this, _, _, cx| this.cycle_sort(s, cx)))
-                                .child(glyph),
-                        )
+                        div()
+                            .id(("sort", s))
+                            .px(theme::SPACE_4)
+                            .text_size(theme::UI_SM)
+                            // Drag must not start from the sort control.
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .map(|d| match avail {
+                                SortAvail::Enabled => d
+                                    .when(glyph == "↕", |d| d.text_color(theme::text_disabled(theme)))
+                                    .hover(|d| d.text_color(theme.foreground))
+                                    .on_click(cx.listener(move |this, _, _, cx| this.cycle_sort(s, cx))),
+                                SortAvail::Disabled(why) => {
+                                    d.text_color(theme::text_disabled(theme)).tooltip(move |window, cx| Tooltip::new(why).build(window, cx))
+                                }
+                            })
+                            .child(glyph)
                     })
                     // Resize grip on the right edge.
                     .child(
