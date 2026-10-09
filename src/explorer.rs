@@ -57,18 +57,21 @@ fn status_style(status: &ConnectionStatus) -> (bool, String) {
 
 /// The nodes to show: the expanded tree, or the filtered full tree while a filter is typed.
 fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>, filter: &str) -> Vec<FlatNode> {
-    // stub
-    flatten(ws, expanded, loading, false)
+    if filter.is_empty() {
+        flatten(ws, expanded, loading, false)
+    } else {
+        filter_nodes(flatten(ws, expanded, &HashSet::new(), true), filter)
+    }
 }
 
 /// Names of every connection except `conn`, which a rename may keep.
 fn other_names(ws: &Workspace, conn: usize) -> Vec<&str> {
-    ws.connections.iter().map(|c| c.name.as_str()).collect()
+    ws.connections.iter().enumerate().filter(|(i, _)| *i != conn).map(|(_, c)| c.name.as_str()).collect()
 }
 
 /// Whether a key during a rename is consumed; chords pass through to the Shell (Ctrl+1..9).
-fn rename_swallows(_: Modifiers) -> bool {
-    true
+fn rename_swallows(m: Modifiers) -> bool {
+    !m.control && !m.alt && !m.platform
 }
 
 /// F2 renames connections only.
@@ -394,20 +397,14 @@ impl Explorer {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        if self.filter.is_empty() {
-            self.nodes = flatten(&self.workspace, &self.expanded, &self.loading, false);
-        }
+        self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
         self.selected = self.selected.min(self.nodes.len().saturating_sub(1));
         cx.notify();
     }
 
     fn set_filter(&mut self, filter: String, cx: &mut Context<Self>) {
         self.filter = filter;
-        self.nodes = if self.filter.is_empty() {
-            flatten(&self.workspace, &self.expanded, &self.loading, false)
-        } else {
-            filter_nodes(flatten(&self.workspace, &self.expanded, &HashSet::new(), true), &self.filter)
-        };
+        self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
         // First match, or the top when clearing.
         let first = self.nodes.iter().position(|n| !self.filter.is_empty() && fuzzy_match(&n.label, &self.filter).is_some());
         self.select(first.unwrap_or(0), cx);
@@ -446,7 +443,7 @@ impl Explorer {
     fn on_key(&mut self, ev: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
         if let Some(rn) = &mut self.rename {
-            let others: Vec<&str> = self.workspace.connections.iter().enumerate().filter(|(i, _)| *i != rn.conn).map(|(_, c)| c.name.as_str()).collect();
+            let others = other_names(&self.workspace, rn.conn);
             match rn.key(&ev.keystroke.key, ev.keystroke.key_char.as_deref().filter(|_| !m.control && !m.alt && !m.platform), &others) {
                 RenameKey::Open => {}
                 RenameKey::Commit(name) => {
@@ -457,7 +454,10 @@ impl Explorer {
                 RenameKey::Cancel => self.rename = None,
             }
             cx.notify();
-            return cx.stop_propagation();
+            if rename_swallows(m) {
+                cx.stop_propagation();
+            }
+            return;
         }
         match ev.keystroke.key.as_str() {
             "f2" if self.nodes.get(self.selected).is_some_and(|n| can_rename(n.kind)) => {
@@ -612,7 +612,7 @@ impl Explorer {
                         d.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     })
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child({
-                        // shortcut: the rename input is the typed text plus a caret glyph, no cursor movement
+                        // shortcut: the rename input is the typed text plus a caret glyph, no cursor movement; AltGr-as-alt characters and IME input aren't supported
                         if let Some(rn) = self.rename.as_ref().filter(|rn| is_conn && rn.conn == node.conn) {
                             StyledText::new(format!("{}▏", rn.text))
                         } else {
@@ -839,13 +839,12 @@ mod tests {
     #[test]
     fn renamed_connection_shows_under_filter() {
         let mut ws = mock::workspaces()[0].clone();
-        let old = ws.connections[0].name.clone();
-        let filter = &old[..2];
-        ws.connections[0].name = format!("{filter}-renamed");
+        let filter = "prod";
+        ws.connections[0].name = "prod-main".into();
         let nodes = tree_nodes(&ws, &Default::default(), &Default::default(), filter);
         let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_ref()).collect();
         assert!(labels.contains(&ws.connections[0].name.as_str()), "{labels:?}");
-        assert!(!labels.contains(&ws.connections[1].name.as_str()), "filter still applied: {labels:?}");
+        assert!(!labels.contains(&ws.connections[2].name.as_str()), "filter still applied: {labels:?}");
     }
 
     #[test]
