@@ -165,7 +165,12 @@ impl Default for LogFilter {
 
 /// Indexes of `log` entries that pass `filter`.
 fn filter_rows(log: &[QueryLogEntry], filter: &LogFilter) -> Vec<usize> {
-    (0..log.len()).filter(|&ix| filter.statuses.contains(&StatusKind::of(&log[ix].status))).collect()
+    let text = filter.text.to_lowercase();
+    (0..log.len())
+        .filter(|&ix| filter.statuses.contains(&StatusKind::of(&log[ix].status)))
+        .filter(|&ix| filter.connections.is_empty() || filter.connections.contains(&log[ix].connection_id.0))
+        .filter(|&ix| text.is_empty() || log[ix].sql.to_lowercase().contains(&text))
+        .collect()
 }
 
 // ponytail: keyword list, not a parser; the log line only needs a hint of structure.
