@@ -197,6 +197,11 @@ fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: us
     })
 }
 
+/// Display columns (anchor, head) of a band: the clicked column, or for a whole row the first and last visible.
+fn band_cols(col: Option<usize>, hidden: &[bool]) -> (usize, usize) {
+    col.map_or((0, hidden.len() - 1), |c| (c, c))
+}
+
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
 
 fn csv(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
@@ -965,7 +970,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{band_cols, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1081,6 +1086,21 @@ mod tests {
         ];
         for (key, hidden, from, expected) in cases {
             assert_eq!(nav(key, true, false, from, 10, &hidden, 5), Some(expected), "Ctrl+{key} from {from:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[test]
+    fn select_row_skips_hidden_columns() {
+        // (clicked column, hidden in display order, expected (anchor, head) columns)
+        let cases: [(Option<usize>, [bool; 3], (usize, usize)); 5] = [
+            (None, [false, false, true], (0, 1)), // c hidden -> head on b
+            (None, [true, false, false], (1, 2)), // a hidden -> anchor on b
+            (None, [true, false, true], (1, 1)),
+            (None, [false, false, false], (0, 2)),
+            (Some(1), [false, true, false], (1, 1)), // a header click selects that column as is
+        ];
+        for (col, hidden, expected) in cases {
+            assert_eq!(band_cols(col, &hidden), expected, "band {col:?}, hidden {hidden:?}");
         }
     }
 
