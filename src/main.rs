@@ -1166,7 +1166,7 @@ mod tests {
         let background = |vcx: &mut gpui_kit::VisualTestContext| vcx.update(|_, cx| cx.theme().background);
         assert_eq!(background(&mut vcx), gpui_kit::rgb(0x2E3440).into(), "Nord applied");
 
-        std::fs::write(dir.join("nord.json"), theme_json("#3B4252")).unwrap();
+        std::fs::write(dir.join("nord.json"), format!("{} ", theme_json("#3B4252"))).unwrap(); // longer too, so the change doesn't hinge on mtime resolution
         vcx.executor().advance_clock(std::time::Duration::from_secs(5));
         vcx.run_until_parked();
         assert_eq!(background(&mut vcx), gpui_kit::rgb(0x3B4252).into(), "edited Nord applied without restart");
@@ -1177,6 +1177,40 @@ mod tests {
         cx.executor().advance_clock(std::time::Duration::from_secs(5));
         cx.run_until_parked();
         assert!(!missing.exists(), "a missing theme dir is not created");
+    }
+
+    /// An unrelated edit doesn't repeat a known problem; deleting the active theme's file falls back to Dark.
+    #[gpui_kit::test]
+    fn reloading_user_themes_repeats_no_notification_and_falls_back_when_the_file_is_gone(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, component::WindowExt as _};
+        let nord = |bg: &str| format!(r##"{{"name": "Nord", "themes": [{{"name": "Nord", "mode": "dark", "colors": {{"background": "{bg}"}}}}]}}"##);
+        let dir = crate::theme::tests::test_dir("reload");
+        std::fs::write(dir.join("bad.json"), "not json").unwrap();
+        std::fs::write(dir.join("nord.json"), nord("#2E3440")).unwrap();
+        cx.update(|cx| gpui_kit::init(cx));
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        // After the window exists: notifications need its root.
+        vcx.update(|window, cx| shell.update(cx, |this, cx| this.watch_user_themes(dir.clone(), window, cx)));
+        vcx.run_until_parked();
+        let count = |vcx: &mut gpui_kit::VisualTestContext| vcx.update(|window, cx| window.notifications(cx).len());
+        assert_eq!(count(&mut vcx), 1, "bad.json reported once on load");
+
+        // (a) an unrelated edit reloads, but bad.json is not reported again.
+        vcx.update(|window, cx| window.clear_notifications(cx));
+        std::fs::write(dir.join("nord.json"), format!("{} ", nord("#3B4252"))).unwrap();
+        vcx.executor().advance_clock(std::time::Duration::from_secs(2));
+        vcx.run_until_parked();
+        assert_eq!(count(&mut vcx), 0, "no repeat notification for bad.json");
+
+        // (b) the active user theme's file is deleted: back to Dark.
+        shell.update(&mut vcx, |this, _| this.theme = crate::theme::ThemeChoice::User("Nord".into()));
+        std::fs::remove_file(dir.join("nord.json")).unwrap();
+        vcx.executor().advance_clock(std::time::Duration::from_secs(2));
+        vcx.run_until_parked();
+        assert_eq!(shell.read_with(&vcx, |this, _| this.theme.clone()), crate::theme::ThemeChoice::Dark);
     }
 
     /// A Shell with 11 tabs and the overflow list open, its search field focused.
