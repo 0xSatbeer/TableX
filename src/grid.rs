@@ -1046,7 +1046,7 @@ mod tests {
     }
 
     fn abc() -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
-        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into() }).to_vec();
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
         (cols, vec![["a0", "b0", "c0"].map(|v| Value::Text(v.into())).to_vec()])
     }
 
