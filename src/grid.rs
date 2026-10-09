@@ -1101,7 +1101,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{gutter_digits, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{gutter_digits, gutter_width, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1302,10 +1302,20 @@ mod tests {
     }
 
     #[test]
+    fn gutter_width_is_digits_plus_padding() {
+        // Spec rule: digits * one mono digit width (0.6 em) + SPACE_12.
+        let cases = [(9, 3.0 * 7.5 + 12.0), (1_000_000, 7.0 * 7.5 + 12.0)];
+        for (rows, px_width) in cases {
+            let got: f32 = gutter_width(rows).into();
+            assert!((got - px_width).abs() < 0.01, "{rows} rows: {got}");
+        }
+    }
+
+    #[test]
     fn cells_format_by_type() {
         assert_eq!(format_cell(&Value::Null), ("NULL".into(), CellKind::Null));
         assert_eq!(format_cell(&Value::Int(-5)), ("-5".into(), CellKind::Number));
-                assert_eq!(format_cell(&Value::Text("a\nb".into())).0, "a ↵");
+        assert_eq!(format_cell(&Value::Text("a\nb".into())).0, "a ↵");
         assert_eq!(format_cell(&Value::Bytes(std::sync::Arc::from(&[0u8; 5][..]))).0, "0x00000000… (5 B)");
         let long = format_cell(&Value::Text("é".repeat(500).into())).0;
         assert_eq!(long.chars().count(), MAX_CHARS + 1);
