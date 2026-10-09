@@ -46,12 +46,12 @@ impl BottomPanel {
             }
         })
         .detach();
-        let log = mock::mock_query_log(10_000);
+        let mut log = Vec::new();
+        mock::mock_query_log(LOG_CAP).into_iter().for_each(|entry| push_log(&mut log, entry));
         let filter = LogFilter::default();
         let rows = filter_rows(&log, &filter);
         Self {
             tab: LOGS,
-            // ponytail: plain Vec; the capped ring buffer comes with live logging (QX-025)
             log,
             filter,
             search,
@@ -196,6 +196,10 @@ const LOG_CAP: usize = 10_000;
 /// Appends the newest entry (the list shows the last one first); past `LOG_CAP` the oldest drops.
 fn push_log(log: &mut Vec<QueryLogEntry>, entry: QueryLogEntry) {
     log.push(entry);
+    // shortcut: O(n) shift on overflow, fine at 10k and a few pushes a second; use a VecDeque when logging goes live.
+    if log.len() > LOG_CAP {
+        log.remove(0);
+    }
 }
 
 /// Which statuses a Logs row can have, for the status filter.
