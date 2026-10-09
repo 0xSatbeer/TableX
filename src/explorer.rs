@@ -15,7 +15,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, DbObject, ObjectKind, Workspace};
+use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
 
@@ -120,6 +120,21 @@ fn row_estimate_label(rows: Option<u64>) -> Option<String> {
         }
     }
     unreachable!("the last unit always returns")
+}
+
+/// The rows under a structure part: label, muted suffix, primary key.
+fn part_rows(obj: &DbObject, part: Part) -> Vec<(&str, Option<&str>, bool)> {
+    match part {
+        Part::Columns => obj.columns.iter().map(|c| (c.name.as_str(), Some(c.data_type.as_str()), c.is_pk)).collect(),
+        Part::Keys => obj
+            .keys
+            .iter()
+            .map(|k| match k {
+                Key::Primary { name, .. } | Key::Foreign { name, .. } | Key::Unique { name, .. } => (name.as_str(), None, false),
+            })
+            .collect(),
+        Part::Indexes => obj.indexes.iter().map(|i| (i.name.as_str(), None, false)).collect(),
+    }
 }
 
 fn part_label(part: Part) -> &'static str {
@@ -319,7 +334,13 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                         }
                         for (part, n) in parts {
                             let label = part_label(part);
-                            push(FlatNode { count: Some(n), expandable: true, ..node(format!("{key}/{label}"), NodeKind::Part(part), label, 5) });
+                            let key = format!("{key}/{label}");
+                            if !push(FlatNode { count: Some(n), expandable: true, ..node(key.clone(), NodeKind::Part(part), label, 5) }) {
+                                continue;
+                            }
+                            for (i, (label, suffix, pk)) in part_rows(obj, part).into_iter().enumerate() {
+                                push(FlatNode { suffix: suffix.map(Into::into), pk, ..node(format!("{key}/{i}"), NodeKind::Item(part), label, 6) });
+                            }
                         }
                     }
                 }
@@ -649,7 +670,14 @@ impl Explorer {
                     NodeKind::Object(kind) => {
                         (Icon::empty().path(assets::object_icon(kind.as_str(), false)), theme::object_color(kind, theme))
                     }
-                    NodeKind::Part(_) | NodeKind::Item(_) => (Icon::new(Lucide::Minus), theme.muted_foreground),
+                    NodeKind::Part(part) | NodeKind::Item(part) => (
+                        match part {
+                            Part::Columns => Icon::new(Lucide::Columns3),
+                            Part::Keys => Icon::new(Lucide::KeyRound),
+                            Part::Indexes => Icon::empty().path(assets::object_icon(ObjectKind::Index.as_str(), false)),
+                        },
+                        theme.muted_foreground,
+                    ),
                     NodeKind::Loading => (Icon::new(Lucide::LoaderCircle), theme.muted_foreground),
                     NodeKind::ConnError => (Icon::new(Lucide::CircleAlert), theme.danger),
                 };
@@ -755,6 +783,7 @@ impl Explorer {
                     .when_some(node.suffix.clone(), |d, suffix| {
                         d.child(div().flex_none().text_size(theme::UI_SM).text_color(theme.muted_foreground).child(suffix))
                     })
+                    .when(node.pk, |d| d.child(div().flex_none().text_size(theme::UI_SM).text_color(theme.muted_foreground).child("PK")))
                     .when_some(node.count, |d, n| {
                         d.child(div().text_size(theme::UI_SM).text_color(theme.muted_foreground).child(n.to_string()))
                     })
