@@ -203,6 +203,15 @@ fn band_cols(col: Option<usize>, hidden: &[bool]) -> (usize, usize) {
     col.map_or_else(|| (edge("home"), edge("end")), |c| (c, c))
 }
 
+/// Anchor, head and extra ranges, in display positions.
+type Selection = ((usize, usize), (usize, usize), Vec<(Range<usize>, Range<usize>)>);
+
+/// Selection after a header drop: a real move (`Some(first visible display column)`) resets it
+/// to row 0 of that column, a no-op drop (`None`) keeps it.
+fn selection_after_drop(reset_col: Option<usize>, selection: Selection) -> Selection {
+    selection
+}
+
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
 
 fn csv(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
@@ -504,10 +513,11 @@ impl Grid {
 
     /// Header drop: display column `from` moves before `before`. A real move clears the selection.
     fn drop_col(&mut self, from: usize, before: usize, cx: &mut Context<Self>) {
-        if move_col(&mut self.col_order, from, before) {
-            let first = self.col_order.iter().position(|&s| !self.hidden[s]).unwrap_or(0);
-            self.select((0, first), false, cx);
-        }
+        let moved = move_col(&mut self.col_order, from, before);
+        let reset_col = moved.then(|| band_cols(None, &self.display_hidden()).0);
+        let selection = (self.anchor, self.head, std::mem::take(&mut self.extra));
+        (self.anchor, self.head, self.extra) = selection_after_drop(reset_col, selection);
+        cx.notify();
     }
 
     /// Ctrl+click: keep the current range and start a new one at `cell`.
@@ -974,7 +984,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{band_cols, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1110,6 +1120,15 @@ mod tests {
         for (key, shift, hidden, from, expected) in cases {
             assert_eq!(nav(key, false, shift, from, 10, &hidden, 5), Some(expected), "{key} shift={shift} from {from:?}, hidden {hidden:?}");
         }
+    }
+
+    #[test]
+    fn real_move_resets_selection_and_own_position_keeps_it() {
+        let selection = || ((2, 1), (4, 3), vec![(0..2, 0..1)]);
+        // c hidden after the move [c, a, b] -> first visible display column is 1
+        let first_visible = band_cols(None, &[true, false, false]).0;
+        assert_eq!(selection_after_drop(Some(first_visible), selection()), ((0, 1), (0, 1), vec![]), "real move");
+        assert_eq!(selection_after_drop(None, selection()), selection(), "own-position drop");
     }
 
     #[test]
