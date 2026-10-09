@@ -222,6 +222,14 @@ fn block_data(block: &Block, order: &[usize], hidden: &[bool], columns: &[Column
     (pick(columns, &ix), block.0.clone().map(|r| pick(&row(r), &ix)).collect())
 }
 
+/// Every range in the order it was added: the extras, then the active one.
+fn ranges_in_order(extra: &[Block], active: Block) -> Vec<Block> {
+    // stub
+    let mut all = vec![active];
+    all.extend(extra.iter().cloned());
+    all
+}
+
 /// One `format` block per range, separated by a blank line.
 fn copy_ranges(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> Vec<Value>) -> String {
     let blocks: Vec<String> = ranges
@@ -1061,7 +1069,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{Block, copy_ranges, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{Block, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1334,5 +1342,19 @@ mod tests {
         for (ranges, expected) in cases {
             assert_eq!(copy_ranges(tsv, &ranges, &[0, 1, 2], &[false; 3], &cols, &row), expected, "ranges {ranges:?}");
         }
+    }
+
+    #[test]
+    fn ranges_are_emitted_in_the_order_added() {
+        let (cols, row) = vgrid();
+        let (r1, r2): (Block, Block) = ((0..1, 0..1), (2..3, 1..2));
+        // Ctrl+click adds: R2 first (kept in `extra`), then R1 is active.
+        let ranges = ranges_in_order(&[r2.clone()], r1.clone());
+        assert_eq!(ranges, [r2.clone(), r1.clone()]);
+        assert_eq!(copy_ranges(tsv, &ranges, &[0, 1, 2], &[false; 3], &cols, &row), "v21\n\nv00\n", "R2 block first");
+        // three ranges keep insertion order, not position order
+        let r3: Block = (1..2, 2..3);
+        assert_eq!(ranges_in_order(&[r2.clone(), r3.clone()], r1.clone()), [r2, r3, r1]);
+        assert_eq!(ranges_in_order(&[], (4..5, 0..1)), [(4..5, 0..1)], "no extras: just the active range");
     }
 }
