@@ -26,10 +26,21 @@ enum NodeKind {
     Schema,
     Group(ObjectKind),
     Object(ObjectKind),
+    /// A table's or view's Columns, Keys or Indexes group.
+    Part(Part),
+    /// One column, key or index under a `Part`.
+    Item(Part),
     /// Placeholder under a connection that is connecting or a schema whose objects are loading.
     Loading,
     /// A failed connection's message, shown under it whether or not it is expanded.
     ConnError,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Part {
+    Columns,
+    Keys,
+    Indexes,
 }
 
 /// The trimmed name to commit, or the message to show inline. `others` are the other connections'
@@ -563,6 +574,7 @@ impl Explorer {
                     NodeKind::Object(kind) => {
                         (Icon::empty().path(assets::object_icon(kind.as_str(), false)), theme::object_color(kind, theme))
                     }
+                    NodeKind::Part(_) | NodeKind::Item(_) => (Icon::new(Lucide::Minus), theme.muted_foreground),
                     NodeKind::Loading => (Icon::new(Lucide::LoaderCircle), theme.muted_foreground),
                     NodeKind::ConnError => (Icon::new(Lucide::CircleAlert), theme.danger),
                 };
@@ -739,7 +751,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
+    use super::{Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -933,5 +945,42 @@ mod tests {
         for kind in [NodeKind::Loading, NodeKind::ConnError] {
             assert_eq!(click_action(kind, Hit::Row { clicks: 1 }), Click::Select, "{kind:?}");
         }
+    }
+
+    #[test]
+    fn table_click_opens_chevron_shows_structure() {
+        for kind in [ObjectKind::Table, ObjectKind::View] {
+            let kind = NodeKind::Object(kind);
+            let cases = [
+                (Hit::Row { clicks: 1 }, Click::Open { preview: true }),
+                (Hit::Row { clicks: 2 }, Click::Open { preview: false }),
+                (Hit::Chevron, Click::Toggle),
+            ];
+            for (hit, want) in cases {
+                assert_eq!(click_action(kind, hit), want, "{kind:?} {hit:?}");
+            }
+        }
+        for kind in [NodeKind::Part(Part::Columns), NodeKind::Item(Part::Columns)] {
+            assert_eq!(click_action(kind, Hit::Row { clicks: 1 }), Click::Select, "{kind:?}");
+        }
+
+        let ws = &mock::workspaces()[0];
+        let mut open = default_expanded(ws);
+        let nodes = flatten(ws, &open, &Default::default(), false);
+        let table = nodes.iter().position(|n| n.kind == NodeKind::Object(ObjectKind::Table)).unwrap();
+        assert!(nodes[table].expandable && !nodes[table].expanded, "a table has a chevron, closed by default");
+        assert_eq!(nodes[table + 1].kind, NodeKind::Object(ObjectKind::Table), "children not expanded");
+
+        open.insert(nodes[table].key.clone());
+        let nodes = flatten(ws, &open, &Default::default(), false);
+        let parts: Vec<_> = nodes[table + 1..].iter().take_while(|n| n.depth > nodes[table].depth).map(|n| (n.kind, n.label.to_string())).collect();
+        assert_eq!(
+            parts,
+            [
+                (NodeKind::Part(Part::Columns), "Columns".to_string()),
+                (NodeKind::Part(Part::Keys), "Keys".to_string()),
+                (NodeKind::Part(Part::Indexes), "Indexes".to_string()),
+            ]
+        );
     }
 }
