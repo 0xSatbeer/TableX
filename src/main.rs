@@ -1017,6 +1017,37 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn every_way_out_of_panel_maximize_refocuses_the_content(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::Focusable as _;
+        // The bottom splitter isn't drawn while maximized, so a drag can't hide the panel from there.
+        let exits: [(&str, fn(&mut gpui_kit::VisualTestContext)); 4] = [
+            ("Esc", |cx| cx.simulate_keystrokes("escape")),
+            ("maximize button again", |cx| cx.dispatch_action(super::MaximizePanel)),
+            ("Ctrl+J / hide panel button", |cx| cx.dispatch_action(super::ToggleBottomPanel)),
+            ("Ctrl+Shift+F", |cx| cx.dispatch_action(super::MaximizeEditor)),
+        ];
+        for (exit, run) in exits {
+            for logs_focused in [false, true] {
+                let (window, shell) = open_maximized(cx, logs_focused);
+                let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+                run(&mut cx);
+                cx.run_until_parked();
+                let (maximized, root, content) = shell.read_with(&cx, |this, cx| {
+                    let content = match this.tabs.active().map(|t| &t.content) {
+                        Some(super::TabContent::Grid(grid)) => grid.focus_handle(cx),
+                        Some(super::TabContent::Console) => this.editor.focus_handle(cx),
+                        None => panic!("launch opens a tab"),
+                    };
+                    (this.layout.panel_maximized, this.focus_handle.clone(), content)
+                });
+                assert!(!maximized, "{exit} ends maximize (logs_focused={logs_focused})");
+                assert!(!cx.update(|window, _| root.is_focused(window)), "{exit} leaves the root (logs_focused={logs_focused})");
+                assert!(cx.update(|window, _| content.is_focused(window)), "{exit} focuses the content (logs_focused={logs_focused})");
+            }
+        }
+    }
+
+    #[gpui_kit::test]
     fn clicking_chrome_keeps_focus_when_not_maximized(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(|cx| gpui_kit::init(cx));
