@@ -849,4 +849,42 @@ mod tests {
         assert!(l.explorer_visible, "maximized -> shown");
         assert!(l.maximized_from.is_none(), "maximize state dropped so the next toggle starts fresh");
     }
+
+    /// A Shell with 11 tabs and the overflow list open, its search field focused.
+    fn open_overflow(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let _ = cx.update_window(window.into(), |_, _, cx| {
+            shell.update(cx, |this, cx| {
+                while !crate::tabs::show_search(this.tabs.tabs.len()) {
+                    let ix = this.tabs.tabs.len();
+                    this.tabs.open(super::grid_tab(format!("t{ix}"), std::rc::Rc::new(crate::mock::edge_cases()), cx));
+                }
+                this.overflow_open = true;
+                cx.notify();
+            });
+        });
+        // Let the popover mount and take focus, then focus the field as `on_open_change` does.
+        let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let search = shell.read_with(&vcx, |this, _| this.overflow_search.clone());
+        vcx.update(|window, cx| search.update(cx, |s, cx| s.focus(window, cx)));
+        vcx.run_until_parked();
+        (window.into(), shell)
+    }
+
+    #[gpui_kit::test]
+    fn typing_a_space_in_the_overflow_search_types_it_and_keeps_the_list_open(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_overflow(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        cx.run_until_parked();
+        cx.simulate_keystrokes("a space b");
+        shell.read_with(&cx, |this, cx| {
+            assert_eq!(this.overflow_search.read(cx).value().to_string(), "a b", "search text");
+            assert!(this.overflow_open, "list stays open");
+        });
+    }
 }
