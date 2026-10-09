@@ -260,6 +260,8 @@ impl Shell {
             bar.set_origin(origin, has_tab, cx);
         });
         self.focus_content = true;
+        // Without a search field the list is a plain menu; don't re-mount open with a stale query.
+        self.overflow_open &= tabs::show_search(self.tabs.tabs.len());
         cx.notify();
     }
 
