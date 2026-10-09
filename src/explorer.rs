@@ -9,6 +9,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
+    input::{Input, InputEvent, InputState},
     tooltip::Tooltip,
     v_flex,
 };
@@ -471,8 +472,9 @@ pub struct Explorer {
     /// Schema keys whose objects have "arrived", and those still waiting on mock latency.
     loaded: HashSet<String>,
     loading: HashSet<String>,
-    /// Type-to-filter query; non-empty shows only matches and their ancestors.
+    /// Mirror of the field's text; non-empty shows only matches and their ancestors.
     filter: String,
+    field: Entity<InputState>,
     nodes: Vec<FlatNode>,
     selected: usize,
     /// False until the user picks a row, so launch doesn't highlight production as "here".
@@ -486,12 +488,20 @@ pub struct Explorer {
 }
 
 impl Explorer {
-    pub fn new(workspace: Workspace, cx: &mut Context<Self>) -> Self {
+    pub fn new(workspace: Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // ponytail: starts collapsed; QX-020 restores the last session's expanded nodes
         let expanded = HashSet::new();
         let nodes = flatten(&workspace, &expanded, &HashSet::new(), false);
         let loaded = HashSet::new();
-        Self { workspace, expanded, loaded, loading: HashSet::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder("Filter objects…"));
+        cx.subscribe(&field, |this, field, ev: &InputEvent, cx| {
+            if let InputEvent::Change = ev {
+                let text = field.read(cx).value().to_string();
+                this.set_filter(text, cx);
+            }
+        })
+        .detach();
+        Self { field, workspace, expanded, loaded, loading: HashSet::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -577,6 +587,32 @@ impl Explorer {
         self.refresh(cx);
     }
 
+    /// Focuses the filter field (Ctrl+Alt+F).
+    pub fn focus_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.field.focus_handle(cx), cx);
+    }
+
+    /// Replaces the field's text and applies it as the filter (`set_value` emits no Change).
+    fn put_filter(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.field.update(cx, |f, cx| f.set_value(text.clone(), window, cx));
+        self.set_filter(text, cx);
+    }
+
+    /// Esc / Down while the field has focus; runs in the capture phase so the input never sees them.
+    fn on_field_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let route = route_key(Focus::Field, &ev.keystroke.key, None, ev.keystroke.modifiers, self.filter.is_empty(), first_match(&self.nodes, &self.filter).is_some(), false);
+        match route {
+            KeyRoute::ClearField => self.put_filter(String::new(), window, cx),
+            KeyRoute::FocusTree => window.focus(&self.focus, cx),
+            KeyRoute::FocusFirstMatch => {
+                window.focus(&self.focus, cx);
+                self.select(first_match(&self.nodes, &self.filter).unwrap_or(0), cx);
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
         self.selected = self.selected.min(self.nodes.len().saturating_sub(1));
@@ -632,8 +668,11 @@ impl Explorer {
         cx.notify();
     }
 
-    fn on_key(&mut self, ev: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
+        if self.field.focus_handle(cx).is_focused(window) {
+            return;
+        }
         if let Some(rn) = &mut self.rename {
             let others = other_names(&self.workspace, rn.conn);
             match rn.key(&ev.keystroke.key, ev.keystroke.key_char.as_deref().filter(|_| !m.control && !m.alt && !m.platform), &others) {
@@ -651,21 +690,30 @@ impl Explorer {
             }
             return;
         }
+        let route = route_key(Focus::Tree, &ev.keystroke.key, ev.keystroke.key_char.as_deref(), m, self.filter.is_empty(), true, false);
+        match route {
+            KeyRoute::ToField(ch) => {
+                self.put_filter(format!("{}{ch}", self.filter), window, cx);
+                self.focus_field(window, cx);
+                return cx.stop_propagation();
+            }
+            KeyRoute::PopField => {
+                let mut f = self.filter.clone();
+                f.pop();
+                return self.put_filter(f, window, cx);
+            }
+            KeyRoute::ClearField => return self.put_filter(String::new(), window, cx),
+            _ => {}
+        }
         match ev.keystroke.key.as_str() {
             "f2" if self.nodes.get(self.selected).is_some_and(|n| can_rename(n.kind)) => {
                 let conn = self.nodes[self.selected].conn;
                 self.rename = Some(Rename { conn, text: self.workspace.connections[conn].name.clone(), error: None });
                 return cx.notify();
             }
-            "escape" if !self.filter.is_empty() => return self.set_filter(String::new(), cx),
             "escape" if !self.marked.is_empty() => {
                 self.marked.clear();
                 return cx.notify();
-            }
-            "backspace" if !self.filter.is_empty() => {
-                let mut f = self.filter.clone();
-                f.pop();
-                return self.set_filter(f, cx);
             }
             "c" if m.secondary() => {
                 let names: Vec<&str> = self
@@ -682,11 +730,6 @@ impl Explorer {
             _ if ev.keystroke.key_char.as_deref() == Some("*") && self.filter.is_empty() => {
                 self.expand_all_under(self.selected, cx);
                 return cx.stop_propagation();
-            }
-            _ if !m.control && !m.alt && !m.platform => {
-                if let Some(ch) = ev.keystroke.key_char.as_deref().filter(|c| !c.chars().any(char::is_control)) {
-                    return self.set_filter(format!("{}{ch}", self.filter), cx);
-                }
             }
             _ => {}
         }
@@ -867,21 +910,15 @@ impl Render for Explorer {
             .size_full()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
-            .when(!self.filter.is_empty(), |d| {
-                d.child(
-                    h_flex()
-                        .flex_none()
-                        .h(theme::TREE_ROW)
-                        .px(theme::SPACE_8)
-                        .gap(theme::SPACE_6)
-                        .border_b_1()
-                        .border_color(theme.border)
-                        .text_size(theme::UI_SM)
-                        .child(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))
-                        .child(div().flex_1().child(self.filter.clone()))
-                        .child(div().text_color(theme.muted_foreground).child("Esc clears")),
-                )
-            })
+            .child(
+                div()
+                    .flex_none()
+                    .p(theme::SPACE_6)
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .capture_key_down(cx.listener(Self::on_field_key))
+                    .child(Input::new(&self.field).small().prefix(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))),
+            )
             .when_some(self.rename.as_ref().and_then(|rn| rn.error.clone()), |d, msg| {
                 d.child(
                     h_flex()
@@ -897,15 +934,15 @@ impl Render for Explorer {
             })
             .map(|d| if self.nodes.is_empty() && !self.filter.is_empty() {
                 d.child(
-                    v_flex()
-                        .flex_1()
-                        .p(theme::SPACE_16)
-                        .gap(theme::SPACE_4)
+                    div()
+                        .flex_none()
+                        .px(theme::SPACE_8)
+                        .h(theme::TREE_ROW)
+                        .flex()
+                        .items_center()
                         .text_size(theme::UI_SM)
-                        .child(format!("Nothing matches “{}”", self.filter))
-                        .child(div().text_color(theme.muted_foreground).child(
-                            "Only connected databases are searched. Backspace edits the filter, Esc clears it.",
-                        )),
+                        .text_color(theme.muted_foreground)
+                        .child(no_match_text(&self.filter)),
                 )
             } else {
                 d.child(

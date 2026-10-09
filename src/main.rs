@@ -157,7 +157,7 @@ struct Shell {
 impl Shell {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let workspace = &mock::workspaces()[0];
-        let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), cx));
+        let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), window, cx));
         cx.subscribe(&explorer, |this, _, ev: &explorer::OpenObject, cx| {
             // ponytail: every table shows a mock query result until drivers land (Phase 5)
             let rows = match mock::run_query(&format!("SELECT * FROM {}", ev.name)) {
@@ -563,7 +563,7 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &RevealTab, window, cx| {
                 // Only explorer-opened tabs have a tooltip path; their key is the tree key.
                 let Some(key) = this.tabs.active().filter(|t| t.tooltip.is_some()).map(|t| t.key.clone()) else { return };
-                this.layout.explorer_visible = true;
+                this.layout.show_explorer();
                 this.explorer.update(cx, |explorer, cx| explorer.reveal(&key, window, cx));
                 cx.notify();
             }))
@@ -592,8 +592,8 @@ impl Render for Shell {
                 }
             }))
             .on_action(cx.listener(|this, _: &FocusExplorer, window, cx| {
-                this.layout.explorer_visible = true;
-                window.focus(&this.explorer.focus_handle(cx), cx);
+                this.layout.show_explorer();
+                this.explorer.update(cx, |explorer, cx| explorer.focus_field(window, cx));
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &CycleTheme, window, cx| {
