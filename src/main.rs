@@ -879,6 +879,19 @@ fn bind_panel_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", RestorePanel, Some(PANEL_MAXIMIZED_CONTEXT))]);
 }
 
+/// Opens the main window and starts watching `user_themes` (the user theme dir), if any.
+fn open_shell(options: WindowOptions, user_themes: Option<std::path::PathBuf>, cx: &mut App) -> Result<(AnyWindowHandle, Entity<Shell>)> {
+    gpui_kit::open_window(options, cx, |window, cx| {
+        cx.new(|cx| {
+            let mut shell = Shell::new(window, cx);
+            if let Some(dir) = user_themes {
+                shell.watch_user_themes(dir, window, cx);
+            }
+            shell
+        })
+    })
+}
+
 fn main() {
     gpui_kit::application()
         .with_assets(assets::Assets)
@@ -915,16 +928,7 @@ fn main() {
             };
             // No home or config dir: built-in themes only.
             let user_themes = theme::UserThemeDir::resolve(|k| std::env::var_os(k));
-            gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| {
-                    let mut shell = Shell::new(window, cx);
-                    if let Some(themes) = user_themes {
-                        shell.watch_user_themes(themes.dir, window, cx);
-                    }
-                    shell
-                })
-            })
-            .expect("open window");
+            open_shell(options, user_themes.map(|t| t.dir), cx).expect("open window");
             cx.activate(true);
         });
 }
