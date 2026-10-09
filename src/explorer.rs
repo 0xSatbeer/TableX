@@ -121,7 +121,7 @@ fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, fiel
 
 /// The single muted row shown when a filter matches nothing.
 fn no_match_text(filter: &str) -> String {
-    format!("Nothing matches “{filter}”")
+    format!("No objects match \"{filter}\"")
 }
 
 /// Index of the first node matching a non-empty filter.
