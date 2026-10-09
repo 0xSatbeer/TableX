@@ -109,7 +109,10 @@ impl LayoutState {
         }
     }
 
-    fn toggle_explorer(&mut self) {}
+    fn toggle_explorer(&mut self) {
+        self.maximized_from = None;
+        self.explorer_visible = !self.explorer_visible;
+    }
 
     fn toggle_maximize(&mut self) {
         match self.maximized_from.take() {
@@ -469,8 +472,7 @@ impl Render for Shell {
             .text_size(theme::UI)
             .text_color(theme.foreground)
             .on_action(cx.listener(|this, _: &ToggleExplorer, _, cx| {
-                this.layout.maximized_from = None;
-                this.layout.explorer_visible = !this.layout.explorer_visible;
+                this.layout.toggle_explorer();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleBottomPanel, _, cx| {
