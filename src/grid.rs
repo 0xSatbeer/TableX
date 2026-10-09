@@ -409,6 +409,17 @@ fn header_height(line: Pixels, pad: Pixels) -> Pixels {
     line * 2. + pad
 }
 
+/// Whether the header sort control works for a source of this size.
+#[derive(Debug, PartialEq)]
+enum SortAvail {
+    Enabled,
+    Disabled(&'static str),
+}
+
+fn sort_availability(_rows: usize) -> SortAvail {
+    SortAvail::Enabled
+}
+
 /// A header cell being dragged to a new display position.
 #[derive(Clone)]
 struct DragColumn {
@@ -1001,7 +1012,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1236,5 +1247,22 @@ mod tests {
         assert_eq!(header_height(px(16.), px(0.)), px(32.));
         assert_eq!(header_height(px(14.), SPACE_4), px(32.));
         assert!(header_height(BADGE_LINE, SPACE_8) >= BADGE_LINE * 2.);
+    }
+
+    #[test]
+    fn sort_is_available_up_to_client_sort_max() {
+        const WHY: &str = "Too many rows to sort here; use ORDER BY";
+        let cases = [
+            (0, SortAvail::Enabled),
+            (1, SortAvail::Enabled),
+            (99_999, SortAvail::Enabled),
+            (100_000, SortAvail::Enabled),
+            (100_001, SortAvail::Disabled(WHY)),
+            (1_000_000, SortAvail::Disabled(WHY)),
+        ];
+        for (rows, want) in cases {
+            assert_eq!(sort_availability(rows), want, "{rows} rows");
+        }
+        assert_eq!(sort_availability(super::BigEvents::new().row_count()), SortAvail::Disabled(WHY), "big_events");
     }
 }
