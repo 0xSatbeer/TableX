@@ -316,6 +316,32 @@ mod tests {
         }
     }
 
+    /// Error text is drawn as `theme.danger` (= danger.background).
+    #[test]
+    fn drawn_status_and_null_text_meet_contrast() {
+        let pairs = [
+            ("danger.background", "background"),
+            ("danger.background", "sidebar.background"),
+            ("danger.background", "muted.background"),
+        ];
+        for (name, theme) in [("dark", DARK), ("light", LIGHT)] {
+            for (fg, bg) in pairs {
+                let r = ratio(color(theme, fg), color(theme, bg));
+                assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1, needs 4.5:1");
+            }
+        }
+    }
+
+    #[test]
+    fn grid_null_text_meets_contrast() {
+        for (name, theme) in [("dark", DARK), ("light", LIGHT)] {
+            for bg in ["table.background", "table.even.background"] {
+                let r = ratio(color(theme, "muted.foreground"), color(theme, bg));
+                assert!(r >= 4.5, "{name}: grid NULL on {bg} is {r:.2}:1, needs 4.5:1");
+            }
+        }
+    }
+
     /// Dots and tab stripes are UI components: 3:1 against every surface they sit on.
     #[test]
     fn connection_colors_read_on_their_theme() {
