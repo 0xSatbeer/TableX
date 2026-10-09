@@ -98,6 +98,11 @@ fn is_numeric_type(ty: &str) -> bool {
     (ty.starts_with("int") && !ty.starts_with("interval")) || PREFIXES.iter().any(|p| ty.starts_with(p))
 }
 
+/// Whether a cell is right-aligned: numbers always, NULLs only in numeric columns.
+fn aligns_right(kind: &CellKind, data_type: &str) -> bool {
+    *kind == CellKind::Number || (*kind == CellKind::Null && is_numeric_type(data_type))
+}
+
 /// Width of the row-number gutter: monospace digits plus padding.
 fn gutter_width(rows: usize) -> Pixels {
     theme::MONO * 0.6 * gutter_digits(rows) as f32 + theme::SPACE_12
@@ -755,7 +760,7 @@ impl Grid {
                         .whitespace_nowrap()
                         .border_r_1()
                         .border_color(theme.table_row_border)
-                        .when(kind == CellKind::Number || (kind == CellKind::Null && is_numeric_type(&self.source.columns()[s].data_type)), |d| d.justify_end())
+                        .when(aligns_right(&kind, &self.source.columns()[s].data_type), |d| d.justify_end())
                         .when(selected, |d| d.bg(fill))
                         .when_some(cursor.filter(|_| self.head == (r, c)), |d, color| d.border_1().border_color(color))
                         .on_mouse_down(
