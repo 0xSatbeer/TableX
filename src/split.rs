@@ -25,7 +25,9 @@ pub struct Split {
 }
 
 impl Split {
-    pub fn reset(&mut self) {}
+    pub fn reset(&mut self) {
+        self.size = self.default;
+    }
 }
 
 pub const EXPLORER: Split = Split { size: px(260.), default: px(260.), min: px(180.), max: |_| px(600.) };
