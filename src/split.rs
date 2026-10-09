@@ -27,7 +27,7 @@ pub struct Split {
 impl Split {
     /// The size to draw at, in a window `window` long along the split's axis.
     pub fn shown(&self, _window: Pixels) -> Pixels {
-        px(0.)
+        self.size
     }
 
     pub fn reset(&mut self) {
