@@ -4,6 +4,8 @@
 # GNOME opens it behind the focused window when launched from a terminal.
 # Usage: scripts/shot.sh OUT.png [SECONDS_BEFORE_SHOT] [ENV=VALUE ...]
 set -euo pipefail
+# one capture at a time: parallel runs would photograph each other's windows
+exec 9>/tmp/queryx-shot.lock; flock 9
 # a cold debug build takes well over 4s to show its window
 out=$1; wait=${2:-15}; shift $(( $# > 1 ? 2 : 1 ))
 bin=$(mktemp /tmp/queryx-shot.XXXXXX)
