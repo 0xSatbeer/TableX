@@ -172,7 +172,7 @@ fn pick<T: Clone>(items: &[T], ix: &[usize]) -> Vec<T> {
 }
 
 /// Head cell after a navigation key, or `None` for other keys. `hidden` is in display order;
-/// Left/Right/Tab/Home/End skip hidden columns.
+/// every horizontal move skips hidden columns.
 fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: usize, hidden: &[bool], page: usize) -> Option<(usize, usize)> {
     let cols = hidden.len();
     // Nearest visible column left or right of `c`, or `c` at the edge.
@@ -180,6 +180,8 @@ fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: us
         let visible = |&i: &usize| !hidden[i];
         if right { (c + 1..cols).find(visible) } else { (0..c).rev().find(visible) }.unwrap_or(c)
     };
+    let first = if hidden[0] { step(0, true) } else { 0 };
+    let last = if hidden[cols - 1] { step(cols - 1, false) } else { cols - 1 };
     Some(match key {
         "up" => (r.saturating_sub(1), c),
         "down" => ((r + 1).min(rows - 1), c),
@@ -187,10 +189,10 @@ fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: us
         "right" => (r, step(c, true)),
         "pageup" => (r.saturating_sub(page.max(1)), c),
         "pagedown" => ((r + page.max(1)).min(rows - 1), c),
-        "home" if secondary => (0, 0),
-        "end" if secondary => (rows - 1, cols - 1),
-        "home" => (r, if hidden[0] { step(0, true) } else { 0 }),
-        "end" => (r, if hidden[cols - 1] { step(cols - 1, false) } else { cols - 1 }),
+        "home" if secondary => (0, first),
+        "end" if secondary => (rows - 1, last),
+        "home" => (r, first),
+        "end" => (r, last),
         "tab" => (r, step(c, !shift)),
         _ => return None,
     })
