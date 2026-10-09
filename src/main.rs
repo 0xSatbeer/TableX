@@ -178,10 +178,17 @@ impl Shell {
         })
         .detach();
         let overflow_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search tabs…"));
-        cx.subscribe(&overflow_search, |_, _, ev: &InputEvent, cx| {
-            if let InputEvent::Change = ev {
-                cx.notify();
+        cx.subscribe(&overflow_search, |this, search, ev: &InputEvent, cx| match ev {
+            InputEvent::Change => cx.notify(),
+            InputEvent::PressEnter { .. } => {
+                let query = search.read(cx).value();
+                if let Some(ix) = tabs::first_match(&this.tabs.tabs, &query) {
+                    this.overflow_open = false;
+                    this.tabs.activate(ix);
+                    this.tab_changed(cx);
+                }
             }
+            _ => {}
         })
         .detach();
         let mut this = Self {
@@ -356,6 +363,7 @@ impl Shell {
         let shell = cx.entity();
         let search = self.overflow_search.clone();
         let query = search.read(cx).value();
+        let empty = tabs::empty_state(&self.tabs.tabs, &query);
         let rows: Vec<_> = tabs::match_tabs(&self.tabs.tabs, &query).into_iter().map(|ix| (ix, self.tabs.tabs[ix].title.clone())).collect();
         let active_ix = self.tabs.active;
         Popover::new("all-tabs-popover")
@@ -377,26 +385,31 @@ impl Shell {
                 }
             })
             .trigger(Button::new("all-tabs").ghost().xsmall().icon(IconName::ChevronDown).tooltip("All open tabs"))
-            .content(move |_, _, _| {
-                let list = v_flex()
-                    .id("overflow-list")
-                    .max_h(theme::SPACE_24 * 10.)
-                    .overflow_y_scroll()
-                    .children(rows.iter().map(|(ix, title)| {
-                        let (ix, shell) = (*ix, shell.clone());
-                        Button::new(("overflow-tab", ix))
-                            .ghost()
-                            .small()
-                            .label(title.clone())
-                            .selected(ix == active_ix)
-                            .on_click(move |_, _, cx| {
-                                shell.update(cx, |this, cx| {
-                                    this.overflow_open = false;
-                                    this.tabs.activate(ix);
-                                    this.tab_changed(cx);
-                                });
-                            })
-                    }));
+            .content(move |_, _, cx| {
+                let list = if let Some(label) = empty {
+                    div().p(theme::SPACE_8).text_color(cx.theme().muted_foreground).child(label).into_any_element()
+                } else {
+                    v_flex()
+                        .id("overflow-list")
+                        .max_h(theme::SPACE_24 * 10.)
+                        .overflow_y_scroll()
+                        .children(rows.iter().map(|(ix, title)| {
+                            let (ix, shell) = (*ix, shell.clone());
+                            Button::new(("overflow-tab", ix))
+                                .ghost()
+                                .small()
+                                .label(title.clone())
+                                .selected(ix == active_ix)
+                                .on_click(move |_, _, cx| {
+                                    shell.update(cx, |this, cx| {
+                                        this.overflow_open = false;
+                                        this.tabs.activate(ix);
+                                        this.tab_changed(cx);
+                                    });
+                                })
+                        }))
+                        .into_any_element()
+                };
                 v_flex().w(theme::SPACE_24 * 10.).gap(theme::SPACE_4).child(Input::new(&search).small()).child(list)
             })
     }

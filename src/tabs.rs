@@ -51,13 +51,13 @@ pub fn match_tabs<C>(tabs: &[EditorTab<C>], query: &str) -> Vec<usize> {
 pub const NO_TABS_MATCH: &str = "No tabs match";
 
 /// The overflow list's empty state: `NO_TABS_MATCH` when `query` matches no tab.
-pub fn empty_state<C>(_tabs: &[EditorTab<C>], _query: &str) -> Option<&'static str> {
-    None
+pub fn empty_state<C>(tabs: &[EditorTab<C>], query: &str) -> Option<&'static str> {
+    match_tabs(tabs, query).is_empty().then_some(NO_TABS_MATCH)
 }
 
 /// The tab Enter activates in the overflow search.
-pub fn first_match<C>(_tabs: &[EditorTab<C>], _query: &str) -> Option<usize> {
-    None
+pub fn first_match<C>(tabs: &[EditorTab<C>], query: &str) -> Option<usize> {
+    match_tabs(tabs, query).first().copied()
 }
 
 pub struct EditorTab<C> {
