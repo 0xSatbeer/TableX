@@ -55,6 +55,22 @@ fn status_style(status: &ConnectionStatus) -> (bool, String) {
     }
 }
 
+/// The nodes to show: the expanded tree, or the filtered full tree while a filter is typed.
+fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>, filter: &str) -> Vec<FlatNode> {
+    // stub
+    flatten(ws, expanded, loading, false)
+}
+
+/// Names of every connection except `conn`, which a rename may keep.
+fn other_names(ws: &Workspace, conn: usize) -> Vec<&str> {
+    ws.connections.iter().map(|c| c.name.as_str()).collect()
+}
+
+/// Whether a key during a rename is consumed; chords pass through to the Shell (Ctrl+1..9).
+fn rename_swallows(_: Modifiers) -> bool {
+    true
+}
+
 /// F2 renames connections only.
 fn can_rename(kind: NodeKind) -> bool {
     matches!(kind, NodeKind::Connection(_))
@@ -701,7 +717,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style};
+    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -808,6 +824,38 @@ mod tests {
         assert_eq!(rn.error, None);
         // Esc cancels.
         assert_eq!(rn.key("escape", None, &others), RenameKey::Cancel);
+    }
+
+    #[test]
+    fn rename_to_own_name_is_allowed() {
+        let ws = &mock::workspaces()[0];
+        let own = ws.connections[0].name.clone();
+        let others = super::other_names(ws, 0);
+        assert!(!others.contains(&own.as_str()));
+        assert_eq!(others.len(), ws.connections.len() - 1);
+        assert_eq!(validate_rename(&own, &others), Ok(own.clone()));
+    }
+
+    #[test]
+    fn renamed_connection_shows_under_filter() {
+        let mut ws = mock::workspaces()[0].clone();
+        let old = ws.connections[0].name.clone();
+        let filter = &old[..2];
+        ws.connections[0].name = format!("{filter}-renamed");
+        let nodes = tree_nodes(&ws, &Default::default(), &Default::default(), filter);
+        let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_ref()).collect();
+        assert!(labels.contains(&ws.connections[0].name.as_str()), "{labels:?}");
+        assert!(!labels.contains(&ws.connections[1].name.as_str()), "filter still applied: {labels:?}");
+    }
+
+    #[test]
+    fn rename_lets_chords_through() {
+        use gpui_kit::Modifiers;
+        assert!(rename_swallows(Modifiers::none()));
+        assert!(rename_swallows(Modifiers::shift()));
+        assert!(!rename_swallows(Modifiers::control()));
+        assert!(!rename_swallows(Modifiers::alt()));
+        assert!(!rename_swallows(Modifiers::command()));
     }
 
     #[test]
