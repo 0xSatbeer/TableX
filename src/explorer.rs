@@ -79,8 +79,11 @@ enum Click {
     Open { preview: bool },
 }
 
-fn click_action(_kind: NodeKind, _hit: Hit) -> Click {
-    Click::Select
+fn click_action(_kind: NodeKind, hit: Hit) -> Click {
+    match hit {
+        Hit::Chevron | Hit::Row { clicks: 2 } => Click::Toggle,
+        Hit::Row { .. } => Click::Select,
+    }
 }
 
 /// Names of every connection except `conn`, which a rename may keep.
