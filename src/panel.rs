@@ -18,6 +18,7 @@ use crate::model::{QueryLogEntry, QuerySource, QueryStatus, Workspace};
 use crate::{ToggleBottomPanel, mock, theme};
 
 const TABS: [&str; 3] = ["Results", "Logs", "Messages"];
+const RESULTS: usize = 0;
 const LOGS: usize = 1;
 /// Time column width in `SPACE_8` units; wide enough for the "Time (UTC)" header.
 const TIME_W: f32 = 10.;
@@ -562,6 +563,17 @@ mod tests {
             assert_eq!(log.first().map(|e| e.sql.clone()), oldest.map(|i| format!("q{i}")), "oldest after {pushed} pushes");
             assert_eq!(log.last().map(|e| e.sql.clone()), (pushed as usize).checked_sub(1).map(|i| format!("q{i}")), "newest after {pushed} pushes");
         }
+    }
+
+    #[gpui_kit::test]
+    fn app_launches_on_results(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| gpui_kit::init(cx));
+        let workspace = crate::mock::workspaces().remove(0);
+        let (_, panel) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::BottomPanel::new(&workspace, window, cx))).expect("open test window")
+        });
+        assert_eq!(panel.read_with(cx, |p, _| p.tab), super::RESULTS, "active panel tab at launch");
     }
 
     /// 0 c1 SELECT ok | 1 c2 SELECT ok | 2 c1 delete ok | 3 c3 select err | 4 c1 Select cancelled | 5 c2 UPDATE err
