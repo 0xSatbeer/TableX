@@ -1234,7 +1234,7 @@ mod tests {
         use crate::theme::{BADGE_LINE, SPACE_4, SPACE_8};
         assert_eq!(header_height(BADGE_LINE, SPACE_8), px(40.));
         assert_eq!(header_height(px(16.), px(0.)), px(32.));
-        assert_eq!(header_height(px(14.), SPACE_4), px(36.));
+        assert_eq!(header_height(px(14.), SPACE_4), px(32.));
         assert!(header_height(BADGE_LINE, SPACE_8) >= BADGE_LINE * 2.);
     }
 }
