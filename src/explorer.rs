@@ -75,6 +75,31 @@ fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<Stri
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Focus {
+    Tree,
+    Field,
+}
+
+/// What a keystroke does to the filter field.
+#[derive(Clone, Debug, PartialEq)]
+enum KeyRoute {
+    /// Not ours: normal tree / input handling.
+    Pass,
+    /// Tree-focused printable key: focus the field and append this text.
+    ToField(String),
+    /// Tree-focused Backspace with text in the field: drop its last character.
+    PopField,
+    ClearField,
+    FocusTree,
+    FocusFirstMatch,
+}
+
+fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, field_empty: bool, has_match: bool, renaming: bool) -> KeyRoute {
+    let _ = (focus, key, key_char, m, field_empty, has_match, renaming);
+    KeyRoute::Pass
+}
+
 /// Index of the first node matching a non-empty filter.
 fn first_match(nodes: &[FlatNode], filter: &str) -> Option<usize> {
     nodes.iter().position(|n| !filter.is_empty() && fuzzy_match(&n.label, filter).is_some())
@@ -870,7 +895,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows, highlight_ranges, first_match};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -1215,5 +1240,34 @@ mod tests {
         assert_eq!(first_match(&normal, ""), None, "no first match without a filter");
         assert_eq!(first_match(&filtered, "ordr").map(|i| filtered[i].label.as_ref()), Some("orders"));
         assert_eq!(first_match(&filtered, "zzzz"), None);
+    }
+
+    #[test]
+    fn typing_in_the_tree_moves_into_the_field() {
+        use gpui_kit::Modifiers as M;
+        use KeyRoute::*;
+        let ch = |c: &'static str| Some(c);
+        // (key, key_char, modifiers, field_empty, renaming, expected)
+        let cases = [
+            ("u", ch("u"), M::none(), true, false, ToField("u".into())),
+            ("u", ch("U"), M::shift(), true, false, ToField("U".into())),
+            ("u", ch("u"), M::none(), false, false, ToField("u".into())),
+            ("u", ch("u"), M::control(), true, false, Pass),
+            ("u", ch("u"), M::alt(), true, false, Pass),
+            ("u", ch("u"), M::command(), true, false, Pass),
+            ("u", ch("u"), M::none(), true, true, Pass),
+            ("space", ch(" "), M::none(), true, false, Pass),
+            ("enter", ch("\n"), M::none(), true, false, Pass),
+            ("*", ch("*"), M::none(), true, false, Pass),
+            ("*", ch("*"), M::none(), false, false, ToField("*".into())),
+            ("up", None, M::none(), true, false, Pass),
+            ("backspace", None, M::none(), true, false, Pass),
+            ("backspace", None, M::none(), false, false, PopField),
+            ("escape", None, M::none(), false, false, ClearField),
+            ("escape", None, M::none(), true, false, Pass),
+        ];
+        for (key, key_char, m, empty, renaming, want) in cases {
+            assert_eq!(route_key(Focus::Tree, key, key_char, m, empty, true, renaming), want, "tree {key:?} {key_char:?} {m:?} empty={empty} renaming={renaming}");
+        }
     }
 }
