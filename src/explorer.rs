@@ -61,6 +61,23 @@ enum RenameKey {
 
 impl Rename {
     fn key(&mut self, key: &str, key_char: Option<&str>, others: &[&str]) -> RenameKey {
+        match key {
+            "escape" => return RenameKey::Cancel,
+            "enter" => match validate_rename(&self.text, others) {
+                Ok(name) => return RenameKey::Commit(name),
+                Err(msg) => self.error = Some(msg),
+            },
+            "backspace" => {
+                self.text.pop();
+                self.error = None;
+            }
+            _ => {
+                if let Some(ch) = key_char.filter(|c| !c.chars().any(char::is_control)) {
+                    self.text.push_str(ch);
+                    self.error = None;
+                }
+            }
+        }
         RenameKey::Open
     }
 }
