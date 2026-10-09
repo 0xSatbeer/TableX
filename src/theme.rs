@@ -109,7 +109,8 @@ impl UserThemeDir {
 pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
     match std::fs::read_dir(dir) {
         Ok(_) => (Vec::new(), Vec::new()),
-        Err(e) => (Vec::new(), vec![e.to_string()]),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Vec::new(), Vec::new()),
+        Err(e) => (Vec::new(), vec![format!("Couldn't read theme folder {}: {e}", dir.display())]),
     }
 }
 
