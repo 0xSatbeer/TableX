@@ -1388,4 +1388,24 @@ mod tests {
         assert_eq!(no_match_text("xyz"), "No objects match \"xyz\"");
         assert_eq!(no_match_text("a b"), "No objects match \"a b\"");
     }
+
+    #[gpui_kit::test]
+    fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Entity};
+        cx.update(gpui_kit::init);
+        let ws = mock::workspaces().remove(0);
+        let key = flatten(&ws, &default_expanded(&ws), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == "orders").expect("orders").key;
+        let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, window, cx))).expect("open test window")
+        });
+        cx.update_window(window.into(), |_, window, cx| {
+            explorer.update(cx, |e, cx| {
+                e.put_filter("ordr".into(), window, cx);
+                e.reveal(&key, window, cx);
+                assert_eq!(e.field.read(cx).value().to_string(), "", "field text cleared");
+                assert_eq!(e.filter, "", "filter cleared");
+            });
+        })
+        .unwrap();
+    }
 }
