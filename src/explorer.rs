@@ -1282,4 +1282,38 @@ mod tests {
             assert_eq!(route_key(Focus::Tree, key, key_char, m, empty, true, renaming), want, "tree {key:?} {key_char:?} {m:?} empty={empty} renaming={renaming}");
         }
     }
+
+    #[test]
+    fn field_keys_escape_and_down() {
+        use gpui_kit::Modifiers as M;
+        use KeyRoute::*;
+        // (key, modifiers, field_empty, has_match, expected)
+        let cases = [
+            ("escape", M::none(), false, true, ClearField),
+            ("escape", M::none(), false, false, ClearField),
+            ("escape", M::none(), true, false, FocusTree),
+            ("escape", M::none(), true, true, FocusTree),
+            ("down", M::none(), false, true, FocusFirstMatch),
+            ("down", M::none(), false, false, Pass),
+            ("down", M::none(), true, true, Pass),
+            ("down", M::shift(), false, true, Pass),
+            ("u", M::none(), false, true, Pass),
+            ("backspace", M::none(), false, true, Pass),
+        ];
+        for (key, m, empty, has_match, want) in cases {
+            assert_eq!(route_key(Focus::Field, key, Some("x").filter(|_| key == "u"), m, empty, has_match, false), want, "field {key:?} empty={empty} match={has_match}");
+        }
+        // Esc twice: first clears, second leaves for the tree.
+        let (mut text, mut seq) = ("ord".to_string(), vec![]);
+        for _ in 0..2 {
+            let r = route_key(Focus::Field, "escape", None, M::none(), text.is_empty(), true, false);
+            if r == ClearField {
+                text.clear();
+            }
+            seq.push(r);
+        }
+        assert_eq!(seq, vec![ClearField, FocusTree]);
+        // F2 rename in progress keeps its keys even if Esc reaches the router.
+        assert_eq!(route_key(Focus::Tree, "escape", None, M::none(), false, true, true), Pass);
+    }
 }
