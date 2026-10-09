@@ -64,6 +64,25 @@ fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<Stri
     }
 }
 
+/// Where a mouse press landed on a row.
+#[derive(Clone, Copy, Debug)]
+enum Hit {
+    Chevron,
+    Row { clicks: usize },
+}
+
+/// What a press does after selecting the row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Click {
+    Select,
+    Toggle,
+    Open { preview: bool },
+}
+
+fn click_action(_kind: NodeKind, _hit: Hit) -> Click {
+    Click::Select
+}
+
 /// Names of every connection except `conn`, which a rename may keep.
 fn other_names(ws: &Workspace, conn: usize) -> Vec<&str> {
     ws.connections.iter().enumerate().filter(|(i, _)| *i != conn).map(|(_, c)| c.name.as_str()).collect()
@@ -717,7 +736,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
+    use super::{Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -885,6 +904,31 @@ mod tests {
         ];
         for (status, solid, tip) in cases {
             assert_eq!(status_style(&status), (solid, tip.to_string()), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn group_click_selects_chevron_or_double_click_toggles() {
+        let containers = [
+            NodeKind::Group(ObjectKind::Table),
+            NodeKind::Group(ObjectKind::View),
+            NodeKind::Connection(DbKind::Postgres),
+            NodeKind::Database,
+            NodeKind::Schema,
+        ];
+        for kind in containers {
+            let cases = [
+                (Hit::Row { clicks: 1 }, Click::Select),
+                (Hit::Chevron, Click::Toggle),
+                (Hit::Row { clicks: 2 }, Click::Toggle),
+                (Hit::Row { clicks: 3 }, Click::Select),
+            ];
+            for (hit, want) in cases {
+                assert_eq!(click_action(kind, hit), want, "{kind:?} {hit:?}");
+            }
+        }
+        for kind in [NodeKind::Loading, NodeKind::ConnError] {
+            assert_eq!(click_action(kind, Hit::Row { clicks: 1 }), Click::Select, "{kind:?}");
         }
     }
 }
