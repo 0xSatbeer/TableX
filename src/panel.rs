@@ -1,6 +1,6 @@
 //! Bottom panel (QX-014): Results / Logs / Messages.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, UNIX_EPOCH};
 
 use gpui_kit::component::{
@@ -22,8 +22,7 @@ const LOGS: usize = 1;
 pub struct BottomPanel {
     tab: usize,
     log: Vec<QueryLogEntry>,
-    show_introspection: bool,
-    errors_only: bool,
+    filter: LogFilter,
     search: Entity<InputState>,
     /// Indexes into `log` that pass the filters.
     rows: Vec<usize>,
@@ -42,13 +41,13 @@ impl BottomPanel {
         })
         .detach();
         let log = mock::mock_query_log(10_000);
-        let rows = filter_rows(&log, false, false, "");
+        let filter = LogFilter::default();
+        let rows = filter_rows(&log, &filter);
         Self {
             tab: LOGS,
             // ponytail: plain Vec; the capped ring buffer comes with live logging (QX-025)
             log,
-            show_introspection: false,
-            errors_only: false,
+            filter,
             search,
             rows,
             connections: workspace.connections.iter().map(|c| (c.id.0, (c.name.clone(), c.color, c.is_production))).collect(),
@@ -56,7 +55,8 @@ impl BottomPanel {
     }
 
     fn refilter(&mut self, cx: &App) {
-        self.rows = filter_rows(&self.log, self.show_introspection, self.errors_only, &self.search.read(cx).value());
+        self.filter.text = self.search.read(cx).value().to_string();
+        self.rows = filter_rows(&self.log, &self.filter);
     }
 
     fn log_row(&self, ix: usize, cx: &App) -> Div {
@@ -123,14 +123,49 @@ impl BottomPanel {
     }
 }
 
-/// Indexes of `log` entries to show. `query` matches SQL case-insensitively.
-fn filter_rows(log: &[QueryLogEntry], show_introspection: bool, errors_only: bool, query: &str) -> Vec<usize> {
-    let query = query.to_lowercase();
-    (0..log.len())
-        .filter(|&ix| show_introspection || log[ix].source != QuerySource::Introspection)
-        .filter(|&ix| !errors_only || matches!(log[ix].status, QueryStatus::Err(_)))
-        .filter(|&ix| query.is_empty() || log[ix].sql.to_lowercase().contains(&query))
-        .collect()
+/// Which statuses a Logs row can have, for the status filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StatusKind {
+    Ok,
+    Error,
+    Cancelled,
+}
+
+impl StatusKind {
+    fn of(status: &QueryStatus) -> Self {
+        match status {
+            QueryStatus::Ok => Self::Ok,
+            QueryStatus::Err(_) => Self::Error,
+            QueryStatus::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+/// Logs filters; they combine with AND.
+#[derive(Clone, Debug)]
+pub struct LogFilter {
+    /// Case-insensitive substring of the SQL.
+    pub text: String,
+    /// Connection ids; empty means all.
+    pub connections: BTreeSet<u32>,
+    pub statuses: BTreeSet<StatusKind>,
+    pub introspection: bool,
+}
+
+impl Default for LogFilter {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            connections: BTreeSet::new(),
+            statuses: [StatusKind::Ok, StatusKind::Error, StatusKind::Cancelled].into(),
+            introspection: false,
+        }
+    }
+}
+
+/// Indexes of `log` entries that pass `filter`.
+fn filter_rows(log: &[QueryLogEntry], _filter: &LogFilter) -> Vec<usize> {
+    (0..log.len()).collect()
 }
 
 // ponytail: keyword list, not a parser; the log line only needs a hint of structure.
@@ -195,13 +230,13 @@ fn filter_toggle(
     id: &'static str,
     label: &'static str,
     on: bool,
-    flag: fn(&mut BottomPanel) -> &mut bool,
+    toggle: fn(&mut LogFilter),
     cx: &mut Context<BottomPanel>,
 ) -> Button {
     // A checkbox glyph, so the off state still reads as a toggle and not a label.
     let check = Icon::new(if on { Lucide::SquareCheck } else { Lucide::Square });
     Button::new(id).ghost().small().icon(check).label(label).selected(on).on_click(cx.listener(move |this, _, _, cx| {
-        *flag(this) = !*flag(this);
+        toggle(&mut this.filter);
         this.refilter(cx);
         cx.notify();
     }))
@@ -209,9 +244,12 @@ fn filter_toggle(
 
 impl Render for BottomPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let errors_toggle = filter_toggle("errors-only", "Errors", self.errors_only, |this| &mut this.errors_only, cx);
+        let errors_on = self.filter.statuses == [StatusKind::Error].into();
+        let errors_toggle = filter_toggle("errors-only", "Errors", errors_on, |f| {
+            f.statuses = if f.statuses == [StatusKind::Error].into() { LogFilter::default().statuses } else { [StatusKind::Error].into() };
+        }, cx);
         let introspection_toggle =
-            filter_toggle("show-introspection", "Introspection", self.show_introspection, |this| &mut this.show_introspection, cx);
+            filter_toggle("show-introspection", "Introspection", self.filter.introspection, |f| f.introspection = !f.introspection, cx);
         let theme = cx.theme();
         // Flat, same height as the editor strip; the active view is underlined, not boxed.
         let header = h_flex()
@@ -283,24 +321,33 @@ impl Render for BottomPanel {
 mod tests {
     use std::time::Duration;
 
-    use crate::model::{QuerySource, QueryStatus};
+
+    use super::{LogFilter, StatusKind, filter_rows};
 
     #[test]
-    fn filters_hide_introspection_and_match_sql() {
+    fn status_filter() {
         let log = crate::mock::mock_query_log(500);
-        let introspection = |rows: &[usize]| rows.iter().filter(|&&ix| log[ix].source == QuerySource::Introspection).count();
-        let default = super::filter_rows(&log, false, false, "");
-        assert_eq!(introspection(&default), 0);
-        assert!(!default.is_empty());
-        let all = super::filter_rows(&log, true, false, "");
-        assert!(introspection(&all) > 0);
-        assert_eq!(all.len(), log.len());
-        let deletes = super::filter_rows(&log, true, false, "delete from");
-        assert!(!deletes.is_empty());
-        assert!(deletes.iter().all(|&ix| log[ix].sql.starts_with("DELETE FROM")));
-        let errors = super::filter_rows(&log, true, true, "");
-        assert!(!errors.is_empty());
-        assert!(errors.iter().all(|&ix| matches!(log[ix].status, QueryStatus::Err(_))));
+        let with = |statuses: &[StatusKind]| {
+            let filter = LogFilter { statuses: statuses.iter().copied().collect(), introspection: true, ..LogFilter::default() };
+            filter_rows(&log, &filter)
+        };
+        let kind = |ix: usize| StatusKind::of(&log[ix].status);
+        // (statuses, expected kinds that may appear)
+        let cases: [(&[StatusKind], &[StatusKind]); 5] = [
+            (&[StatusKind::Error], &[StatusKind::Error]),
+            (&[StatusKind::Ok], &[StatusKind::Ok]),
+            (&[StatusKind::Cancelled], &[StatusKind::Cancelled]),
+            (&[StatusKind::Ok, StatusKind::Cancelled], &[StatusKind::Ok, StatusKind::Cancelled]),
+            (&[], &[]),
+        ];
+        for (statuses, allowed) in cases {
+            let rows = with(statuses);
+            assert!(rows.iter().all(|&ix| allowed.contains(&kind(ix))), "{statuses:?}");
+            assert_eq!(rows.is_empty(), allowed.is_empty() || !log.iter().any(|e| allowed.contains(&StatusKind::of(&e.status))), "{statuses:?}");
+        }
+        assert!(!with(&[StatusKind::Error]).is_empty(), "mock log has errors");
+        assert!(!with(&[StatusKind::Ok]).is_empty(), "mock log has ok rows");
+        assert_eq!(with(&[StatusKind::Ok, StatusKind::Error, StatusKind::Cancelled]).len(), log.len());
     }
 
     #[test]
