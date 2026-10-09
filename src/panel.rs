@@ -52,7 +52,7 @@ impl BottomPanel {
         let filter = LogFilter::default();
         let rows = filter_rows(&log, &filter);
         Self {
-            tab: LOGS,
+            tab: RESULTS,
             log,
             filter,
             search,
