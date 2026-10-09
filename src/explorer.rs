@@ -96,8 +96,15 @@ enum KeyRoute {
 }
 
 fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, field_empty: bool, has_match: bool, renaming: bool) -> KeyRoute {
-    let _ = has_match;
-    if focus != Focus::Tree || renaming {
+    if focus == Focus::Field {
+        return match key {
+            "escape" if field_empty => KeyRoute::FocusTree,
+            "escape" => KeyRoute::ClearField,
+            "down" if has_match && !field_empty && !m.shift && !m.control && !m.alt && !m.platform => KeyRoute::FocusFirstMatch,
+            _ => KeyRoute::Pass,
+        };
+    }
+    if renaming {
         return KeyRoute::Pass;
     }
     let printable = key_char.filter(|c| !c.chars().any(char::is_control) && *c != " ");
