@@ -689,4 +689,16 @@ mod tests {
         assert!(l.explorer_visible, "explorer visible after Ctrl+B");
         assert_eq!(l.explorer.shown(window.width), px(260.), "explorer width after Ctrl+B");
     }
+
+    #[test]
+    fn bottom_click_without_moving_keeps_its_stored_height() {
+        let small = size(px(1200.), px(600.));
+        let mut l = layout();
+        l.bottom.size = px(500.);
+        let at = point(px(600.), px(180.));
+        l.press(Edge::Bottom, at, small);
+        l.release(at, small);
+        assert_eq!(l.bottom.size, px(500.), "stored bottom height after a click at window height 600");
+        assert_eq!(l.bottom.shown(px(800.)), px(500.), "bottom height after the window grows to 800");
+    }
 }
