@@ -145,6 +145,10 @@ mod tests {
         EditorTab { key: key.into(), title: key.into(), origin: None, tooltip: None, preview, pinned: false, content: () }
     }
 
+    fn pinned(key: &'static str) -> EditorTab<()> {
+        EditorTab { pinned: true, ..tab(key, false) }
+    }
+
     fn keys(t: &Tabs<()>) -> Vec<&str> {
         t.tabs.iter().map(|t| t.key.as_ref()).collect()
     }
@@ -218,6 +222,25 @@ mod tests {
             t.move_tab(0, 0);
             t.move_tab(0, 1);
             assert_eq!(t.tabs.len(), n, "{n} tabs: nothing to move");
+        }
+    }
+
+    #[test]
+    fn move_tab_keeps_pinned_block_left() {
+        // (from, drop slot, expected); tabs are [pa, pb, c, d]
+        let cases: [(usize, usize, [&str; 4]); 7] = [
+            (3, 0, ["pa", "pb", "d", "c"]),
+            (3, 1, ["pa", "pb", "d", "c"]),
+            (2, 0, ["pa", "pb", "c", "d"]),
+            (0, 4, ["pb", "pa", "c", "d"]),
+            (0, 3, ["pb", "pa", "c", "d"]),
+            (1, 0, ["pb", "pa", "c", "d"]),
+            (0, 1, ["pa", "pb", "c", "d"]),
+        ];
+        for (from, to, want) in cases {
+            let mut t = Tabs::new(vec![pinned("pa"), pinned("pb"), tab("c", false), tab("d", false)]);
+            t.move_tab(from, to);
+            assert_eq!(keys(&t), want, "move {from} before {to}");
         }
     }
 }
