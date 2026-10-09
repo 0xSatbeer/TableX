@@ -1004,6 +1004,18 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn tab_change_while_maximized_keeps_esc_restoring_the_panel(cx: &mut gpui_kit::TestAppContext) {
+        for logs_focused in [false, true] {
+            let (window, shell) = open_maximized(cx, logs_focused);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            cx.dispatch_action(super::NextTab);
+            cx.run_until_parked();
+            cx.simulate_keystrokes("escape");
+            assert!(!shell.read_with(&cx, |this, _| this.layout.panel_maximized), "Esc restores after a tab change (logs_focused={logs_focused})");
+        }
+    }
+
+    #[gpui_kit::test]
     fn clicking_chrome_keeps_focus_when_not_maximized(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(|cx| gpui_kit::init(cx));
