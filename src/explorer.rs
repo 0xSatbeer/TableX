@@ -15,7 +15,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, ObjectKind, Workspace};
+use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, DbObject, ObjectKind, Workspace};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
 
@@ -90,10 +90,25 @@ enum Click {
     Open { preview: bool },
 }
 
-fn click_action(_kind: NodeKind, hit: Hit) -> Click {
+fn click_action(kind: NodeKind, hit: Hit) -> Click {
     match hit {
-        Hit::Chevron | Hit::Row { clicks: 2 } => Click::Toggle,
+        Hit::Chevron => Click::Toggle,
+        Hit::Row { clicks } if opens_tab(kind) => Click::Open { preview: clicks < 2 },
+        Hit::Row { clicks: 2 } => Click::Toggle,
         Hit::Row { .. } => Click::Select,
+    }
+}
+
+/// Table-like objects open in a tab and expand into their structure.
+fn opens_tab(kind: NodeKind) -> bool {
+    matches!(kind, NodeKind::Object(ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView))
+}
+
+fn part_label(part: Part) -> &'static str {
+    match part {
+        Part::Columns => "Columns",
+        Part::Keys => "Keys",
+        Part::Indexes => "Indexes",
     }
 }
 
@@ -209,7 +224,8 @@ fn target(conn: &Connection) -> String {
 fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>, all: bool) -> Vec<FlatNode> {
     let mut out = Vec::new();
     let mut push = |key: String, kind, label: &str, depth, conn, count, expandable: bool| {
-        let open = expandable && (all || expanded.contains(&key));
+        // Filtering opens everything but structure, so a query doesn't list every table's columns.
+        let open = expandable && (expanded.contains(&key) || all && !matches!(kind, NodeKind::Object(_) | NodeKind::Part(_)));
         out.push(FlatNode { key, kind, label: label.to_string().into(), depth, conn, count, expandable, expanded: open });
         open
     };
@@ -245,18 +261,26 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                     push(format!("{key}/loading"), NodeKind::Loading, "Loading objects…", 3, ci, None, false);
                     continue;
                 }
-                let mut groups: BTreeMap<ObjectKind, Vec<&str>> = BTreeMap::new();
+                let mut groups: BTreeMap<ObjectKind, Vec<&DbObject>> = BTreeMap::new();
                 for obj in &schema.objects {
-                    groups.entry(obj.kind).or_default().push(&obj.name);
+                    groups.entry(obj.kind).or_default().push(obj);
                 }
-                for (kind, names) in groups {
+                for (kind, objects) in groups {
                     let key = format!("{key}/{}", kind.as_str());
                     let label = group_label(kind);
-                    if !push(key.clone(), NodeKind::Group(kind), label, 3, ci, Some(names.len()), true) {
+                    if !push(key.clone(), NodeKind::Group(kind), label, 3, ci, Some(objects.len()), true) {
                         continue;
                     }
-                    for (oi, name) in names.into_iter().enumerate() {
-                        push(format!("{key}/{oi}"), NodeKind::Object(kind), name, 4, ci, None, false);
+                    for (oi, obj) in objects.into_iter().enumerate() {
+                        let key = format!("{key}/{oi}");
+                        let kind = NodeKind::Object(kind);
+                        if !push(key.clone(), kind, &obj.name, 4, ci, None, opens_tab(kind)) {
+                            continue;
+                        }
+                        let parts = [(Part::Columns, obj.columns.len()), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
+                        for (part, n) in parts {
+                            push(format!("{key}/{}", part_label(part)), NodeKind::Part(part), part_label(part), 5, ci, Some(n), true);
+                        }
                     }
                 }
             }
@@ -445,7 +469,7 @@ impl Explorer {
 
     fn open(&mut self, ix: usize, preview: bool, cx: &mut Context<Self>) {
         let node = &self.nodes[ix];
-        if let NodeKind::Object(ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView) = node.kind {
+        if opens_tab(node.kind) {
             let conn = &self.workspace.connections[node.conn];
             let mut names = vec![node.label.to_string()];
             let mut at = ix;
@@ -545,9 +569,9 @@ impl Explorer {
                 }
             }
             "enter" | "space" if node.kind == NodeKind::ConnError => self.connect(node.conn, cx),
-            "enter" if !node.expandable => self.open(ix, false, cx),
+            "enter" if opens_tab(node.kind) => self.open(ix, false, cx),
             "enter" if matches!(node.kind, NodeKind::Connection(_)) => self.set_expanded(ix, true, cx),
-            "space" if !node.expandable => self.open(ix, true, cx),
+            "space" if opens_tab(node.kind) => self.open(ix, true, cx),
             "enter" | "space" => self.set_expanded(ix, !node.expanded, cx),
             _ => return,
         }
