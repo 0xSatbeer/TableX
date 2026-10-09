@@ -288,6 +288,16 @@ mod tests {
     }
 
     #[test]
+    fn int_sums_are_exact_past_i64() {
+        check([
+            (2, 1, vec![Int(i64::MAX), Int(1)], "2 rows × 1 col · count 2 · sum 9223372036854775808 · avg 4611686018427387904"),
+            (2, 1, vec![Int(i64::MIN), Int(-1)], "2 rows × 1 col · count 2 · sum -9223372036854775809 · avg -4611686018427387904"),
+            // Overflow in the middle cancels out; avg is f64, so only the sum is exact.
+            (3, 1, vec![Int(i64::MAX), Int(i64::MAX), Int(i64::MIN)], "3 rows × 1 col · count 3 · sum 9223372036854775806 · avg 3074457345618258432"),
+        ]);
+    }
+
+    #[test]
     fn reads_private_memory_from_proc_status() {
         let status = "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
         assert_eq!(super::rss_anon_mb(status), Some(35));
