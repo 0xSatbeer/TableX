@@ -45,6 +45,11 @@ fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Whether the status dot is solid (else a ring), and the tooltip naming the status.
+fn status_style(status: &ConnectionStatus) -> (bool, String) {
+    (false, String::new())
+}
+
 /// F2 renames connections only.
 fn can_rename(kind: NodeKind) -> bool {
     matches!(kind, NodeKind::Connection(_))
@@ -656,7 +661,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename};
+    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -780,6 +785,19 @@ mod tests {
         ];
         for (kind, want) in cases {
             assert_eq!(can_rename(kind), want, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn status_dot_and_tooltip() {
+        let cases = [
+            (ConnectionStatus::Connected, true, "Connected"),
+            (ConnectionStatus::Disconnected, false, "Disconnected"),
+            (ConnectionStatus::Error("timeout".into()), false, "Error: timeout"),
+            (ConnectionStatus::Connecting, false, "Connecting…"),
+        ];
+        for (status, solid, tip) in cases {
+            assert_eq!(status_style(&status), (solid, tip.to_string()), "{status:?}");
         }
     }
 }
