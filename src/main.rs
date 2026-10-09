@@ -122,6 +122,9 @@ impl LayoutState {
         self.explorer_visible = !self.explorer_visible;
     }
 
+    /// Ctrl+Alt+F / reveal: shows the explorer if hidden; never hides it.
+    fn show_explorer(&mut self) {}
+
     fn toggle_maximize(&mut self) {
         match self.maximized_from.take() {
             Some((explorer, bottom)) => (self.explorer_visible, self.bottom_visible) = (explorer, bottom),
@@ -748,5 +751,20 @@ mod tests {
         l.release(at, small);
         assert_eq!(l.bottom.size, px(500.), "stored bottom height after a click at window height 600");
         assert_eq!(l.bottom.shown(px(800.)), px(500.), "bottom height after the window grows to 800");
+    }
+
+    #[test]
+    fn ctrl_alt_f_shows_a_hidden_explorer_and_never_hides_it() {
+        let mut l = layout();
+        l.explorer_visible = false;
+        l.show_explorer();
+        assert!(l.explorer_visible, "hidden -> shown");
+        l.show_explorer();
+        assert!(l.explorer_visible, "visible stays visible");
+        l.toggle_maximize();
+        assert!(!l.explorer_visible, "maximized hides it");
+        l.show_explorer();
+        assert!(l.explorer_visible, "maximized -> shown");
+        assert!(l.maximized_from.is_none(), "maximize state dropped so the next toggle starts fresh");
     }
 }
