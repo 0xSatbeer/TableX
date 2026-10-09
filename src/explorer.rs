@@ -566,7 +566,7 @@ impl Explorer {
             }
             self.expanded.insert(ancestor);
         }
-        self.set_filter(String::new(), cx);
+        self.put_filter(String::new(), window, cx);
         if let Some(ix) = self.nodes.iter().position(|n| n.key == key) {
             self.select(ix, cx);
         }
