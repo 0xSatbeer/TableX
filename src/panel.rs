@@ -190,6 +190,14 @@ impl BottomPanel {
     }
 }
 
+/// Logs keep the newest this many entries.
+const LOG_CAP: usize = 10_000;
+
+/// Appends the newest entry (the list shows the last one first); past `LOG_CAP` the oldest drops.
+fn push_log(log: &mut Vec<QueryLogEntry>, entry: QueryLogEntry) {
+    log.push(entry);
+}
+
 /// Which statuses a Logs row can have, for the status filter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StatusKind {
@@ -536,6 +544,19 @@ mod tests {
             rows: None,
             status,
             source,
+        }
+    }
+
+    #[test]
+    fn log_keeps_the_newest_10k_entries() {
+        for (pushed, len, oldest) in [(0u32, 0, None), (1, 1, Some(0)), (9_999, 9_999, Some(0)), (10_000, 10_000, Some(0)), (10_001, 10_000, Some(1)), (10_005, 10_000, Some(5))] {
+            let mut log = Vec::new();
+            for i in 0..pushed as usize {
+                super::push_log(&mut log, entry(1, &format!("q{i}"), QueryStatus::Ok, QuerySource::Console));
+            }
+            assert_eq!(log.len(), len, "length after {pushed} pushes");
+            assert_eq!(log.first().map(|e| e.sql.clone()), oldest.map(|i| format!("q{i}")), "oldest after {pushed} pushes");
+            assert_eq!(log.last().map(|e| e.sql.clone()), (pushed as usize).checked_sub(1).map(|i| format!("q{i}")), "newest after {pushed} pushes");
         }
     }
 
