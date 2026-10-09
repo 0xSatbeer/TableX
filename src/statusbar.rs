@@ -191,6 +191,22 @@ mod tests {
         }
     }
 
+    /// Runs `(rows, cols, values, expected)` cases through `aggregate`.
+    fn check(cases: impl IntoIterator<Item = (usize, usize, Vec<Value>, &'static str)>) {
+        for (rows, cols, values, expected) in cases {
+            assert_eq!(aggregate(rows, cols, values.clone()).as_deref(), Some(expected), "{rows}x{cols} {values:?}");
+        }
+    }
+
+    #[test]
+    fn int_selection_shows_shape_count_sum_avg() {
+        check([
+            (2, 1, vec![Int(3), Int(4)], "2 rows × 1 col · count 2 · sum 7 · avg 3.5"),
+            (1, 2, vec![Int(3), Int(4)], "1 row × 2 cols · count 2 · sum 7 · avg 3.5"),
+            (2, 2, vec![Int(-1), Int(-2), Int(0), Int(7)], "2 rows × 2 cols · count 4 · sum 4 · avg 1"),
+        ]);
+    }
+
     #[test]
     fn reads_private_memory_from_proc_status() {
         let status = "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
