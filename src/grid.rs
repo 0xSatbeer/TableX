@@ -213,6 +213,22 @@ fn selection_after_drop(reset_col: Option<usize>, selection: Selection) -> Selec
     reset_col.map_or(selection, |c| ((0, c), (0, c), Vec::new()))
 }
 
+/// A selected block: row range, display column range.
+type Block = (Range<usize>, Range<usize>);
+
+/// Columns and rows of one selected block, hidden columns skipped, in display order.
+fn block_data(block: &Block, order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: &impl Fn(usize) -> Vec<Value>) -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
+    let ix = copy_cols(order, hidden, block.1.clone());
+    (pick(columns, &ix), block.0.clone().map(|r| pick(&row(r), &ix)).collect())
+}
+
+/// One `format` block per range, separated by a blank line.
+fn copy_ranges(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> Vec<Value>) -> String {
+    // stub
+    let (cols, rows) = block_data(ranges.last().unwrap(), order, hidden, columns, &row);
+    format(&cols, &rows)
+}
+
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
 
 fn csv(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
@@ -1040,7 +1056,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{Block, copy_ranges, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1292,5 +1308,26 @@ mod tests {
             assert_eq!(sort_availability(rows), want, "{rows} rows");
         }
         assert_eq!(sort_availability(super::BigEvents::new().row_count()), SortAvail::Disabled(WHY), "big_events");
+    }
+
+    /// Row r, column c holds "v{r}{c}"; columns a, b, c.
+    fn vgrid() -> (Vec<ColumnMeta>, impl Fn(usize) -> Vec<Value>) {
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        (cols, |r| (0..3).map(|c| Value::Text(format!("v{r}{c}").into())).collect())
+    }
+
+    #[test]
+    fn multi_range_blocks_are_separated_by_a_blank_line() {
+        let (cols, row) = vgrid();
+        // (ranges as (rows, display cols), TSV)
+        let cases: [(Vec<Block>, &str); 4] = [
+            (vec![(0..1, 0..1), (2..3, 1..2)], "v00\n\nv21\n"),
+            (vec![(0..1, 0..1)], "v00\n"),
+            (vec![(0..2, 0..2), (2..3, 2..3)], "v00\tv01\nv10\tv11\n\nv22\n"), // different widths
+            (vec![(0..1, 0..2), (0..1, 1..3)], "v00\tv01\n\nv01\tv02\n"),      // overlapping
+        ];
+        for (ranges, expected) in cases {
+            assert_eq!(copy_ranges(tsv, &ranges, &[0, 1, 2], &[false; 3], &cols, &row), expected, "ranges {ranges:?}");
+        }
     }
 }
