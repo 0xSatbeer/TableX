@@ -295,6 +295,18 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_tab_with_one_or_no_tab_changes_nothing() {
+        for steps in ["nr", "pr", "nnr", "n", "r"] {
+            let mut t = with_mru(&["a"]);
+            run(&mut t, steps);
+            assert_eq!(state(&t), ("a", vec!["a"]), "one tab, steps {steps}");
+            let mut t: Tabs<()> = Tabs::new(Vec::new());
+            run(&mut t, steps);
+            assert_eq!((t.tabs.len(), t.active, t.mru.len()), (0, 0, 0), "no tabs, steps {steps}");
+        }
+    }
+
+    #[test]
     fn move_tab_unpinned() {
         // (from, drop slot, expected)
         let cases: [(usize, usize, [&str; 4]); 8] = [
