@@ -29,7 +29,8 @@ impl Origin {
 
 /// Tab tooltip: title on line 1, origin path on line 2.
 pub fn tooltip_text(title: &str, origin: Option<&Origin>) -> String {
-    String::new()
+    let path = origin.map_or("Sample data · not from a connection", |o| o.path.as_ref());
+    format!("{title}\n{path}")
 }
 
 pub struct EditorTab<C> {
