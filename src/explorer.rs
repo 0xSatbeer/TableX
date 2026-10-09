@@ -77,8 +77,11 @@ fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<Stri
 
 /// Byte ranges of the characters in `label` that the filter matched, for highlighting.
 fn highlight_ranges(label: &str, filter: &str) -> Vec<Range<usize>> {
-    let _ = (label, filter);
-    Vec::new()
+    fuzzy_match(label, filter)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|at| at..at + label[at..].chars().next().map_or(1, char::len_utf8))
+        .collect()
 }
 
 /// Where a mouse press landed on a row.
@@ -761,12 +764,8 @@ impl Explorer {
                         if let Some(rn) = self.rename.as_ref().filter(|rn| is_conn && rn.conn == node.conn) {
                             StyledText::new(format!("{}▏", rn.text))
                         } else {
-                        let hits = fuzzy_match(&node.label, &self.filter).filter(|_| !self.filter.is_empty());
                         let style = HighlightStyle { color: Some(theme.primary), ..Default::default() };
-                        let ranges = hits.unwrap_or_default().into_iter().map(|at| {
-                            let len = node.label[at..].chars().next().map_or(1, char::len_utf8);
-                            (at..at + len, style)
-                        });
+                        let ranges = highlight_ranges(&node.label, &self.filter).into_iter().map(|r| (r, style));
                         StyledText::new(node.label.clone()).with_highlights(ranges.collect::<Vec<_>>())
                         }
                     }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError), |d| d.text_size(theme::UI_SM).text_color(theme.muted_foreground)))
