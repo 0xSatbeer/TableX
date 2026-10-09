@@ -47,7 +47,12 @@ fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
 
 /// Whether the status dot is solid (else a ring), and the tooltip naming the status.
 fn status_style(status: &ConnectionStatus) -> (bool, String) {
-    (false, String::new())
+    match status {
+        ConnectionStatus::Connected => (true, "Connected".into()),
+        ConnectionStatus::Disconnected => (false, "Disconnected".into()),
+        ConnectionStatus::Connecting => (false, "Connecting…".into()),
+        ConnectionStatus::Error(msg) => (false, format!("Error: {msg}")),
+    }
 }
 
 /// F2 renames connections only.
@@ -274,6 +279,8 @@ pub struct Explorer {
     picked: bool,
     /// Extra rows picked with Ctrl/Shift+click, by key so they survive re-flattening.
     marked: HashSet<String>,
+    /// Inline rename of a connection, started with F2.
+    rename: Option<Rename>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
 }
@@ -284,7 +291,7 @@ impl Explorer {
         let expanded = HashSet::new();
         let nodes = flatten(&workspace, &expanded, &HashSet::new(), false);
         let loaded = HashSet::new();
-        Self { workspace, expanded, loaded, loading: HashSet::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { workspace, expanded, loaded, loading: HashSet::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -422,7 +429,26 @@ impl Explorer {
 
     fn on_key(&mut self, ev: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
+        if let Some(rn) = &mut self.rename {
+            let others: Vec<&str> = self.workspace.connections.iter().enumerate().filter(|(i, _)| *i != rn.conn).map(|(_, c)| c.name.as_str()).collect();
+            match rn.key(&ev.keystroke.key, ev.keystroke.key_char.as_deref().filter(|_| !m.control && !m.alt && !m.platform), &others) {
+                RenameKey::Open => {}
+                RenameKey::Commit(name) => {
+                    self.workspace.connections[rn.conn].name = name;
+                    self.rename = None;
+                    self.refresh(cx);
+                }
+                RenameKey::Cancel => self.rename = None,
+            }
+            cx.notify();
+            return cx.stop_propagation();
+        }
         match ev.keystroke.key.as_str() {
+            "f2" if self.nodes.get(self.selected).is_some_and(|n| can_rename(n.kind)) => {
+                let conn = self.nodes[self.selected].conn;
+                self.rename = Some(Rename { conn, text: self.workspace.connections[conn].name.clone(), error: None });
+                return cx.notify();
+            }
             "escape" if !self.filter.is_empty() => return self.set_filter(String::new(), cx),
             "escape" if !self.marked.is_empty() => {
                 self.marked.clear();
@@ -533,6 +559,7 @@ impl Explorer {
                         MouseButton::Left,
                         cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                             window.focus(&this.focus, cx);
+                            this.rename = None;
                             let m = ev.modifiers;
                             if m.secondary() || m.shift {
                                 let range = if m.shift { this.selected.min(ix)..=this.selected.max(ix) } else { ix..=ix };
@@ -559,21 +586,20 @@ impl Explorer {
                     )
                     .child(icon.small().text_color(color))
                     .when(is_conn, |d| {
-                        // Status in the color dot: solid = connected, hollow = disconnected or
-                        // connecting, red = error (message in the tooltip).
+                        // Solid = connected, 2px ring otherwise; an error also has its own row below.
                         let color = theme::connection_color(conn.color, theme);
-                        let dot = div().flex_none().size(theme::SPACE_6).rounded_full();
-                        d.child(match &conn.status {
-                            ConnectionStatus::Connected => dot.bg(color).into_any_element(),
-                            ConnectionStatus::Disconnected | ConnectionStatus::Connecting => {
-                                dot.border_1().border_color(color).into_any_element()
-                            }
-                            // Hollow in the connection's own color: red belongs to production, and the
-                            // error already has its own row below.
-                            ConnectionStatus::Error(_) => dot.border_1().border_color(color).into_any_element(),
-                        })
+                        let dot = div().flex_none().size(theme::SPACE_8).rounded_full();
+                        d.child(if status_style(&conn.status).0 { dot.bg(color) } else { dot.border_2().border_color(color) })
+                    })
+                    .when(is_conn, |d| {
+                        let tip: SharedString = status_style(&conn.status).1.into();
+                        d.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     })
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child({
+                        // shortcut: the rename input is the typed text plus a caret glyph, no cursor movement
+                        if let Some(rn) = self.rename.as_ref().filter(|rn| is_conn && rn.conn == node.conn) {
+                            StyledText::new(format!("{}▏", rn.text))
+                        } else {
                         let hits = fuzzy_match(&node.label, &self.filter).filter(|_| !self.filter.is_empty());
                         let style = HighlightStyle { color: Some(theme.primary), ..Default::default() };
                         let ranges = hits.unwrap_or_default().into_iter().map(|at| {
@@ -581,6 +607,7 @@ impl Explorer {
                             (at..at + len, style)
                         });
                         StyledText::new(node.label.clone()).with_highlights(ranges.collect::<Vec<_>>())
+                        }
                     }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError), |d| d.text_size(theme::UI_SM).text_color(theme.muted_foreground)))
                     .when(node.kind == NodeKind::ConnError, |d| {
                         let help: SharedString = format!(
@@ -635,6 +662,19 @@ impl Render for Explorer {
                         .child(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))
                         .child(div().flex_1().child(self.filter.clone()))
                         .child(div().text_color(theme.muted_foreground).child("Esc clears")),
+                )
+            })
+            .when_some(self.rename.as_ref().and_then(|rn| rn.error.clone()), |d, msg| {
+                d.child(
+                    h_flex()
+                        .flex_none()
+                        .h(theme::TREE_ROW)
+                        .px(theme::SPACE_8)
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .text_size(theme::UI_SM)
+                        .text_color(theme.danger)
+                        .child(msg),
                 )
             })
             .map(|d| if self.nodes.is_empty() && !self.filter.is_empty() {
