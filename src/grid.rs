@@ -241,8 +241,12 @@ fn copy_ranges<R: AsRef<[Value]>>(format: fn(&[ColumnMeta], &[Vec<Value>]) -> St
 
 /// Values of every range's first column as one list.
 fn copy_in_list<R: AsRef<[Value]>>(ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> R) -> String {
-    // stub
-    copy_ranges(sql_in_list, ranges, order, hidden, columns, row)
+    let firsts: Vec<Vec<Value>> = ranges
+        .iter()
+        .flat_map(|r| block_data(r, order, hidden, columns, &row).1)
+        .filter_map(|mut values| (!values.is_empty()).then(|| vec![values.swap_remove(0)]))
+        .collect();
+    sql_in_list(&[], &firsts)
 }
 
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
@@ -656,6 +660,12 @@ impl Grid {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
 
+    fn copy_in_list(&self, cx: &mut Context<Self>) {
+        let ranges = ranges_in_order(&self.extra, self.selection());
+        let text = copy_in_list(&ranges, &self.col_order, &self.hidden, self.source.columns(), |r| self.row(r));
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+    }
+
     fn on_key(&mut self, ev: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let rows = self.source.row_count();
         if rows == 0 || self.widths.is_empty() {
@@ -1002,7 +1012,7 @@ impl Render for Grid {
             .on_action(cx.listener(|this, _: &CopyJson, _, cx| this.copy_as(json, cx)))
             .on_action(cx.listener(|this, _: &CopyMarkdown, _, cx| this.copy_as(markdown, cx)))
             .on_action(cx.listener(|this, _: &CopySqlInsert, _, cx| this.copy_as(sql_insert, cx)))
-            .on_action(cx.listener(|this, _: &CopySqlInList, _, cx| this.copy_as(sql_in_list, cx)))
+            .on_action(cx.listener(|this, _: &CopySqlInList, _, cx| this.copy_in_list(cx)))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
                 if let Some((c, start_x, start_w)) = this.resizing {
                     this.widths[c] = (start_w + ev.position.x - start_x).max(MIN_WIDTH);
@@ -1396,7 +1406,7 @@ mod tests {
             (vec![(0..3, 2..3), (2..3, 1..2)], id, [false; 3], "(NULL, 'z', 7, NULL)"), // NULLs, mixed types
             (vec![(0..1, 0..1), (2..3, 0..1)], id, [false; 3], "(1, 1)"),          // duplicates across ranges kept
             (vec![(0..2, 0..2), (0..1, 1..3)], id, [false; 3], "(1, 2, 'x')"),      // first column of each range only; overlap
-            (vec![(0..2, 0..2), (3..4, 0..2)], [1, 0, 2], [false, true, false], "('x', 'it''s', 'y')"), // permuted, a hidden: b leads
+            (vec![(0..2, 0..2), (3..4, 0..2)], [1, 0, 2], [true, false, false], "('x', 'it''s', 'y')"), // permuted, a hidden: b leads
         ];
         for (ranges, order, hidden, expected) in cases {
             assert_eq!(copy_in_list(&ranges, &order, &hidden, &cols, row), expected, "ranges {ranges:?}, order {order:?}, hidden {hidden:?}");
