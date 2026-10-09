@@ -445,6 +445,11 @@ fn filter_nodes(nodes: Vec<FlatNode>, query: &str) -> Vec<FlatNode> {
         })
         .collect();
     keep.reverse();
+    // STUB (red only): swap the real parent schema for a sibling header at the same depth.
+    if let Some(n) = keep.iter_mut().find(|n| n.depth == 2) {
+        n.key = "0/0/9".into();
+        n.label = "staging".into();
+    }
     keep
 }
 
@@ -1285,7 +1290,18 @@ mod tests {
         assert_eq!(highlight_ranges("orders", "ordr"), vec![0..1, 1..2, 2..3, 4..5]);
         assert_eq!(highlight_ranges("orders", ""), Vec::<std::ops::Range<usize>>::new());
         assert_eq!(highlight_ranges("users", "ordr"), Vec::<std::ops::Range<usize>>::new());
-        assert!((0..nodes[at].depth).all(|d| nodes[..at].iter().any(|n| n.depth == d)), "ancestors kept");
+        // The real parent chain (connection > database > schema > Tables group), not just any shallower rows.
+        let mut chain = vec![];
+        let mut cur = at;
+        while let Some(p) = parent_of(&nodes, cur) {
+            chain.push(nodes[p].key.to_string());
+            cur = p;
+        }
+        chain.reverse();
+        let key = nodes[at].key.to_string();
+        let want: Vec<String> = key.match_indices('/').take(4).map(|(i, _)| key[..i].to_string()).collect();
+        assert_eq!(chain, want, "ancestors of orders are its own parent chain");
+        assert_eq!(chain.len(), 4);
     }
 
     #[test]
