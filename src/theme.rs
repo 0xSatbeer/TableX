@@ -122,19 +122,21 @@ pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
         .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "json"))
         .collect();
     files.sort();
-    let mut themes = Vec::new();
+    let (mut themes, mut errors) = (Vec::new(), Vec::new());
     for path in files {
         // A scratch registry parses the theme-set format without a JSON dependency of our own.
         let mut set = ThemeRegistry::default();
-        let Ok(json) = std::fs::read_to_string(&path) else { continue };
-        if set.load_themes_from_str(&json).is_err() {
+        let loaded = std::fs::read_to_string(&path).map_err(|e| e.to_string());
+        if let Err(e) = loaded.and_then(|json| set.load_themes_from_str(&json).map_err(|e| e.to_string())) {
+            let file = path.file_name().unwrap_or_default().to_string_lossy();
+            errors.push(format!("Couldn't load theme {file}: {e}"));
             continue;
         }
         let mut found: Vec<_> = set.themes().values().cloned().collect();
         found.sort_by(|a, b| a.name.cmp(&b.name));
         themes.extend(found);
     }
-    (themes, Vec::new())
+    (themes, errors)
 }
 
 /// The user's theme setting. `System` follows the OS light/dark preference live.
