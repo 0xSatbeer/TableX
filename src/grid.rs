@@ -71,6 +71,12 @@ fn prefix_sums(widths: &[Pixels]) -> Vec<Pixels> {
     })).collect()
 }
 
+/// Widths in display order from per-source `widths` and `hidden`; hidden columns are zero wide.
+fn display_widths(order: &[usize], widths: &[Pixels], hidden: &[bool]) -> Vec<Pixels> {
+    let _ = order;
+    widths.iter().zip(hidden).map(|(w, h)| if *h { Pixels::ZERO } else { *w }).collect()
+}
+
 /// Columns intersecting `[scroll_x, scroll_x + viewport)`, widened by `overscan` each side.
 fn visible_cols(offsets: &[Pixels], scroll_x: Pixels, viewport: Pixels, overscan: usize) -> Range<usize> {
     let n = offsets.len() - 1;
@@ -508,11 +514,9 @@ impl Grid {
         base.set_offset(offset);
     }
 
-    /// Prefix-summed widths with hidden columns at zero width.
+    /// Display-order left edges, hidden columns at zero width.
     fn offsets(&self) -> Vec<Pixels> {
-        let widths: Vec<Pixels> =
-            self.widths.iter().zip(&self.hidden).map(|(w, h)| if *h { Pixels::ZERO } else { *w }).collect();
-        prefix_sums(&widths)
+        prefix_sums(&display_widths(&self.col_order, &self.widths, &self.hidden))
     }
 
     fn copy_as(&self, format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, cx: &mut Context<Self>) {
@@ -902,7 +906,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmp_values, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{cmp_values, display_widths, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -929,6 +933,26 @@ mod tests {
             let mut order = start.to_vec();
             move_col(&mut order, from, before);
             assert_eq!(order, expected, "{start:?} move {from} before {before}");
+        }
+    }
+
+    #[test]
+    fn widths_hidden_and_sort_travel_with_the_column() {
+        // Per source column a..d: widths 10..40, c hidden, sorted on b.
+        let (widths, hidden, sorted) = ([px(10.), px(20.), px(30.), px(40.)], [false, false, true, false], 1);
+        // (from, before) -> (order, display widths, display position of the sorted column, selection cleared)
+        let cases: [((usize, usize), [usize; 4], [f32; 4], usize, bool); 3] = [
+            ((0, 3), [1, 2, 0, 3], [20., 0., 10., 40.], 0, true),
+            ((1, 0), [1, 0, 2, 3], [20., 10., 0., 40.], 0, true),
+            ((3, 0), [3, 0, 1, 2], [40., 10., 20., 0.], 2, true),
+        ];
+        for ((from, before), order, expected, sort_at, cleared) in cases {
+            let mut o = vec![0, 1, 2, 3];
+            let changed = move_col(&mut o, from, before);
+            assert_eq!(o, order, "move {from} before {before}");
+            assert_eq!(display_widths(&o, &widths, &hidden), expected.map(px), "widths after move {from} before {before}");
+            assert_eq!(o.iter().position(|&s| s == sorted), Some(sort_at), "sort still on b after move {from} before {before}");
+            assert_eq!(changed, cleared, "selection cleared after move {from} before {before}");
         }
     }
 
