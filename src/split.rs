@@ -11,8 +11,8 @@ pub enum Drag {
 }
 
 /// Where a drag that asked for `size` lands, given the size the panel had when it started.
-pub fn resolve_drag(size: Pixels, min: Pixels, max: Pixels, _start: Pixels) -> Drag {
-    Drag::Size(size.clamp(min, max))
+pub fn resolve_drag(size: Pixels, min: Pixels, max: Pixels, start: Pixels) -> Drag {
+    if size < min { Drag::Hidden(start) } else { Drag::Size(size.min(max)) }
 }
 
 /// One panel's size and its limits. `max` takes the window extent along the split's axis.
