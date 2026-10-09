@@ -77,8 +77,7 @@ fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<Stri
 
 /// Index of the first node matching a non-empty filter.
 fn first_match(nodes: &[FlatNode], filter: &str) -> Option<usize> {
-    let _ = (nodes, filter);
-    Some(0)
+    nodes.iter().position(|n| !filter.is_empty() && fuzzy_match(&n.label, filter).is_some())
 }
 
 /// Byte ranges of the characters in `label` that the filter matched, for highlighting.
@@ -539,7 +538,7 @@ impl Explorer {
         self.filter = filter;
         self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
         // First match, or the top when clearing.
-        let first = self.nodes.iter().position(|n| !self.filter.is_empty() && fuzzy_match(&n.label, &self.filter).is_some());
+        let first = first_match(&self.nodes, &self.filter);
         self.select(first.unwrap_or(0), cx);
     }
 
