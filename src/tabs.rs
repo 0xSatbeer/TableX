@@ -237,13 +237,22 @@ mod tests {
         t
     }
 
-    /// Runs Ctrl+Tab steps: 'n' next, 'p' previous, 'r' release Ctrl.
+    /// Runs steps: 'n' Ctrl+Tab, 'p' Ctrl+Shift+Tab, 'r' release Ctrl, a digit activates that
+    /// position (click, Ctrl+1..9), 'o' opens new tab d, 'e' opens existing a, 'w' closes the
+    /// active tab, 'u' reopens, 'm' moves the active tab to the start, 'k' pins the active tab.
     fn run(t: &mut Tabs<()>, steps: &str) {
         for s in steps.chars() {
             match s {
                 'n' => t.cycle(true),
                 'p' => t.cycle(false),
-                _ => t.commit(),
+                'r' => t.commit(),
+                'o' => t.open(tab("d", false)),
+                'e' => t.open(tab("a", false)),
+                'w' => t.close(t.active),
+                'u' => t.reopen(),
+                'm' => t.move_tab(t.active, 0),
+                'k' => t.toggle_pin(t.active),
+                d => t.activate(d.to_digit(10).unwrap() as usize),
             }
         }
     }
@@ -336,6 +345,39 @@ mod tests {
         let mut t = with_mru(&["a"]);
         t.close(0);
         assert_eq!((t.tabs.len(), t.active, t.mru.len()), (0, 0, 0), "closing the last tab");
+    }
+
+    #[test]
+    fn activating_moves_tab_to_mru_front() {
+        // (MRU before, steps, tab order after, active after, MRU after); tabs [a, b, c]
+        let cases: [(&[&'static str], &str, &[&str], &str, &[&str]); 11] = [
+            (&["c", "b", "a"], "0", &["a", "b", "c"], "a", &["a", "c", "b"]),
+            (&["c", "b", "a"], "1", &["a", "b", "c"], "b", &["b", "c", "a"]),
+            (&["b", "a", "c"], "2", &["a", "b", "c"], "c", &["c", "b", "a"]),
+            (&["c", "b", "a"], "n0r", &["a", "b", "c"], "a", &["a", "c", "b"]),
+            (&["c", "b", "a"], "o", &["a", "b", "c", "d"], "d", &["d", "c", "b", "a"]),
+            (&["c", "b", "a"], "nor", &["a", "b", "c", "d"], "d", &["d", "c", "b", "a"]),
+            (&["c", "b", "a"], "e", &["a", "b", "c"], "a", &["a", "c", "b"]),
+            (&["c", "b", "a"], "wu", &["a", "b", "c"], "c", &["c", "b", "a"]),
+            (&["c", "b", "a"], "nnmr", &["a", "b", "c"], "a", &["a", "c", "b"]),
+            (&["c", "b", "a"], "nmr", &["b", "a", "c"], "b", &["b", "c", "a"]),
+            (&["c", "b", "a"], "1k", &["b", "a", "c"], "b", &["b", "c", "a"]),
+        ];
+        for (mru, steps, order, active, want) in cases {
+            let mut t = with_mru(mru);
+            run(&mut t, steps);
+            assert_eq!((keys(&t), state(&t)), (order.to_vec(), (active, want.to_vec())), "MRU {mru:?}, steps {steps}");
+        }
+        let mut t = with_mru(&["a"]);
+        run(&mut t, "wu");
+        assert_eq!(state(&t), ("a", vec!["a"]), "reopen after closing the last tab");
+        let mut t = with_mru(&["c", "b", "a"]);
+        run(&mut t, "nwu");
+        assert_eq!(state(&t), ("b", vec!["b", "c", "a"]), "reopen the tab closed mid-cycle");
+
+        let mut t = Tabs::new(vec![tab("a", false), tab("p", true)]);
+        t.open(tab("q", true));
+        assert_eq!((keys(&t), state(&t)), (vec!["a", "q"], ("q", vec!["q", "a"])), "a replaced preview leaves the MRU");
     }
 
     #[test]
