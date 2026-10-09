@@ -201,6 +201,11 @@ fn toggle_expanded(expanded: &mut BTreeSet<usize>, ix: usize) {
     }
 }
 
+/// Logs column headers in row order (the status icon column has none).
+fn header_labels() -> [&'static str; 8] {
+    ["Time", "Connection", "Database", "SQL", "", "Duration", "Rows", "Source"]
+}
+
 // ponytail: keyword list, not a parser; the log line only needs a hint of structure.
 // Swap for the editor's tree-sitter highlighter if rows need full fidelity.
 const KEYWORDS: &[&str] = &[
@@ -484,6 +489,13 @@ mod tests {
         assert!(!filter_rows(&log, &only_ok).contains(&5));
         assert!(open.contains(&5));
         assert!(filter_rows(&log, &LogFilter::default()).contains(&5));
+    }
+
+    #[test]
+    fn time_column_is_labeled_utc() {
+        let labels = super::header_labels();
+        assert_eq!(labels[0], "Time (UTC)");
+        assert_eq!(labels[3], "SQL");
     }
 
     #[test]
