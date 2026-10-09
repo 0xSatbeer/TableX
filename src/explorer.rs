@@ -119,6 +119,11 @@ fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, fiel
     }
 }
 
+/// The single muted row shown when a filter matches nothing.
+fn no_match_text(filter: &str) -> String {
+    format!("Nothing matches “{filter}”")
+}
+
 /// Index of the first node matching a non-empty filter.
 fn first_match(nodes: &[FlatNode], filter: &str) -> Option<usize> {
     nodes.iter().position(|n| !filter.is_empty() && fuzzy_match(&n.label, filter).is_some())
@@ -914,7 +919,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute, no_match_text};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -1322,5 +1327,13 @@ mod tests {
         assert_eq!(seq, vec![ClearField, FocusTree]);
         // F2 rename in progress keeps its keys even if Esc reaches the router.
         assert_eq!(route_key(Focus::Tree, "escape", None, M::none(), false, true, true), Pass);
+    }
+
+    #[test]
+    fn no_match_shows_one_muted_row() {
+        let ws = &mock::workspaces()[0];
+        assert!(tree_nodes(ws, &Default::default(), &Default::default(), "xyz").is_empty(), "nothing survives the filter");
+        assert_eq!(no_match_text("xyz"), "No objects match \"xyz\"");
+        assert_eq!(no_match_text("a b"), "No objects match \"a b\"");
     }
 }
