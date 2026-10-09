@@ -97,12 +97,11 @@ enum KeyRoute {
 }
 
 fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, field_empty: bool, has_match: impl FnOnce() -> bool, renaming: bool) -> KeyRoute {
-    let has_match = has_match(); // STUB (red only): eager
     if focus == Focus::Field {
         return match key {
             "escape" if field_empty => KeyRoute::FocusTree,
             "escape" => KeyRoute::ClearField,
-            "down" if has_match && !field_empty && !m.shift && !m.control && !m.alt && !m.platform => KeyRoute::FocusFirstMatch,
+            "down" if !field_empty && !m.shift && !m.control && !m.alt && !m.platform && has_match() => KeyRoute::FocusFirstMatch,
             _ => KeyRoute::Pass,
         };
     }
