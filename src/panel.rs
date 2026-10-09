@@ -323,6 +323,7 @@ mod tests {
 
 
     use super::{LogFilter, StatusKind, filter_rows};
+    use crate::model::{ConnectionId, QueryLogEntry, QuerySource, QueryStatus};
 
     #[test]
     fn status_filter() {
@@ -348,6 +349,59 @@ mod tests {
         assert!(!with(&[StatusKind::Error]).is_empty(), "mock log has errors");
         assert!(!with(&[StatusKind::Ok]).is_empty(), "mock log has ok rows");
         assert_eq!(with(&[StatusKind::Ok, StatusKind::Error, StatusKind::Cancelled]).len(), log.len());
+    }
+
+    fn entry(conn: u32, sql: &str, status: QueryStatus, source: QuerySource) -> QueryLogEntry {
+        QueryLogEntry {
+            at: std::time::UNIX_EPOCH,
+            connection_id: ConnectionId(conn),
+            database: "app_db".into(),
+            sql: sql.into(),
+            duration: Duration::from_millis(1),
+            rows: None,
+            status,
+            source,
+        }
+    }
+
+    /// 0 c1 SELECT ok | 1 c2 SELECT ok | 2 c1 delete ok | 3 c3 select err | 4 c1 Select cancelled | 5 c2 UPDATE err
+    fn sample() -> Vec<QueryLogEntry> {
+        let (ok, err, c) = (QueryStatus::Ok, || QueryStatus::Err("boom".into()), QuerySource::Console);
+        vec![
+            entry(1, "SELECT 1", ok.clone(), c),
+            entry(2, "SELECT 2", ok.clone(), c),
+            entry(1, "delete from t", ok, c),
+            entry(3, "select 3", err(), c),
+            entry(1, "Select 4", QueryStatus::Cancelled, c),
+            entry(2, "UPDATE t SET a = 1", err(), c),
+        ]
+    }
+
+    #[test]
+    fn connection_and_text_filter() {
+        let log = sample();
+        let run = |conns: &[u32], text: &str, statuses: Option<&[StatusKind]>| {
+            let mut f = LogFilter { text: text.into(), connections: conns.iter().copied().collect(), ..LogFilter::default() };
+            if let Some(s) = statuses {
+                f.statuses = s.iter().copied().collect();
+            }
+            filter_rows(&log, &f)
+        };
+        // (connections, text, statuses, expected rows)
+        let cases: [(&[u32], &str, Option<&[StatusKind]>, &[usize]); 9] = [
+            (&[], "", None, &[0, 1, 2, 3, 4, 5]),               // empty set = all connections
+            (&[1], "select", None, &[0, 4]),                    // spec case, text is case-insensitive
+            (&[1], "", None, &[0, 2, 4]),
+            (&[1, 2], "", None, &[0, 1, 2, 4, 5]),              // several names
+            (&[], "SELECT", None, &[0, 1, 3, 4]),               // upper-case query
+            (&[], "select", None, &[0, 1, 3, 4]),
+            (&[1, 2], "select", Some(&[StatusKind::Ok]), &[0, 1]), // text + status + connection
+            (&[1], "select", Some(&[StatusKind::Cancelled]), &[4]), // cancelled is not ok
+            (&[9], "", None, &[]),                              // unknown connection
+        ];
+        for (conns, text, statuses, expected) in cases {
+            assert_eq!(run(conns, text, statuses), expected, "{conns:?} {text:?} {statuses:?}");
+        }
     }
 
     #[test]
