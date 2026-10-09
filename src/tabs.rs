@@ -246,4 +246,25 @@ mod tests {
             assert_eq!(keys(&t), want, "move {from} before {to}");
         }
     }
+
+    #[test]
+    fn move_tab_active_follows_its_tab() {
+        // (active, from, drop slot, expected keys, expected active)
+        let cases: [(usize, usize, usize, [&str; 3], usize); 6] = [
+            (2, 2, 0, ["c", "a", "b"], 0),
+            (2, 2, 2, ["a", "b", "c"], 2),
+            (0, 2, 0, ["c", "a", "b"], 1),
+            (1, 0, 3, ["b", "c", "a"], 0),
+            (1, 1, 3, ["a", "c", "b"], 2),
+            (1, 0, 1, ["a", "b", "c"], 1),
+        ];
+        for (active, from, to, want, want_active) in cases {
+            let mut t = Tabs::new(vec![tab("a", false), tab("b", false), tab("c", false)]);
+            t.activate(active);
+            let key = t.tabs[active].key.clone();
+            t.move_tab(from, to);
+            assert_eq!((keys(&t), t.active), (want.to_vec(), want_active), "active {active}, move {from} before {to}");
+            assert_eq!(t.tabs[t.active].key, key, "same tab stays active");
+        }
+    }
 }
