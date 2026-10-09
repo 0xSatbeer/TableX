@@ -66,6 +66,16 @@ impl BottomPanel {
         }
     }
 
+    #[cfg(test)]
+    pub fn show_logs(&mut self) {
+        self.tab = LOGS;
+    }
+
+    #[cfg(test)]
+    pub fn search_field(&self) -> Entity<InputState> {
+        self.search.clone()
+    }
+
     fn refilter(&mut self, cx: &App) {
         self.filter.text = self.search.read(cx).value().to_string();
         self.rows = filter_rows(&self.log, &self.filter);

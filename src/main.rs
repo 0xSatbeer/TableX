@@ -808,6 +808,10 @@ fn bind_overflow_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("space", NoAction, Some(OVERFLOW_CONTEXT))]);
 }
 
+fn bind_panel_keys(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("escape", RestorePanel, Some(PANEL_MAXIMIZED_CONTEXT))]);
+}
+
 fn main() {
     gpui_kit::application()
         .with_assets(assets::Assets)
@@ -822,12 +826,12 @@ fn main() {
             }
             theme::init(cx);
             bind_overflow_keys(cx);
+            bind_panel_keys(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.bind_keys([
                 KeyBinding::new("ctrl-q", Quit, None),
                 KeyBinding::new("ctrl-b", ToggleExplorer, None),
                 KeyBinding::new("ctrl-j", ToggleBottomPanel, None),
-                KeyBinding::new("escape", RestorePanel, Some(PANEL_MAXIMIZED_CONTEXT)),
                 KeyBinding::new("ctrl-shift-f", MaximizeEditor, None),
                 KeyBinding::new("ctrl-alt-shift-d", ToggleGallery, None),
                 KeyBinding::new("ctrl-alt-f", FocusExplorer, None),
@@ -943,6 +947,48 @@ mod tests {
         assert!(l.panel_maximized, "maximized again");
         l.toggle_maximize();
         assert!(!l.bottom_visible && !l.panel_maximized, "Ctrl+Shift+F while maximized hides everything and ends maximize");
+    }
+
+    /// A Shell with the panel maximized, on the Logs tab with its filter field focused if `logs_focused`.
+    fn open_maximized(cx: &mut gpui_kit::TestAppContext, logs_focused: bool) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            super::bind_panel_keys(cx);
+        });
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        if logs_focused {
+            shell.update(&mut vcx, |this, cx| this.bottom_panel.update(cx, |p, _| p.show_logs()));
+        }
+        vcx.run_until_parked();
+        // As the header's maximize button does.
+        vcx.dispatch_action(super::MaximizePanel);
+        vcx.run_until_parked();
+        if logs_focused {
+            let search = shell.read_with(&vcx, |this, cx| this.bottom_panel.read(cx).search_field());
+            vcx.update(|window, cx| search.update(cx, |s, cx| s.focus(window, cx)));
+            vcx.run_until_parked();
+        }
+        (window.into(), shell)
+    }
+
+    #[gpui_kit::test]
+    fn esc_while_maximized_restores_the_panel(cx: &mut gpui_kit::TestAppContext) {
+        for logs_focused in [false, true] {
+            let (window, shell) = open_maximized(cx, logs_focused);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let sizes = |shell: &gpui_kit::Entity<super::Shell>, cx: &gpui_kit::VisualTestContext| {
+                shell.read_with(cx, |this, _| (this.layout.explorer.size, this.layout.bottom.size))
+            };
+            let before = sizes(&shell, &cx);
+            assert!(shell.read_with(&cx, |this, _| this.layout.panel_maximized), "maximized (logs_focused={logs_focused})");
+            cx.simulate_keystrokes("escape");
+            assert!(!shell.read_with(&cx, |this, _| this.layout.panel_maximized), "Esc restores (logs_focused={logs_focused})");
+            assert_eq!(sizes(&shell, &cx), before, "stored sizes unchanged (logs_focused={logs_focused})");
+        }
     }
 
     /// A Shell with 11 tabs and the overflow list open, its search field focused.
