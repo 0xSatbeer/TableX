@@ -104,4 +104,17 @@ mod tests {
             assert_eq!(split.shown(px(window)), px(width), "explorer {width} in window {window}");
         }
     }
+
+    #[test]
+    fn bottom_shrinks_to_the_new_max_when_the_window_shrinks() {
+        for (height, window, expected) in [
+            (500., 800., 500.),
+            (560., 800., 560.),
+            (500., 600., 420.),
+            (240., 600., 240.),
+        ] {
+            let split = Split { size: px(height), ..BOTTOM };
+            assert_eq!(split.shown(px(window)), px(expected), "bottom {height} in window height {window}");
+        }
+    }
 }
