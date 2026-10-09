@@ -120,6 +120,9 @@ impl<C> Tabs<C> {
         }
     }
 
+    /// Moves the tab at `from` to just before index `to` (a drop slot, 0..=len).
+    pub fn move_tab(&mut self, from: usize, to: usize) {}
+
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {
             self.active = ix;
@@ -183,5 +186,31 @@ mod tests {
         t.activate(1);
         t.close_where(|ix| ix > 1);
         assert_eq!((keys(&t), t.active), (vec!["a", "b"], 1), "close to the right keeps the active tab");
+    }
+
+    #[test]
+    fn move_tab_unpinned() {
+        // (from, drop slot, expected)
+        let cases: [(usize, usize, [&str; 4]); 8] = [
+            (0, 3, ["b", "c", "a", "d"]),
+            (3, 0, ["d", "a", "b", "c"]),
+            (0, 4, ["b", "c", "d", "a"]),
+            (1, 1, ["a", "b", "c", "d"]),
+            (1, 2, ["a", "b", "c", "d"]),
+            (2, 99, ["a", "b", "d", "c"]),
+            (99, 0, ["a", "b", "c", "d"]),
+            (0, 0, ["a", "b", "c", "d"]),
+        ];
+        for (from, to, want) in cases {
+            let mut t = Tabs::new(vec![tab("a", false), tab("b", false), tab("c", false), tab("d", false)]);
+            t.move_tab(from, to);
+            assert_eq!(keys(&t), want, "move {from} before {to}");
+        }
+        for n in 0..=1 {
+            let mut t = Tabs::new((0..n).map(|_| tab("a", false)).collect());
+            t.move_tab(0, 0);
+            t.move_tab(0, 1);
+            assert_eq!(t.tabs.len(), n, "{n} tabs: nothing to move");
+        }
     }
 }
