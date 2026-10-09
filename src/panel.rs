@@ -160,7 +160,11 @@ impl BottomPanel {
                         .xsmall()
                         .icon(IconName::Copy)
                         .tooltip("Copy SQL")
-                        .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(sql.clone()))),
+                        .on_click(move |_, _, cx| {
+                            // Copying must not bubble to the row and toggle its expansion.
+                            cx.stop_propagation();
+                            cx.write_to_clipboard(ClipboardItem::new_string(sql.clone()));
+                        }),
                 ),
             );
         let line = div().id(("log-row", ix)).w_full().cursor_pointer().on_click(on_click).child(line);
