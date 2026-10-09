@@ -43,7 +43,8 @@ pub fn show_search(tab_count: usize) -> bool {
 /// Indices of the tabs matching `query` in the overflow search.
 pub fn match_tabs<C>(tabs: &[EditorTab<C>], query: &str) -> Vec<usize> {
     let query = query.to_lowercase();
-    (0..tabs.len()).filter(|&ix| tabs[ix].title.to_lowercase().contains(&query)).collect()
+    let hit = |s: &str| s.to_lowercase().contains(&query);
+    (0..tabs.len()).filter(|&ix| hit(&tabs[ix].title) || tabs[ix].origin.as_ref().is_some_and(|o| hit(&o.path))).collect()
 }
 
 pub struct EditorTab<C> {
