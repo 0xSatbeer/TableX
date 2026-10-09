@@ -160,6 +160,17 @@ fn move_col(order: &mut Vec<usize>, from: usize, before: usize) -> bool {
     true
 }
 
+/// Source columns a copy of display positions `display` emits, in display order, hidden ones skipped.
+fn copy_cols(order: &[usize], hidden: &[bool], display: Range<usize>) -> Vec<usize> {
+    let _ = (order, hidden);
+    display.collect()
+}
+
+/// `items` at the indices `ix`, in that order.
+fn pick<T: Clone>(items: &[T], ix: &[usize]) -> Vec<T> {
+    ix.iter().map(|&i| items[i].clone()).collect()
+}
+
 /// Head cell after a navigation key, or `None` for other keys. `hidden` is in display order;
 /// Left/Right/Tab/Home/End skip hidden columns.
 fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: usize, hidden: &[bool], page: usize) -> Option<(usize, usize)> {
@@ -523,8 +534,9 @@ impl Grid {
 
     fn copy_as(&self, format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, cx: &mut Context<Self>) {
         let (rows, cols) = self.selection();
-        let rows: Vec<Vec<Value>> = rows.map(|r| self.row(r)[cols.clone()].to_vec()).collect();
-        let text = format(&self.source.columns()[cols], &rows);
+        let cols = copy_cols(&self.col_order, &self.hidden, cols);
+        let rows: Vec<Vec<Value>> = rows.map(|r| pick(&self.row(r), &cols)).collect();
+        let text = format(&pick(self.source.columns(), &cols), &rows);
         cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
 
@@ -908,7 +920,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmp_values, display_widths, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{cmp_values, copy_cols, display_widths, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -967,6 +979,34 @@ mod tests {
             assert_eq!(order, [0, 1, 2, 3], "order after move {from} before {before}");
             assert!(!changed, "selection kept after move {from} before {before}");
         }
+    }
+
+    fn abc() -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into() }).to_vec();
+        (cols, vec![["a0", "b0", "c0"].map(|v| Value::Text(v.into())).to_vec()])
+    }
+
+    /// What `Grid::copy_as` emits for display positions `display` of row 0.
+    fn copy(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, order: &[usize], hidden: &[bool], display: std::ops::Range<usize>) -> String {
+        let (cols, rows) = abc();
+        let ix = copy_cols(order, hidden, display);
+        format(&pick(&cols, &ix), &rows.iter().map(|r| pick(r, &ix)).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn copy_skips_hidden_columns() {
+        // (hidden, selected display positions, TSV)
+        let cases: [([bool; 3], std::ops::Range<usize>, &str); 5] = [
+            ([false, true, false], 0..3, "a0\tc0\n"), // select row 0 with b hidden
+            ([false, false, false], 0..3, "a0\tb0\tc0\n"),
+            ([true, false, true], 0..3, "b0\n"),
+            ([false, true, false], 1..3, "c0\n"),
+            ([false, true, false], 1..2, "\n"), // only the hidden column selected
+        ];
+        for (hidden, display, expected) in cases {
+            assert_eq!(copy(tsv, &[0, 1, 2], &hidden, display.clone()), expected, "hidden {hidden:?}, selected {display:?}");
+        }
+        assert_eq!(copy(csv, &[0, 1, 2], &[false, true, false], 0..3), "a,c\na0,c0\n", "every format skips hidden");
     }
 
     #[test]
