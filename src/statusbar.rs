@@ -17,6 +17,8 @@ use crate::model::Value;
 use crate::tabs::Origin;
 use crate::{ToggleBottomPanel, ToggleExplorer, theme};
 
+/// Larger selections show their shape only, so the bar never walks millions of cells.
+const AGGREGATE_MAX: usize = 1_000_000;
 const MEMORY_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct StatusBar {
@@ -113,6 +115,10 @@ pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Valu
         return None;
     }
     let plural = |n: usize, one: &str| if n == 1 { format!("{n} {one}") } else { format!("{n} {one}s") };
+    let shape = format!("{} × {}", plural(rows, "row"), plural(cols, "col"));
+    if rows.saturating_mul(cols) > AGGREGATE_MAX {
+        return Some(format!("{shape} · aggregate skipped (too many cells)"));
+    }
     // Ints sum exactly; floats join only when there is one.
     let (mut count, mut numeric, mut ints, mut floats) = (0, 0, 0, None);
     for v in values {
@@ -124,7 +130,7 @@ pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Valu
         }
         count += 1;
     }
-    let mut out = format!("{} × {} · count {count}", plural(rows, "row"), plural(cols, "col"));
+    let mut out = format!("{shape} · count {count}");
     if numeric > 0 {
         let total = ints as f64 + floats.unwrap_or(0.0);
         let sum = if floats.is_some() { decimal(total) } else { ints.to_string() };
