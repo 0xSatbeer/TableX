@@ -96,8 +96,20 @@ enum KeyRoute {
 }
 
 fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, field_empty: bool, has_match: bool, renaming: bool) -> KeyRoute {
-    let _ = (focus, key, key_char, m, field_empty, has_match, renaming);
-    KeyRoute::Pass
+    let _ = has_match;
+    if focus != Focus::Tree || renaming {
+        return KeyRoute::Pass;
+    }
+    let printable = key_char.filter(|c| !c.chars().any(char::is_control) && *c != " ");
+    match key {
+        "escape" if !field_empty => KeyRoute::ClearField,
+        "backspace" if !field_empty => KeyRoute::PopField,
+        // "*" stays the expand-all key while there is no filter.
+        _ => match printable {
+            Some(c) if !m.control && !m.alt && !m.platform && !(c == "*" && field_empty) => KeyRoute::ToField(c.into()),
+            _ => KeyRoute::Pass,
+        },
+    }
 }
 
 /// Index of the first node matching a non-empty filter.
