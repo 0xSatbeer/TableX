@@ -528,6 +528,27 @@ pub(crate) mod tests {
         assert!(!dir.exists(), "loading must not create the dir");
     }
 
+    #[test]
+    fn unreadable_theme_dir_is_reported_unlike_a_missing_one() {
+        let dir = test_dir("not-a-dir").join("themes");
+        std::fs::write(&dir, "").unwrap(); // a file where the folder should be: ENOTDIR
+        let (themes, errors) = super::load_user_themes(&dir);
+        assert!(themes.is_empty());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with(&format!("Couldn't read theme folder {}: ", dir.display())), "{errors:?}");
+    }
+
+    #[test]
+    fn theme_file_that_is_not_text_is_skipped_and_reported() {
+        let dir = test_dir("not-utf8");
+        std::fs::write(dir.join("bad.json"), [0xFF, 0xFE]).unwrap();
+        std::fs::write(dir.join("nord.json"), NORD).unwrap();
+        let (themes, errors) = super::load_user_themes(&dir);
+        assert_eq!(names(&themes), ["Nord"]);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("Couldn't load theme bad.json: ") && errors[0].len() > 30, "{errors:?}");
+    }
+
     const NORD: &str = r##"{"name": "Nord", "themes": [{"name": "Nord", "mode": "dark", "colors": {"background": "#2E3440"}}]}"##;
     const PAPER: &str = r##"{"name": "Paper", "themes": [{"name": "Paper", "mode": "light", "colors": {"background": "#F7F3E8"}}]}"##;
 
@@ -642,6 +663,6 @@ pub(crate) mod tests {
     #[test]
     fn theme_choice_cycles_through_all_three() {
         use super::ThemeChoice::*;
-        assert_eq!([Dark.next(), Light.next(), System.next()], [Light, System, Dark]);
+        assert_eq!([Dark.next(), Light.next(), System.next(), User("Nord".into()).next()], [Light, System, Dark, Dark]);
     }
 }
