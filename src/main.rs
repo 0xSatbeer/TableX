@@ -1217,6 +1217,21 @@ mod tests {
         assert_eq!(shell.read_with(&vcx, |this, _| this.theme.clone()), crate::theme::ThemeChoice::Dark);
     }
 
+    /// A broken theme file present at launch is reported once, not a crash.
+    #[gpui_kit::test]
+    fn broken_theme_file_at_startup_is_reported_not_a_crash(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::component::WindowExt as _;
+        let dir = crate::theme::tests::test_dir("startup-bad");
+        std::fs::write(dir.join("bad.json"), "not json").unwrap();
+        cx.update(|cx| gpui_kit::init(cx));
+        let (window, shell) = cx.update(|cx| super::open_shell(Default::default(), Some(dir), cx)).expect("open test window");
+        let mut vcx = gpui_kit::VisualTestContext::from_window(window, cx);
+        vcx.run_until_parked();
+        assert_eq!(vcx.update(|window, cx| window.notifications(cx).len()), 1, "one notification");
+        let errors = shell.read_with(&vcx, |this, _| this.user_theme_errors.clone());
+        assert!(matches!(&errors[..], [e] if e.starts_with("Couldn't load theme bad.json: ")), "{errors:?}");
+    }
+
     /// A Shell with 11 tabs and the overflow list open, its search field focused.
     fn open_overflow(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
         use gpui_kit::AppContext as _;
