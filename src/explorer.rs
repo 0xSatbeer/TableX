@@ -35,7 +35,14 @@ enum NodeKind {
 /// The trimmed name to commit, or the message to show inline. `others` are the other connections'
 /// names; uniqueness is case-sensitive.
 fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
-    Ok(input.to_string())
+    let name = input.trim();
+    if name.is_empty() {
+        Err("Name can't be empty".into())
+    } else if others.contains(&name) {
+        Err(format!("Another connection is already named {name}"))
+    } else {
+        Ok(name.into())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
