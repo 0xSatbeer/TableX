@@ -410,7 +410,7 @@ impl Shell {
                         }))
                         .into_any_element()
                 };
-                v_flex().w(theme::SPACE_24 * 10.).gap(theme::SPACE_4).child(Input::new(&search).small()).child(list)
+                v_flex().key_context(OVERFLOW_CONTEXT).w(theme::SPACE_24 * 10.).gap(theme::SPACE_4).child(Input::new(&search).small()).child(list)
             })
     }
 
@@ -755,6 +755,15 @@ impl Render for Shell {
     }
 }
 
+/// Key context of the overflow list's content.
+const OVERFLOW_CONTEXT: &str = "OverflowSearch";
+
+/// `Popover` binds space to Confirm (closing it), which would swallow spaces typed in the search
+/// field; a no-op binding in the content's own, deeper context lets the field type them.
+fn bind_overflow_keys(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("space", NoAction, Some(OVERFLOW_CONTEXT))]);
+}
+
 fn main() {
     gpui_kit::application()
         .with_assets(assets::Assets)
@@ -768,6 +777,7 @@ fn main() {
                 }
             }
             theme::init(cx);
+            bind_overflow_keys(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.bind_keys([
                 KeyBinding::new("ctrl-q", Quit, None),
@@ -853,7 +863,10 @@ mod tests {
     /// A Shell with 11 tabs and the overflow list open, its search field focused.
     fn open_overflow(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
         use gpui_kit::AppContext as _;
-        cx.update(gpui_kit::init);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            super::bind_overflow_keys(cx);
+        });
         let (window, shell) = cx.update(|cx| {
             gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
         });
