@@ -405,8 +405,8 @@ fn header_model(c: &ColumnMeta) -> HeaderModel {
 }
 
 /// Header height: two lines (name, type) plus vertical padding.
-fn header_height(_line: Pixels, _pad: Pixels) -> Pixels {
-    px(0.)
+fn header_height(line: Pixels, pad: Pixels) -> Pixels {
+    line * 2. + pad
 }
 
 /// A header cell being dragged to a new display position.
