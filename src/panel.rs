@@ -15,7 +15,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::prelude::FluentBuilder as _;
 
 use crate::model::{QueryLogEntry, QuerySource, QueryStatus, Workspace};
-use crate::{ToggleBottomPanel, mock, theme};
+use crate::{MaximizePanel, ToggleBottomPanel, mock, theme};
 
 const TABS: [&str; 3] = ["Results", "Logs", "Messages"];
 const RESULTS: usize = 0;
@@ -24,6 +24,8 @@ const LOGS: usize = 1;
 const TIME_W: f32 = 10.;
 
 pub struct BottomPanel {
+    /// Set by the shell: the panel covers the editor area, so the header offers restore.
+    pub maximized: bool,
     tab: usize,
     log: Vec<QueryLogEntry>,
     filter: LogFilter,
@@ -52,6 +54,7 @@ impl BottomPanel {
         let filter = LogFilter::default();
         let rows = filter_rows(&log, &filter);
         Self {
+            maximized: false,
             tab: RESULTS,
             log,
             filter,
@@ -449,6 +452,15 @@ impl Render for BottomPanel {
                             .child(connection_menu)
                             .children(status_toggles)
                             .child(introspection_toggle)
+                    })
+                    .child({
+                        let (icon, label) = if self.maximized { (IconName::WindowRestore, "Restore panel") } else { (IconName::WindowMaximize, "Maximize panel") };
+                        Button::new("maximize-panel")
+                            .ghost()
+                            .xsmall()
+                            .icon(icon)
+                            .tooltip_with_action(label, &MaximizePanel, None)
+                            .on_click(|_, window, cx| window.dispatch_action(Box::new(MaximizePanel), cx))
                     })
                     .child(
                         Button::new("hide-panel")

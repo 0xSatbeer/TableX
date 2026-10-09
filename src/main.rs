@@ -26,7 +26,7 @@ mod statusbar;
 mod tabs;
 mod theme;
 
-actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme]);
+actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme]);
 
 enum TabContent {
     Grid(Entity<grid::Grid>),
@@ -133,16 +133,22 @@ impl LayoutState {
 
     fn toggle_bottom(&mut self) {
         self.maximized_from = None;
+        self.panel_maximized = false;
         self.bottom_visible = !self.bottom_visible;
     }
 
     /// Maximize button on the panel header; does nothing while the panel is hidden.
-    fn toggle_panel_maximize(&mut self) {}
+    fn toggle_panel_maximize(&mut self) {
+        self.panel_maximized = self.bottom_visible && !self.panel_maximized;
+    }
 
     /// Esc: leaves panel maximize; does nothing otherwise.
-    fn restore_panel(&mut self) {}
+    fn restore_panel(&mut self) {
+        self.panel_maximized = false;
+    }
 
     fn toggle_maximize(&mut self) {
+        self.panel_maximized = false;
         match self.maximized_from.take() {
             Some((explorer, bottom)) => (self.explorer_visible, self.bottom_visible) = (explorer, bottom),
             None => {
@@ -617,6 +623,7 @@ impl Render for Shell {
         v_flex()
             .relative()
             .size_full()
+            .when(self.layout.panel_maximized, |d| d.key_context(PANEL_MAXIMIZED_CONTEXT))
             .bg(theme.background)
             .text_size(theme::UI)
             .text_color(theme.foreground)
@@ -626,6 +633,14 @@ impl Render for Shell {
             }))
             .on_action(cx.listener(|this, _: &ToggleBottomPanel, _, cx| {
                 this.layout.toggle_bottom();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &MaximizePanel, _, cx| {
+                this.layout.toggle_panel_maximize();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &RestorePanel, _, cx| {
+                this.layout.restore_panel();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &MaximizeEditor, _, cx| {
@@ -730,6 +745,8 @@ impl Render for Shell {
                 let viewport = window.viewport_size();
                 let explorer_w = self.layout.explorer.shown(viewport.width);
                 let bottom_h = self.layout.bottom.shown(viewport.height);
+                let maximized = self.layout.panel_maximized;
+                self.bottom_panel.update(cx, |panel, _| panel.maximized = maximized);
                 main.child(
                     h_flex()
                         .relative()
@@ -743,10 +760,14 @@ impl Render for Shell {
                                 .flex_1()
                                 .min_w_0()
                                 .h_full()
-                                .child(div().flex_1().min_h_0().overflow_hidden().child(v_flex().size_full().child(tabs).child(content)))
+                                .when(!maximized, |d| d.child(div().flex_1().min_h_0().overflow_hidden().child(v_flex().size_full().child(tabs).child(content))))
                                 .when(self.layout.bottom_visible, |d| {
-                                    d.child(div().flex_none().w_full().h(bottom_h).overflow_hidden().child(self.bottom_panel.clone()))
-                                        .child(self.splitter(Edge::Bottom, bottom_h, cx))
+                                    let panel = div().w_full().overflow_hidden().child(self.bottom_panel.clone());
+                                    if maximized {
+                                        d.child(panel.flex_1().min_h_0())
+                                    } else {
+                                        d.child(panel.flex_none().h(bottom_h)).child(self.splitter(Edge::Bottom, bottom_h, cx))
+                                    }
                                 }),
                         )
                         .when(self.layout.explorer_visible, |d| d.child(self.splitter(Edge::Explorer, explorer_w, cx))),
@@ -774,6 +795,9 @@ impl Render for Shell {
             })
     }
 }
+
+/// Key context of the shell while the bottom panel is maximized, so Esc restores it.
+const PANEL_MAXIMIZED_CONTEXT: &str = "PanelMaximized";
 
 /// Key context of the overflow list's content.
 const OVERFLOW_CONTEXT: &str = "OverflowSearch";
@@ -803,6 +827,7 @@ fn main() {
                 KeyBinding::new("ctrl-q", Quit, None),
                 KeyBinding::new("ctrl-b", ToggleExplorer, None),
                 KeyBinding::new("ctrl-j", ToggleBottomPanel, None),
+                KeyBinding::new("escape", RestorePanel, Some(PANEL_MAXIMIZED_CONTEXT)),
                 KeyBinding::new("ctrl-shift-f", MaximizeEditor, None),
                 KeyBinding::new("ctrl-alt-shift-d", ToggleGallery, None),
                 KeyBinding::new("ctrl-alt-f", FocusExplorer, None),
