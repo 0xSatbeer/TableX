@@ -75,6 +75,12 @@ fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<Stri
     }
 }
 
+/// Byte ranges of the characters in `label` that the filter matched, for highlighting.
+fn highlight_ranges(label: &str, filter: &str) -> Vec<Range<usize>> {
+    let _ = (label, filter);
+    Vec::new()
+}
+
 /// Where a mouse press landed on a row.
 #[derive(Clone, Copy, Debug)]
 enum Hit {
@@ -860,7 +866,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows, highlight_ranges};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -1179,5 +1185,16 @@ mod tests {
             crate::model::Key::Primary { name, .. } | crate::model::Key::Foreign { name, .. } | crate::model::Key::Unique { name, .. } => name.clone(),
         }).collect::<Vec<_>>());
         assert_eq!(labels(Part::Indexes), obj.indexes.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn typing_ordr_shows_orders_highlighted_with_ancestors() {
+        let ws = &mock::workspaces()[0];
+        let nodes = tree_nodes(ws, &Default::default(), &Default::default(), "ordr");
+        let at = nodes.iter().position(|n| n.label.as_ref() == "orders").expect("orders shown");
+        assert_eq!(highlight_ranges("orders", "ordr"), vec![0..1, 1..2, 2..3, 4..5]);
+        assert_eq!(highlight_ranges("orders", ""), Vec::<std::ops::Range<usize>>::new());
+        assert_eq!(highlight_ranges("users", "ordr"), Vec::<std::ops::Range<usize>>::new());
+        assert!((0..nodes[at].depth).all(|d| nodes[..at].iter().any(|n| n.depth == d)), "ancestors kept");
     }
 }
