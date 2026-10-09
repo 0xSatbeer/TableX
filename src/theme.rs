@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::{App, Hsla, Pixels, Rgba, Window, WindowAppearance, px};
-use gpui_kit::component::theme::{Theme, ThemeMode, ThemeRegistry};
+use gpui_kit::component::theme::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
 
 use crate::model::ObjectKind;
 
@@ -101,6 +102,14 @@ impl UserThemeDir {
             abs("XDG_CONFIG_HOME").or_else(|| abs("HOME").map(|h| h.join(".config")))
         };
         config.map(|c| Self { dir: c.join("queryx/themes") })
+    }
+}
+
+/// Loads every theme in `dir/*.json`, with one notification message per file or theme skipped.
+pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
+    match std::fs::read_dir(dir) {
+        Ok(_) => (Vec::new(), Vec::new()),
+        Err(e) => (Vec::new(), vec![e.to_string()]),
     }
 }
 
@@ -274,7 +283,7 @@ pub fn grid_deleted(theme: &Theme) -> Hsla {
 pub const SYNTAX: [&str; 8] = ["keyword", "string", "number", "comment", "function", "type", "operator", "variable"];
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{CONNECTION_COLORS, CONNECTION_COLORS_LIGHT, DARK, LIGHT, Rgba};
 
     fn rgb(hex: &str) -> [f64; 3] {
@@ -437,6 +446,23 @@ mod tests {
             let got = UserThemeDir::resolve(env).map(|d| d.dir);
             assert_eq!(got, want.map(PathBuf::from), "XDG_CONFIG_HOME={xdg:?} HOME={home:?}");
         }
+    }
+
+    /// A fresh dir under the workspace's `target/`, never the user's config dir.
+    pub(crate) fn test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-themes").join(name);
+        _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn missing_user_theme_dir_loads_nothing_and_reports_nothing() {
+        let dir = test_dir("missing").join("themes");
+        let (themes, errors) = super::load_user_themes(&dir);
+        assert!(themes.is_empty(), "themes from a missing dir");
+        assert_eq!(errors, Vec::<String>::new(), "a missing dir is not an error");
+        assert!(!dir.exists(), "loading must not create the dir");
     }
 
     #[test]
