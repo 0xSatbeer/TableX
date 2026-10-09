@@ -404,6 +404,11 @@ fn header_model(c: &ColumnMeta) -> HeaderModel {
     HeaderModel { name: c.name.to_string(), data_type: c.data_type.to_string(), pk: c.is_pk }
 }
 
+/// Header height: two lines (name, type) plus vertical padding.
+fn header_height(_line: Pixels, _pad: Pixels) -> Pixels {
+    px(0.)
+}
+
 /// A header cell being dragged to a new display position.
 #[derive(Clone)]
 struct DragColumn {
@@ -996,7 +1001,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1222,5 +1227,14 @@ mod tests {
         let cols = [col("a", "text", false), col("id", "bigint", true), col("b", "int", false)];
         let shown: Vec<bool> = [1usize, 0, 2].iter().map(|&s| header_model(&cols[s]).pk).collect();
         assert_eq!(shown, [true, false, false]);
+    }
+
+    #[test]
+    fn header_height_fits_two_lines() {
+        use crate::theme::{BADGE_LINE, SPACE_4, SPACE_8};
+        assert_eq!(header_height(BADGE_LINE, SPACE_8), px(40.));
+        assert_eq!(header_height(px(16.), px(0.)), px(32.));
+        assert_eq!(header_height(px(14.), SPACE_4), px(36.));
+        assert!(header_height(BADGE_LINE, SPACE_8) >= BADGE_LINE * 2.);
     }
 }
