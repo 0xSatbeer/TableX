@@ -1097,4 +1097,29 @@ mod tests {
         assert!(table.suffix.is_some());
         assert_eq!(first(ObjectKind::View).suffix, None, "views have no estimate");
     }
+
+    #[test]
+    fn structure_omits_empty_parts() {
+        let mut ws = mock::workspaces()[0].clone();
+        let conn = ws.connections.iter_mut().find(|c| c.status == ConnectionStatus::Connected).unwrap();
+        let obj = conn.databases[0].schemas[0].objects.iter_mut().find(|o| o.kind == ObjectKind::Table).unwrap();
+        obj.columns.truncate(3);
+        obj.keys.truncate(1);
+        obj.indexes.clear();
+        let name = obj.name.clone();
+
+        let all = flatten(&ws, &Default::default(), &Default::default(), true);
+        let table = all.iter().find(|n| n.label.as_ref() == name).unwrap();
+        let nodes = flatten(&ws, &[table.key.clone()].into(), &Default::default(), true);
+        let at = nodes.iter().position(|n| n.key == table.key).unwrap();
+        let children: Vec<_> = nodes[at + 1..].iter().take_while(|n| n.depth > table.depth).map(|n| (n.label.to_string(), n.count)).collect();
+        assert_eq!(children, [("Columns".to_string(), Some(3)), ("Keys".to_string(), Some(1))]);
+
+        let conn = ws.connections.iter_mut().find(|c| c.status == ConnectionStatus::Connected).unwrap();
+        let obj = conn.databases[0].schemas[0].objects.iter_mut().find(|o| o.name == name).unwrap();
+        (obj.columns.clear(), obj.keys.clear());
+        let nodes = flatten(&ws, &[table.key.clone()].into(), &Default::default(), true);
+        let empty = nodes.iter().find(|n| n.key == table.key).unwrap();
+        assert!(!empty.expandable, "nothing to show, no chevron");
+    }
 }
