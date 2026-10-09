@@ -127,7 +127,10 @@ impl<C> Tabs<C> {
         }
         let to = to.min(self.tabs.len());
         let tab = self.tabs.remove(from);
-        self.tabs.insert(if to > from { to - 1 } else { to }, tab);
+        let ix = if to > from { to - 1 } else { to };
+        let pinned = self.tabs.iter().take_while(|t| t.pinned).count();
+        let ix = if tab.pinned { ix.min(pinned) } else { ix.max(pinned) };
+        self.tabs.insert(ix, tab);
     }
 
     pub fn activate(&mut self, ix: usize) {
