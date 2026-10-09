@@ -174,6 +174,23 @@ fn filter_rows(log: &[QueryLogEntry], filter: &LogFilter) -> Vec<usize> {
         .collect()
 }
 
+/// What an expanded row shows beyond its single line.
+#[derive(Debug, PartialEq)]
+struct RowDetail {
+    /// Full statement, newlines kept (rendered wrapped, mono).
+    sql: String,
+    /// Error message of a failed entry.
+    error: Option<String>,
+}
+
+fn row_detail(entry: &QueryLogEntry) -> RowDetail {
+    RowDetail { sql: entry.sql.clone(), error: None }
+}
+
+/// Click on a row: expand it, or collapse it when already open. Keyed by log index, so an
+/// expanded row stays expanded while filters hide and show it.
+fn toggle_expanded(_expanded: &mut BTreeSet<usize>, _ix: usize) {}
+
 // ponytail: keyword list, not a parser; the log line only needs a hint of structure.
 // Swap for the editor's tree-sitter highlighter if rows need full fidelity.
 const KEYWORDS: &[&str] = &[
@@ -328,7 +345,9 @@ mod tests {
     use std::time::Duration;
 
 
-    use super::{LogFilter, StatusKind, filter_rows};
+    use std::collections::BTreeSet;
+
+    use super::{LogFilter, RowDetail, StatusKind, filter_rows, row_detail, toggle_expanded};
     use crate::model::{ConnectionId, QueryLogEntry, QuerySource, QueryStatus};
 
     #[test]
@@ -426,6 +445,35 @@ mod tests {
         assert_eq!(f(true, ""), [0, 1, 2, 3]);
         assert_eq!(f(false, "pg_class"), Vec::<usize>::new(), "text can't bring hidden rows back");
         assert_eq!(f(true, "pg_class"), [1, 2]);
+    }
+
+    #[test]
+    fn expanding_rows() {
+        let log = sample();
+        // error row: full SQL plus the message
+        let multi = entry(1, "SELECT *\nFROM t\nWHERE a = 1", QueryStatus::Err("relation \"t\" does not exist".into()), QuerySource::Console);
+        assert_eq!(
+            row_detail(&multi),
+            RowDetail { sql: "SELECT *\nFROM t\nWHERE a = 1".into(), error: Some("relation \"t\" does not exist".into()) }
+        );
+        // non-error rows show SQL only
+        assert_eq!(row_detail(&log[0]), RowDetail { sql: "SELECT 1".into(), error: None });
+        assert_eq!(row_detail(&log[4]).error, None, "cancelled has no error text");
+
+        // click expands, click again collapses; rows are independent
+        let mut open = BTreeSet::new();
+        toggle_expanded(&mut open, 3);
+        assert!(open.contains(&3));
+        toggle_expanded(&mut open, 5);
+        assert_eq!(open, [3, 5].into());
+        toggle_expanded(&mut open, 3);
+        assert_eq!(open, [5].into());
+
+        // survives a filter change: hidden while filtered out, open again when it returns
+        let only_ok = LogFilter { statuses: [StatusKind::Ok].into(), ..LogFilter::default() };
+        assert!(!filter_rows(&log, &only_ok).contains(&5));
+        assert!(open.contains(&5));
+        assert!(filter_rows(&log, &LogFilter::default()).contains(&5));
     }
 
     #[test]
