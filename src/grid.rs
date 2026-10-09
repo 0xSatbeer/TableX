@@ -93,8 +93,9 @@ enum CellKind {
 }
 
 /// Column types whose values align right, so a NULL in them lines up with the numbers.
-fn is_numeric_type(_: &str) -> bool {
-    false
+fn is_numeric_type(ty: &str) -> bool {
+    const PREFIXES: [&str; 8] = ["bigint", "smallint", "numeric", "decimal", "double", "float", "real", "money"];
+    (ty.starts_with("int") && !ty.starts_with("interval")) || PREFIXES.iter().any(|p| ty.starts_with(p))
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -740,7 +741,7 @@ impl Grid {
                         .whitespace_nowrap()
                         .border_r_1()
                         .border_color(theme.table_row_border)
-                        .when(kind == CellKind::Number, |d| d.justify_end())
+                        .when(kind == CellKind::Number || (kind == CellKind::Null && is_numeric_type(&self.source.columns()[s].data_type)), |d| d.justify_end())
                         .when(selected, |d| d.bg(fill))
                         .when_some(cursor.filter(|_| self.head == (r, c)), |d, color| d.border_1().border_color(color))
                         .on_mouse_down(
@@ -762,7 +763,6 @@ impl Grid {
                                 .px(theme::SPACE_4)
                                 .rounded(theme::RADIUS_SM)
                                 .bg(theme.muted)
-                                .italic()
                                 .text_color(theme::grid_null(theme))
                                 .child(text)
                         } else {
@@ -854,7 +854,7 @@ impl Grid {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .when(kind == CellKind::Null, |d| d.italic().text_color(theme::grid_null(theme)))
+                            .when(kind == CellKind::Null, |d| d.text_color(theme::grid_null(theme)))
                             .child(if kind == CellKind::Null { text } else { inspect_text(value) }),
                     )
             }))
