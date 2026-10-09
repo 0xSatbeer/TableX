@@ -59,6 +59,8 @@ struct LayoutState {
     bottom_visible: bool,
     /// Visibility of (explorer, bottom) from before `MaximizeEditor`, restored by the next one.
     maximized_from: Option<(bool, bool)>,
+    /// The bottom panel covers the editor area; sizes stay as they were, so un-maximizing restores them.
+    panel_maximized: bool,
     explorer: split::Split,
     bottom: split::Split,
     dragging: Option<Dragging>,
@@ -128,6 +130,17 @@ impl LayoutState {
         self.maximized_from = None;
         self.explorer_visible = true;
     }
+
+    fn toggle_bottom(&mut self) {
+        self.maximized_from = None;
+        self.bottom_visible = !self.bottom_visible;
+    }
+
+    /// Maximize button on the panel header; does nothing while the panel is hidden.
+    fn toggle_panel_maximize(&mut self) {}
+
+    /// Esc: leaves panel maximize; does nothing otherwise.
+    fn restore_panel(&mut self) {}
 
     fn toggle_maximize(&mut self) {
         match self.maximized_from.take() {
@@ -220,6 +233,7 @@ impl Shell {
                 explorer_visible: true,
                 bottom_visible: true,
                 maximized_from: None,
+                panel_maximized: false,
                 explorer: split::EXPLORER,
                 bottom: split::BOTTOM,
                 dragging: None,
@@ -611,8 +625,7 @@ impl Render for Shell {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleBottomPanel, _, cx| {
-                this.layout.maximized_from = None;
-                this.layout.bottom_visible = !this.layout.bottom_visible;
+                this.layout.toggle_bottom();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &MaximizeEditor, _, cx| {
@@ -820,6 +833,7 @@ mod tests {
             explorer_visible: true,
             bottom_visible: true,
             maximized_from: None,
+            panel_maximized: false,
             explorer: split::EXPLORER,
             bottom: split::BOTTOM,
             dragging: None,
@@ -865,6 +879,45 @@ mod tests {
         l.show_explorer();
         assert!(l.explorer_visible, "maximized -> shown");
         assert!(l.maximized_from.is_none(), "maximize state dropped so the next toggle starts fresh");
+    }
+
+    #[test]
+    fn panel_maximize_toggles_and_keeps_sizes() {
+        let window = size(px(1200.), px(800.));
+        let mut l = layout();
+        l.explorer.size = px(300.);
+        l.bottom.size = px(333.);
+        l.toggle_panel_maximize();
+        assert!(l.panel_maximized, "maximized after the first press");
+        assert!(l.bottom_visible, "panel stays visible when maximized");
+        l.toggle_panel_maximize();
+        assert!(!l.panel_maximized, "restored after the second press");
+        l.toggle_panel_maximize();
+        l.restore_panel();
+        assert!(!l.panel_maximized, "Esc restores");
+        l.restore_panel();
+        assert!(!l.panel_maximized, "Esc when not maximized does nothing");
+        assert_eq!((l.explorer.shown(window.width), l.bottom.shown(window.height)), (px(300.), px(333.)), "previous sizes restored");
+        assert!(l.explorer_visible, "explorer visibility untouched");
+    }
+
+    #[test]
+    fn panel_maximize_needs_a_visible_panel_and_ends_when_it_hides() {
+        let mut l = layout();
+        l.bottom_visible = false;
+        l.toggle_panel_maximize();
+        assert!(!l.panel_maximized, "hidden panel can't be maximized");
+        l.bottom_visible = true;
+        l.toggle_panel_maximize();
+        assert!(l.panel_maximized, "visible panel maximizes");
+        l.toggle_bottom();
+        assert!(!l.bottom_visible && !l.panel_maximized, "Ctrl+J while maximized hides the panel and ends maximize");
+        l.toggle_bottom();
+        assert!(l.bottom_visible && !l.panel_maximized, "panel comes back at its normal size");
+        l.toggle_panel_maximize();
+        assert!(l.panel_maximized, "maximized again");
+        l.toggle_maximize();
+        assert!(!l.bottom_visible && !l.panel_maximized, "Ctrl+Shift+F while maximized hides everything and ends maximize");
     }
 
     /// A Shell with 11 tabs and the overflow list open, its search field focused.
