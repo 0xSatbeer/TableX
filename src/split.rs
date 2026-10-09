@@ -25,6 +25,11 @@ pub struct Split {
 }
 
 impl Split {
+    /// The size to draw at, in a window `window` long along the split's axis.
+    pub fn shown(&self, _window: Pixels) -> Pixels {
+        px(0.)
+    }
+
     pub fn reset(&mut self) {
         self.size = self.default;
     }
@@ -89,6 +94,14 @@ mod tests {
             (600., Drag::Size(px(560.))),
         ] {
             assert_eq!(resolve_drag(px(to), b.min, max, b.size), expected, "bottom drag to {to}");
+        }
+    }
+
+    #[test]
+    fn explorer_keeps_its_width_when_the_window_resizes() {
+        for (width, window) in [(260., 1200.), (260., 1600.), (260., 900.), (600., 1600.), (180., 900.)] {
+            let split = Split { size: px(width), ..EXPLORER };
+            assert_eq!(split.shown(px(window)), px(width), "explorer {width} in window {window}");
         }
     }
 }
