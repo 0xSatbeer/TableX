@@ -416,6 +416,20 @@ mod tests {
     }
 
     #[test]
+    fn only_id_columns_are_primary_keys() {
+        for o in all_objects() {
+            for c in &o.columns {
+                let want = o.kind == ObjectKind::Table && c.name == "id";
+                assert_eq!(c.is_pk, want, "{}.{}: is_pk", o.name, c.name);
+            }
+        }
+        let result_sets = [big_events_columns(), wide_table(0).columns, edge_cases().columns];
+        for c in result_sets.iter().flatten() {
+            assert_eq!(c.is_pk, &*c.name == "id", "result column {}: is_pk", c.name);
+        }
+    }
+
+    #[test]
     fn run_query_picks_outcome_from_sql() {
         assert!(matches!(run_query("  SELECT * FROM users"), QueryOutcome::Rows(_)));
         assert!(matches!(run_query("update t set a = 1"), QueryOutcome::Affected(_)));
