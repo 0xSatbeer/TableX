@@ -36,8 +36,8 @@ pub fn tooltip_text(title: &str, origin: Option<&Origin>) -> String {
 /// More tabs than this and the overflow list gets a search field.
 pub const SEARCH_MIN_TABS: usize = 10;
 
-pub fn show_search(_tab_count: usize) -> bool {
-    false
+pub fn show_search(tab_count: usize) -> bool {
+    tab_count > SEARCH_MIN_TABS
 }
 
 pub struct EditorTab<C> {

@@ -1,7 +1,8 @@
 use gpui_kit::component::{
     ActiveTheme as _, Icon,
-    button::{Button, ButtonVariants as _}, IconName, Sizable as _, TitleBar, h_flex,
-    input::{Editor, EditorState},
+    button::{Button, ButtonVariants as _}, IconName, Selectable as _, Sizable as _, TitleBar, h_flex,
+    input::{Editor, EditorState, Input, InputEvent, InputState},
+    popover::Popover,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     tooltip::Tooltip,
     v_flex,
@@ -151,6 +152,9 @@ struct Shell {
     /// Set when a tab is activated; the next render moves keyboard focus into its content.
     focus_content: bool,
     theme: theme::ThemeChoice,
+    /// Overflow list: open state and its search field (shown above `tabs::SEARCH_MIN_TABS` tabs).
+    overflow_open: bool,
+    overflow_search: Entity<InputState>,
     _appearance: Subscription,
 }
 
@@ -173,7 +177,16 @@ impl Shell {
             this.focus_content = !ev.preview;
         })
         .detach();
+        let overflow_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search tabs…"));
+        cx.subscribe(&overflow_search, |_, _, ev: &InputEvent, cx| {
+            if let InputEvent::Change = ev {
+                cx.notify();
+            }
+        })
+        .detach();
         let mut this = Self {
+            overflow_open: false,
+            overflow_search,
             explorer,
             editor: cx.new(|cx| {
                 EditorState::new(window, cx)
@@ -310,29 +323,81 @@ impl Shell {
             )
             .child(
                 h_flex().flex_none().h_full().px(theme::SPACE_4).border_l_1().border_b_1().border_color(theme.border).child(
-                    Button::new("all-tabs")
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::ChevronDown)
-                        .tooltip("All open tabs")
-                        .dropdown_menu(move |mut menu, _, _| {
-                            menu = menu.scrollable(true);
-                            for (ix, title) in titles.iter().enumerate() {
-                                let shell = shell.clone();
-                                menu = menu.item(PopupMenuItem::new(title.clone()).checked(ix == active_ix).on_click(
-                                    move |_, _, cx| {
-                                        _ = shell.update(cx, |this, cx| {
-                                            this.tabs.activate(ix);
-                                            this.tab_changed(cx);
-                                        });
-                                    },
-                                ));
-                            }
-                            menu
-                        })
-                        .anchor(Anchor::TopRight),
+                    if tabs::show_search(titles.len()) { self.overflow_search_list(cx).into_any_element() } else {
+                        Button::new("all-tabs")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ChevronDown)
+                            .tooltip("All open tabs")
+                            .dropdown_menu(move |mut menu, _, _| {
+                                menu = menu.scrollable(true);
+                                for (ix, title) in titles.iter().enumerate() {
+                                    let shell = shell.clone();
+                                    menu = menu.item(PopupMenuItem::new(title.clone()).checked(ix == active_ix).on_click(
+                                        move |_, _, cx| {
+                                            _ = shell.update(cx, |this, cx| {
+                                                this.tabs.activate(ix);
+                                                this.tab_changed(cx);
+                                            });
+                                        },
+                                    ));
+                                }
+                                menu
+                            })
+                            .anchor(Anchor::TopRight)
+                            .into_any_element()
+                    },
                 ),
             )
+    }
+
+    /// The overflow list with a search field, for more than `tabs::SEARCH_MIN_TABS` tabs.
+    fn overflow_search_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let shell = cx.entity();
+        let search = self.overflow_search.clone();
+        let rows: Vec<_> = self.tabs.tabs.iter().enumerate().map(|(ix, t)| (ix, t.title.clone())).collect();
+        let active_ix = self.tabs.active;
+        Popover::new("all-tabs-popover")
+            .anchor(Anchor::TopRight)
+            .open(self.overflow_open)
+            .on_open_change({
+                let (shell, search) = (shell.downgrade(), search.clone());
+                move |open, window, cx| {
+                    _ = shell.update(cx, |this, cx| {
+                        this.overflow_open = *open;
+                        cx.notify();
+                    });
+                    if *open {
+                        search.update(cx, |s, cx| {
+                            s.set_value("", window, cx);
+                            s.focus(window, cx);
+                        });
+                    }
+                }
+            })
+            .trigger(Button::new("all-tabs").ghost().xsmall().icon(IconName::ChevronDown).tooltip("All open tabs"))
+            .content(move |_, _, _| {
+                let list = v_flex()
+                    .id("overflow-list")
+                    .max_h(theme::SPACE_24 * 10.)
+                    .overflow_y_scroll()
+                    .children(rows.iter().map(|(ix, title)| {
+                        let (ix, shell) = (*ix, shell.clone());
+                        Button::new(("overflow-tab", ix))
+                            .ghost()
+                            .small()
+                            .label(title.clone())
+                            .selected(ix == active_ix)
+                            .on_click(move |_, _, cx| {
+                                shell.update(cx, |this, cx| {
+                                    this.overflow_open = false;
+                                    this.tabs.activate(ix);
+                                    this.tab_changed(cx);
+                                });
+                            })
+                    }));
+                v_flex().w(theme::SPACE_24 * 10.).gap(theme::SPACE_4).child(Input::new(&search).small()).child(list)
+            })
     }
 
     fn tab(&self, ix: usize, t: &tabs::EditorTab<TabContent>, cx: &mut Context<Self>) -> AnyElement {
