@@ -308,10 +308,12 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                         let key = format!("{key}/{oi}");
                         let kind = NodeKind::Object(kind);
                         let suffix = row_estimate_label(obj.row_estimate).map(Into::into);
-                        if !push(FlatNode { expandable: opens_tab(kind), suffix, ..node(key.clone(), kind, &obj.name, 4) }) {
+                        let parts = [(Part::Columns, obj.columns.len()), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
+                        let parts: Vec<_> = parts.into_iter().filter(|(_, n)| *n > 0).collect();
+                        let expandable = opens_tab(kind) && !parts.is_empty();
+                        if !push(FlatNode { expandable, suffix, ..node(key.clone(), kind, &obj.name, 4) }) {
                             continue;
                         }
-                        let parts = [(Part::Columns, obj.columns.len()), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
                         for (part, n) in parts {
                             let label = part_label(part);
                             push(FlatNode { count: Some(n), expandable: true, ..node(format!("{key}/{label}"), NodeKind::Part(part), label, 5) });
