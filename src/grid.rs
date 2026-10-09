@@ -920,7 +920,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmp_values, copy_cols, display_widths, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1007,6 +1007,22 @@ mod tests {
             assert_eq!(copy(tsv, &[0, 1, 2], &hidden, display.clone()), expected, "hidden {hidden:?}, selected {display:?}");
         }
         assert_eq!(copy(csv, &[0, 1, 2], &[false, true, false], 0..3), "a,c\na0,c0\n", "every format skips hidden");
+    }
+
+    #[test]
+    fn ctrl_home_end_skip_hidden_columns() {
+        // (key, hidden in display order, from, expected head) over 10 rows
+        let cases: [(&str, [bool; 3], (usize, usize), (usize, usize)); 6] = [
+            ("end", [false, true, false], (0, 0), (9, 2)), // b hidden -> last row, column c
+            ("end", [false, false, true], (0, 0), (9, 1)),
+            ("end", [false, false, false], (3, 1), (9, 2)),
+            ("home", [true, false, false], (5, 2), (0, 1)),
+            ("home", [true, true, false], (5, 2), (0, 2)),
+            ("home", [false, false, false], (5, 2), (0, 0)),
+        ];
+        for (key, hidden, from, expected) in cases {
+            assert_eq!(nav(key, true, false, from, 10, &hidden, 5), Some(expected), "Ctrl+{key} from {from:?}, hidden {hidden:?}");
+        }
     }
 
     #[test]
