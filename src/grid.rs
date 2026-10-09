@@ -1012,6 +1012,20 @@ mod tests {
     }
 
     #[test]
+    fn copy_follows_display_order() {
+        // (display order over a, b, c, hidden per source, selected display positions, CSV)
+        let cases: [([usize; 3], [bool; 3], std::ops::Range<usize>, &str); 4] = [
+            ([2, 0, 1], [false, true, false], 0..3, "c,a\nc0,a0\n"), // display order [c,a]
+            ([2, 0, 1], [false, false, false], 0..2, "c,a\nc0,a0\n"),
+            ([2, 1, 0], [false, false, false], 0..3, "c,b,a\nc0,b0,a0\n"),
+            ([1, 2, 0], [true, false, false], 1..3, "c\nc0\n"), // hidden looked up by source, not position
+        ];
+        for (order, hidden, display, expected) in cases {
+            assert_eq!(copy(csv, &order, &hidden, display.clone()), expected, "order {order:?}, hidden {hidden:?}, selected {display:?}");
+        }
+    }
+
+    #[test]
     fn ctrl_home_end_skip_hidden_columns() {
         // (key, hidden in display order, from, expected head) over 10 rows
         let cases: [(&str, [bool; 3], (usize, usize), (usize, usize)); 6] = [
