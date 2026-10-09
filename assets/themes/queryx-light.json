@@ -37,13 +37,13 @@
         "secondary.foreground": "#1C1D22",
 
         "success.background": "#1E8E5A",
-        "success.foreground": "#1E8E5A",
+        "success.foreground": "#1A794D",
         "warning.background": "#B26B00",
-        "warning.foreground": "#B26B00",
+        "warning.foreground": "#9A5C00",
         "danger.background": "#C93434",
-        "danger.foreground": "#C93434",
+        "danger.foreground": "#C53333",
         "info.background": "#1C7FA6",
-        "info.foreground": "#1C7FA6",
+        "info.foreground": "#197295",
 
         "input.border": "#CDD0D7",
         "popover.background": "#FFFFFF",
