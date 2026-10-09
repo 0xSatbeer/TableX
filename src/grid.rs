@@ -1106,7 +1106,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{gutter_digits, gutter_width, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{aligns_right, gutter_digits, gutter_width, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1292,6 +1292,10 @@ mod tests {
             ("", false),
             ("interval", false),
             ("point", false),
+            ("INTEGER", true),
+            ("integer[]", false),
+            ("numeric[]", false),
+            ("int4range", false),
         ];
         for (ty, right) in cases {
             assert_eq!(is_numeric_type(ty), right, "type {ty:?}");
@@ -1303,6 +1307,23 @@ mod tests {
         let cases = [(0, 3), (9, 3), (999, 3), (1000, 4), (99_999, 5), (100_000, 6), (999_999, 6), (1_000_000, 7)];
         for (rows, digits) in cases {
             assert_eq!(gutter_digits(rows), digits, "{rows} rows");
+        }
+    }
+
+    #[test]
+    fn aligns_right_by_kind_and_type() {
+        let cases = [
+            (CellKind::Null, "integer", true),
+            (CellKind::Null, "INTEGER", true),
+            (CellKind::Null, "text", false),
+            (CellKind::Null, "integer[]", false),
+            (CellKind::Number, "integer", true),
+            (CellKind::Number, "text", true),
+            (CellKind::Text, "integer", false),
+            (CellKind::Bool(true), "integer", false),
+        ];
+        for (kind, ty, right) in cases {
+            assert_eq!(aligns_right(&kind, ty), right, "{kind:?} in {ty:?}");
         }
     }
 
