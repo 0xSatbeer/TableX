@@ -1,4 +1,6 @@
 use std::borrow::Cow;
+use std::ffi::OsString;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui_kit::{App, Hsla, Pixels, Rgba, Window, WindowAppearance, px};
@@ -78,6 +80,20 @@ pub fn init(cx: &mut App) {
     // `Theme::change` loads whichever of these two matches the mode it is given.
     Theme::update(cx, |theme| (theme.dark_theme, theme.light_theme) = (dark, light));
     Theme::change(ThemeMode::Dark, None, cx);
+}
+
+/// Where users drop gpui-kit theme-set JSON files (`*.json`). QueryX only reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserThemeDir {
+    pub dir: PathBuf,
+}
+
+impl UserThemeDir {
+    /// `queryx/themes/` under the platform config dir; `env` reads an environment variable.
+    pub fn resolve(env: impl Fn(&str) -> Option<OsString>) -> Option<Self> {
+        let _ = env;
+        None
+    }
 }
 
 /// The user's theme setting. `System` follows the OS light/dark preference live.
@@ -386,6 +402,32 @@ mod tests {
         for theme in [DARK, LIGHT] {
             assert!((num(theme, "font.size") * 0.875 - f32::from(super::UI_SM)).abs() < 0.01, "font.size * 0.875 != UI_SM");
             assert_eq!(num(theme, "mono_font.size"), f32::from(super::MONO));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn user_theme_dir_follows_xdg_then_home() {
+        use super::UserThemeDir;
+        use std::path::PathBuf;
+        // (XDG_CONFIG_HOME, HOME, expected dir)
+        let cases: [(Option<&str>, Option<&str>, Option<&str>); 7] = [
+            (Some("/x"), Some("/h"), Some("/x/queryx/themes")),
+            (None, Some("/h"), Some("/h/.config/queryx/themes")),
+            (Some(""), Some("/h"), Some("/h/.config/queryx/themes")), // empty counts as unset (XDG spec)
+            (Some("rel"), Some("/h"), Some("/h/.config/queryx/themes")), // relative is ignored (XDG spec)
+            (Some("/x"), None, Some("/x/queryx/themes")),
+            (None, None, None),
+            (None, Some(""), None),
+        ];
+        for (xdg, home, want) in cases {
+            let env = |k: &str| match k {
+                "XDG_CONFIG_HOME" => xdg.map(Into::into),
+                "HOME" => home.map(Into::into),
+                _ => None,
+            };
+            let got = UserThemeDir::resolve(env).map(|d| d.dir);
+            assert_eq!(got, want.map(PathBuf::from), "XDG_CONFIG_HOME={xdg:?} HOME={home:?}");
         }
     }
 
