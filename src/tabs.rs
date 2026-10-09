@@ -126,11 +126,13 @@ impl<C> Tabs<C> {
             return;
         }
         let to = to.min(self.tabs.len());
+        let active = self.tabs[self.active.min(self.tabs.len() - 1)].key.clone();
         let tab = self.tabs.remove(from);
         let ix = if to > from { to - 1 } else { to };
         let pinned = self.tabs.iter().take_while(|t| t.pinned).count();
         let ix = if tab.pinned { ix.min(pinned) } else { ix.max(pinned) };
         self.tabs.insert(ix, tab);
+        self.active = self.tabs.iter().position(|t| t.key == active).unwrap_or(0);
     }
 
     pub fn activate(&mut self, ix: usize) {
