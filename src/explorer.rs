@@ -445,11 +445,6 @@ fn filter_nodes(nodes: Vec<FlatNode>, query: &str) -> Vec<FlatNode> {
         })
         .collect();
     keep.reverse();
-    // STUB (red only): swap the real parent schema for a sibling header at the same depth.
-    if let Some(n) = keep.iter_mut().find(|n| n.depth == 2) {
-        n.key = "0/0/9".into();
-        n.label = "staging".into();
-    }
     keep
 }
 
