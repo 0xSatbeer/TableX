@@ -105,8 +105,21 @@ fn opens_tab(kind: NodeKind) -> bool {
 }
 
 /// A row estimate rounded for the tree: `999`, `1.2k`, `12k`, `1.2M`.
-fn row_estimate_label(_rows: Option<u64>) -> Option<String> {
-    None
+fn row_estimate_label(rows: Option<u64>) -> Option<String> {
+    let rows = rows?;
+    if rows < 1000 {
+        return Some(rows.to_string());
+    }
+    let mut scaled = rows as f64;
+    for unit in ["k", "M", "B"] {
+        scaled /= 1000.0;
+        let rounded = if scaled < 10.0 { (scaled * 10.0).round() / 10.0 } else { scaled.round() };
+        // 999_999 rounds to 1000k; carry it to the next unit instead.
+        if rounded < 1000.0 || unit == "B" {
+            return Some(format!("{rounded}{unit}"));
+        }
+    }
+    unreachable!("the last unit always returns")
 }
 
 fn part_label(part: Part) -> &'static str {
@@ -294,7 +307,8 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                     for (oi, obj) in objects.into_iter().enumerate() {
                         let key = format!("{key}/{oi}");
                         let kind = NodeKind::Object(kind);
-                        if !push(FlatNode { expandable: opens_tab(kind), ..node(key.clone(), kind, &obj.name, 4) }) {
+                        let suffix = row_estimate_label(obj.row_estimate).map(Into::into);
+                        if !push(FlatNode { expandable: opens_tab(kind), suffix, ..node(key.clone(), kind, &obj.name, 4) }) {
                             continue;
                         }
                         let parts = [(Part::Columns, obj.columns.len()), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
@@ -732,6 +746,9 @@ impl Explorer {
                                 .label("Retry")
                                 .on_click(cx.listener(move |this, _, _, cx| this.connect(ci, cx))),
                         )
+                    })
+                    .when_some(node.suffix.clone(), |d, suffix| {
+                        d.child(div().flex_none().text_size(theme::UI_SM).text_color(theme.muted_foreground).child(suffix))
                     })
                     .when_some(node.count, |d, n| {
                         d.child(div().text_size(theme::UI_SM).text_color(theme.muted_foreground).child(n.to_string()))
