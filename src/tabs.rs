@@ -121,7 +121,14 @@ impl<C> Tabs<C> {
     }
 
     /// Moves the tab at `from` to just before index `to` (a drop slot, 0..=len).
-    pub fn move_tab(&mut self, from: usize, to: usize) {}
+    pub fn move_tab(&mut self, from: usize, to: usize) {
+        if from >= self.tabs.len() {
+            return;
+        }
+        let to = to.min(self.tabs.len());
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(if to > from { to - 1 } else { to }, tab);
+    }
 
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {
