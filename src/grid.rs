@@ -152,6 +152,9 @@ fn tsv(_: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
 /// Header drag: moves display position `from` to just before display position `before`
 /// (`before == order.len()` is the end). Returns whether the order changed.
 fn move_col(order: &mut Vec<usize>, from: usize, before: usize) -> bool {
+    if before == from || before == from + 1 {
+        return false;
+    }
     let col = order.remove(from);
     order.insert(if before > from { before - 1 } else { before }, col);
     true
