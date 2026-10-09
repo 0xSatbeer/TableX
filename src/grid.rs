@@ -73,8 +73,7 @@ fn prefix_sums(widths: &[Pixels]) -> Vec<Pixels> {
 
 /// Widths in display order from per-source `widths` and `hidden`; hidden columns are zero wide.
 fn display_widths(order: &[usize], widths: &[Pixels], hidden: &[bool]) -> Vec<Pixels> {
-    let _ = order;
-    widths.iter().zip(hidden).map(|(w, h)| if *h { Pixels::ZERO } else { *w }).collect()
+    order.iter().map(|&s| if hidden[s] { Pixels::ZERO } else { widths[s] }).collect()
 }
 
 /// Columns intersecting `[scroll_x, scroll_x + viewport)`, widened by `overscan` each side.
