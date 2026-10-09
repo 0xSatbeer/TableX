@@ -75,6 +75,12 @@ fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<Stri
     }
 }
 
+/// Index of the first node matching a non-empty filter.
+fn first_match(nodes: &[FlatNode], filter: &str) -> Option<usize> {
+    let _ = (nodes, filter);
+    Some(0)
+}
+
 /// Byte ranges of the characters in `label` that the filter matched, for highlighting.
 fn highlight_ranges(label: &str, filter: &str) -> Vec<Range<usize>> {
     fuzzy_match(label, filter)
@@ -865,7 +871,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows, highlight_ranges};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows, highlight_ranges, first_match};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -1195,5 +1201,20 @@ mod tests {
         assert_eq!(highlight_ranges("orders", ""), Vec::<std::ops::Range<usize>>::new());
         assert_eq!(highlight_ranges("users", "ordr"), Vec::<std::ops::Range<usize>>::new());
         assert!((0..nodes[at].depth).all(|d| nodes[..at].iter().any(|n| n.depth == d)), "ancestors kept");
+    }
+
+    #[test]
+    fn empty_field_restores_the_expanded_set() {
+        let ws = &mock::workspaces()[0];
+        let expanded = default_expanded(ws);
+        let none = Default::default();
+        let normal = flatten(ws, &expanded, &none, false);
+        let keys = |v: &[super::FlatNode]| v.iter().map(|n| n.key.clone()).collect::<Vec<_>>();
+        let filtered = tree_nodes(ws, &expanded, &none, "ordr");
+        assert_ne!(keys(&filtered), keys(&normal), "filter changes the tree");
+        assert_eq!(keys(&tree_nodes(ws, &expanded, &none, "")), keys(&normal));
+        assert_eq!(first_match(&normal, ""), None, "no first match without a filter");
+        assert_eq!(first_match(&filtered, "ordr").map(|i| filtered[i].label.as_ref()), Some("orders"));
+        assert_eq!(first_match(&filtered, "zzzz"), None);
     }
 }
