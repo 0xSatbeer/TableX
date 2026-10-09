@@ -239,6 +239,12 @@ fn copy_ranges<R: AsRef<[Value]>>(format: fn(&[ColumnMeta], &[Vec<Value>]) -> St
     blocks.join("\n")
 }
 
+/// Values of every range's first column as one list.
+fn copy_in_list<R: AsRef<[Value]>>(ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> R) -> String {
+    // stub
+    copy_ranges(sql_in_list, ranges, order, hidden, columns, row)
+}
+
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
 
 fn csv(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
@@ -1064,7 +1070,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{Block, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1368,6 +1374,32 @@ mod tests {
         for (format, want) in expected {
             let got = copy_ranges(format, &[(0..2, 0..3)], &[2, 0, 1], &[false, true, false], &cols, &row);
             assert_eq!(got, want);
+        }
+    }
+
+    #[test]
+    fn in_list_merges_every_range_into_one_list() {
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        let rows: Vec<Vec<Value>> = vec![
+            vec![Value::Int(1), Value::Text("x".into()), Value::Null],
+            vec![Value::Int(2), Value::Text("it's".into()), Value::Text("z".into())],
+            vec![Value::Int(1), Value::Null, Value::Int(7)],
+            vec![Value::Int(5), Value::Text("y".into()), Value::Int(8)],
+        ];
+        let row = |r: usize| rows[r].clone();
+        let id = [0, 1, 2];
+        // (ranges, order, hidden, expected); duplicates are kept: the list mirrors the selection, and IN ignores repeats
+        let cases: [(Vec<Block>, [usize; 3], [bool; 3], &str); 7] = [
+            (vec![(0..2, 0..1), (3..4, 0..1)], id, [false; 3], "(1, 2, 5)"),
+            (vec![(0..1, 0..1)], id, [false; 3], "(1)"),
+            (vec![(0..1, 1..2), (1..2, 1..2)], id, [false; 3], "('x', 'it''s')"), // strings quoted, quote doubled
+            (vec![(0..3, 2..3), (2..3, 1..2)], id, [false; 3], "(NULL, 'z', 7, NULL)"), // NULLs, mixed types
+            (vec![(0..1, 0..1), (2..3, 0..1)], id, [false; 3], "(1, 1)"),          // duplicates across ranges kept
+            (vec![(0..2, 0..2), (0..1, 1..3)], id, [false; 3], "(1, 2, 'x')"),      // first column of each range only; overlap
+            (vec![(0..2, 0..2), (3..4, 0..2)], [1, 0, 2], [false, true, false], "('x', 'it''s', 'y')"), // permuted, a hidden: b leads
+        ];
+        for (ranges, order, hidden, expected) in cases {
+            assert_eq!(copy_in_list(&ranges, &order, &hidden, &cols, row), expected, "ranges {ranges:?}, order {order:?}, hidden {hidden:?}");
         }
     }
 }
