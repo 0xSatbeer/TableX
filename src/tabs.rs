@@ -50,13 +50,18 @@ pub struct Tabs<C> {
     pub tabs: Vec<EditorTab<C>>,
     pub active: usize,
     closed: Vec<EditorTab<C>>,
+    /// Tab keys, most recently used first.
+    mru: Vec<SharedString>,
+    /// MRU position previewed by Ctrl+Tab while Ctrl is held.
+    cycling: Option<usize>,
 }
 
 const CLOSED_HISTORY: usize = 20;
 
 impl<C> Tabs<C> {
     pub fn new(tabs: Vec<EditorTab<C>>) -> Self {
-        Self { tabs, active: 0, closed: Vec::new() }
+        let mru = tabs.iter().map(|t| t.key.clone()).collect();
+        Self { tabs, active: 0, closed: Vec::new(), mru, cycling: None }
     }
 
     pub fn active(&self) -> Option<&EditorTab<C>> {
@@ -125,6 +130,9 @@ impl<C> Tabs<C> {
             self.active = if forward { (self.active + 1) % n } else { (self.active + n - 1) % n };
         }
     }
+
+    /// Ctrl released: the previewed tab becomes the most recently used.
+    pub fn commit(&mut self) {}
 
     /// Moves the tab at `from` to just before index `to` (a drop slot, 0..=len).
     pub fn move_tab(&mut self, from: usize, to: usize) {
@@ -208,6 +216,44 @@ mod tests {
         t.activate(1);
         t.close_where(|ix| ix > 1);
         assert_eq!((keys(&t), t.active), (vec!["a", "b"], 1), "close to the right keeps the active tab");
+    }
+
+    /// Tabs [a, b, c] in position order with the given MRU order; the MRU front is active.
+    fn with_mru(mru: &[&'static str]) -> Tabs<()> {
+        let mut t = Tabs::new(vec![tab("a", false), tab("b", false), tab("c", false)]);
+        t.tabs.truncate(mru.len());
+        t.mru = mru.iter().map(|&k| k.into()).collect();
+        t.active = t.tabs.iter().position(|x| x.key == mru[0]).unwrap();
+        t
+    }
+
+    /// Runs Ctrl+Tab steps: 'n' next, 'p' previous, 'r' release Ctrl.
+    fn run(t: &mut Tabs<()>, steps: &str) {
+        for s in steps.chars() {
+            match s {
+                'n' => t.cycle(true),
+                'p' => t.cycle(false),
+                _ => t.commit(),
+            }
+        }
+    }
+
+    fn state(t: &Tabs<()>) -> (&str, Vec<&str>) {
+        (t.tabs[t.active].key.as_ref(), t.mru.iter().map(|k| k.as_ref()).collect())
+    }
+
+    #[test]
+    fn ctrl_tab_release_commits_previous_mru_tab() {
+        // (MRU before, steps, active after, MRU after)
+        let cases: [(&[&'static str], &str, &str, &[&str]); 2] = [
+            (&["c", "b", "a"], "nr", "b", &["b", "c", "a"]),
+            (&["b", "a"], "nr", "a", &["a", "b"]),
+        ];
+        for (mru, steps, active, want) in cases {
+            let mut t = with_mru(mru);
+            run(&mut t, steps);
+            assert_eq!(state(&t), (active, want.to_vec()), "MRU {mru:?}, steps {steps}");
+        }
     }
 
     #[test]
