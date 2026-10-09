@@ -126,7 +126,7 @@ impl<C> Tabs<C> {
 
     /// Ctrl+Tab while Ctrl is held: previews the next tab in MRU order.
     pub fn cycle(&mut self, _forward: bool) {
-        let pos = 1;
+        let pos = self.cycling.map_or(1, |p| p + 1);
         self.cycling = Some(pos);
         if let Some(ix) = self.tabs.iter().position(|t| t.key == self.mru[pos]) {
             self.active = ix;
