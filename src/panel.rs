@@ -203,7 +203,7 @@ fn toggle_expanded(expanded: &mut BTreeSet<usize>, ix: usize) {
 
 /// Logs column headers in row order (the status icon column has none).
 fn header_labels() -> [&'static str; 8] {
-    ["Time", "Connection", "Database", "SQL", "", "Duration", "Rows", "Source"]
+    ["Time (UTC)", "Connection", "Database", "SQL", "", "Duration", "Rows", "Source"]
 }
 
 // ponytail: keyword list, not a parser; the log line only needs a hint of structure.
