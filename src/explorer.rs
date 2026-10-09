@@ -197,6 +197,8 @@ struct FlatNode {
     expanded: bool,
     /// Muted text after the label: a table's row estimate or a column's type.
     suffix: Option<SharedString>,
+    /// A primary-key column.
+    pk: bool,
 }
 
 fn group_label(kind: ObjectKind) -> &'static str {
@@ -262,6 +264,7 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
             expandable: false,
             expanded: false,
             suffix: None,
+            pk: false,
         };
         let key = format!("{ci}");
         let open = push(FlatNode { expandable: !conn.databases.is_empty(), ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
@@ -1123,5 +1126,29 @@ mod tests {
         let nodes = flatten(&ws, &[table.key.clone()].into(), &Default::default(), true);
         let empty = nodes.iter().find(|n| n.key == table.key).unwrap();
         assert!(!empty.expandable, "nothing to show, no chevron");
+    }
+
+    #[test]
+    fn column_rows_show_type_and_pk() {
+        let ws = &mock::workspaces()[0];
+        let conn = ws.connections.iter().find(|c| c.status == ConnectionStatus::Connected).unwrap();
+        let obj = conn.databases[0].schemas[0].objects.iter().find(|o| o.kind == ObjectKind::Table).unwrap();
+        let table = flatten(ws, &Default::default(), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == obj.name).unwrap();
+        let open = ["", "/Columns", "/Keys", "/Indexes"].map(|part| format!("{}{part}", table.key)).into();
+        let nodes = flatten(ws, &open, &Default::default(), true);
+        let items = |part| nodes.iter().filter(|n| n.kind == NodeKind::Item(part) && n.key.starts_with(&table.key)).collect::<Vec<_>>();
+
+        let columns = items(Part::Columns);
+        let got: Vec<_> = columns.iter().map(|n| (n.label.to_string(), n.suffix.as_ref().map(|s| s.to_string()), n.pk)).collect();
+        let want: Vec<_> = obj.columns.iter().map(|c| (c.name.clone(), Some(c.data_type.clone()), c.is_pk)).collect();
+        assert_eq!(got, want);
+        assert_eq!(got[0], ("id".to_string(), Some("bigint".to_string()), true), "id bigint PK");
+        assert!(got[1..].iter().all(|(_, _, pk)| !pk), "only id is a PK");
+
+        let labels = |part| items(part).iter().map(|n| n.label.to_string()).collect::<Vec<_>>();
+        assert_eq!(labels(Part::Keys), obj.keys.iter().map(|k| match k {
+            crate::model::Key::Primary { name, .. } | crate::model::Key::Foreign { name, .. } | crate::model::Key::Unique { name, .. } => name.clone(),
+        }).collect::<Vec<_>>());
+        assert_eq!(labels(Part::Indexes), obj.indexes.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 }
