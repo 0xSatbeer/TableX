@@ -573,6 +573,11 @@ impl Render for Shell {
                 this.tabs.cycle(false);
                 this.tab_changed(cx);
             }))
+            .on_modifiers_changed(cx.listener(|this, ev: &ModifiersChangedEvent, _, _| {
+                if !ev.modifiers.control {
+                    this.tabs.commit();
+                }
+            }))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
                 let m = ev.keystroke.modifiers;
                 if let Some(n) = ev.keystroke.key.parse::<usize>().ok().filter(|n| m.control && !m.shift && (1..=9).contains(n)) {
