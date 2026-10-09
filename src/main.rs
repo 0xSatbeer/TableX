@@ -626,8 +626,8 @@ impl Render for Shell {
         v_flex()
             .relative()
             .size_full()
-            .track_focus(&self.focus_handle)
-            .when(self.layout.panel_maximized, |d| d.key_context(PANEL_MAXIMIZED_CONTEXT))
+            // Only while maximized: a tracked root focuses itself on every click on plain chrome.
+            .when(self.layout.panel_maximized, |d| d.track_focus(&self.focus_handle).key_context(PANEL_MAXIMIZED_CONTEXT))
             .bg(theme.background)
             .text_size(theme::UI)
             .text_color(theme.foreground)
@@ -643,11 +643,14 @@ impl Render for Shell {
                 this.layout.toggle_panel_maximize();
                 if this.layout.panel_maximized {
                     window.focus(&this.focus_handle, cx);
+                } else {
+                    this.focus_content = true;
                 }
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &RestorePanel, _, cx| {
                 this.layout.restore_panel();
+                this.focus_content = true;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &MaximizeEditor, _, cx| {
@@ -995,6 +998,8 @@ mod tests {
             cx.simulate_keystrokes("escape");
             assert!(!shell.read_with(&cx, |this, _| this.layout.panel_maximized), "Esc restores (logs_focused={logs_focused})");
             assert_eq!(sizes(&shell, &cx), before, "stored sizes unchanged (logs_focused={logs_focused})");
+            let root = shell.read_with(&cx, |this, _| this.focus_handle.clone());
+            assert!(!cx.update(|window, _| root.is_focused(window)), "content refocused after restore (logs_focused={logs_focused})");
         }
     }
 
