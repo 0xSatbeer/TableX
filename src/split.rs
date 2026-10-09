@@ -31,7 +31,7 @@ impl Split {
 }
 
 pub const EXPLORER: Split = Split { size: px(260.), default: px(260.), min: px(180.), max: |_| px(600.) };
-pub const BOTTOM: Split = Split { size: px(240.), default: px(240.), min: px(80.), max: |h| h };
+pub const BOTTOM: Split = Split { size: px(240.), default: px(240.), min: px(80.), max: |h| h * 0.7 };
 
 #[cfg(test)]
 mod tests {
