@@ -400,8 +400,8 @@ struct HeaderModel {
     pk: bool,
 }
 
-fn header_model(_c: &ColumnMeta) -> HeaderModel {
-    HeaderModel { name: String::new(), data_type: String::new(), pk: false }
+fn header_model(c: &ColumnMeta) -> HeaderModel {
+    HeaderModel { name: c.name.to_string(), data_type: c.data_type.to_string(), pk: c.is_pk }
 }
 
 /// A header cell being dragged to a new display position.
