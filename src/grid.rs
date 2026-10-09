@@ -392,6 +392,18 @@ fn cmp_values(a: &Value, b: &Value) -> Ordering {
 /// Above this the sort belongs to the query (QX-011 passes it to ORDER BY), not the client.
 const CLIENT_SORT_MAX: usize = 100_000;
 
+/// What a header cell shows for one source column.
+#[derive(Debug, PartialEq)]
+struct HeaderModel {
+    name: String,
+    data_type: String,
+    pk: bool,
+}
+
+fn header_model(_c: &ColumnMeta) -> HeaderModel {
+    HeaderModel { name: String::new(), data_type: String::new(), pk: false }
+}
+
 /// A header cell being dragged to a new display position.
 #[derive(Clone)]
 struct DragColumn {
@@ -984,7 +996,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1189,5 +1201,26 @@ mod tests {
         let rows = |r: std::ops::Range<usize>| rs.rows[r].iter().map(|row| row[0..2].to_vec()).collect::<Vec<_>>();
         assert_eq!(tsv(&rs.columns, &rows(0..1)), "null\t\n");
         assert_eq!(tsv(&rs.columns, &rows(3..4)), "multiline\t\"first line\nsecond line\n\tindented third\"\n");
+    }
+
+    fn col(name: &str, ty: &str, pk: bool) -> ColumnMeta {
+        ColumnMeta { name: name.into(), data_type: ty.into(), is_pk: pk }
+    }
+
+    #[test]
+    fn header_model_shows_name_type_and_pk_icon() {
+        let m = |n: &str, t: &str, pk| HeaderModel { name: n.into(), data_type: t.into(), pk };
+        let cases = [
+            (col("id", "bigint", true), m("id", "bigint", true)),
+            (col("email", "text", false), m("email", "text", false)),
+            (col("", "", false), m("", "", false)),
+        ];
+        for (c, want) in cases {
+            assert_eq!(header_model(&c), want);
+        }
+        // The icon belongs to the column: a reordered PK keeps it, and so does a hidden one (the model ignores both).
+        let cols = [col("a", "text", false), col("id", "bigint", true), col("b", "int", false)];
+        let shown: Vec<bool> = [1usize, 0, 2].iter().map(|&s| header_model(&cols[s]).pk).collect();
+        assert_eq!(shown, [true, false, false]);
     }
 }
