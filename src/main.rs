@@ -77,6 +77,13 @@ impl LayoutState {
         }
     }
 
+    /// Starts a drag of `edge` from the panel's drawn size.
+    fn press(&mut self, edge: Edge, at: Point<Pixels>, window: Size<Pixels>) {
+        let extent = if edge == Edge::Explorer { window.width } else { window.height };
+        let start = self.split(edge).shown(extent);
+        self.dragging = Some(Dragging { edge, from: at, start });
+    }
+
     /// Follows the pointer, clamped; going below the minimum only hides on release.
     fn drag_to(&mut self, to: Point<Pixels>, window: Size<Pixels>) {
         let Some(drag) = &self.dragging else { return };
@@ -101,6 +108,8 @@ impl LayoutState {
             }
         }
     }
+
+    fn toggle_explorer(&mut self) {}
 
     fn toggle_maximize(&mut self) {
         match self.maximized_from.take() {
@@ -400,10 +409,7 @@ impl Shell {
                     this.layout.dragging = None;
                     this.layout.split(edge).reset();
                 } else {
-                    let viewport = window.viewport_size();
-                    let extent = if edge == Edge::Explorer { viewport.width } else { viewport.height };
-                    let start = this.layout.split(edge).shown(extent);
-                    this.layout.dragging = Some(Dragging { edge, from: ev.position, start });
+                    this.layout.press(edge, ev.position, window.viewport_size());
                 }
                 cx.notify();
             }))
@@ -650,4 +656,35 @@ fn main() {
             .expect("open window");
             cx.activate(true);
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Edge, LayoutState, split};
+    use gpui_kit::{point, px, size};
+
+    fn layout() -> LayoutState {
+        LayoutState {
+            explorer_visible: true,
+            bottom_visible: true,
+            maximized_from: None,
+            explorer: split::EXPLORER,
+            bottom: split::BOTTOM,
+            dragging: None,
+        }
+    }
+
+    #[test]
+    fn explorer_released_below_min_hides_and_ctrl_b_shows_it_at_the_pre_drag_width() {
+        let window = size(px(1200.), px(800.));
+        let mut l = layout();
+        l.press(Edge::Explorer, point(px(260.), px(300.)), window);
+        l.drag_to(point(px(179.), px(300.)), window);
+        l.release(point(px(179.), px(300.)), window);
+        assert!(!l.explorer_visible, "explorer hidden after release at 179");
+        assert_eq!(l.explorer.size, px(260.), "stored explorer width after release at 179");
+        l.toggle_explorer();
+        assert!(l.explorer_visible, "explorer visible after Ctrl+B");
+        assert_eq!(l.explorer.shown(window.width), px(260.), "explorer width after Ctrl+B");
+    }
 }
