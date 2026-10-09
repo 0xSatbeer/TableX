@@ -47,7 +47,7 @@ fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
 
 /// F2 renames connections only.
 fn can_rename(kind: NodeKind) -> bool {
-    true
+    matches!(kind, NodeKind::Connection(_))
 }
 
 /// An inline rename in progress on a connection row.
