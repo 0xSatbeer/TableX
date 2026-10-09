@@ -99,6 +99,11 @@ fn is_numeric_type(ty: &str) -> bool {
     (ty.starts_with("int") && !ty.starts_with("interval")) || PREFIXES.iter().any(|p| ty.starts_with(p))
 }
 
+/// Digits the row-number gutter must fit: the row count's, but never fewer than 3.
+fn gutter_digits(_: usize) -> usize {
+    0
+}
+
 fn truncate(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
         Some((at, _)) => format!("{}…", &s[..at]),
@@ -1088,7 +1093,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{gutter_digits, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1277,6 +1282,14 @@ mod tests {
         let cases = [(true, "true", CellKind::Bool(true)), (false, "false", CellKind::Bool(false))];
         for (b, text, kind) in cases {
             assert_eq!(format_cell(&Value::Bool(b)), (text.into(), kind));
+        }
+    }
+
+    #[test]
+    fn gutter_fits_the_row_count() {
+        let cases = [(0, 3), (9, 3), (999, 3), (1000, 4), (99_999, 5), (100_000, 6), (999_999, 6), (1_000_000, 7)];
+        for (rows, digits) in cases {
+            assert_eq!(gutter_digits(rows), digits, "{rows} rows");
         }
     }
 
