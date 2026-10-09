@@ -92,6 +92,11 @@ enum CellKind {
     Text,
 }
 
+/// Column types whose values align right, so a NULL in them lines up with the numbers.
+fn is_numeric_type(_: &str) -> bool {
+    false
+}
+
 fn truncate(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
         Some((at, _)) => format!("{}…", &s[..at]),
@@ -1080,7 +1085,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1239,6 +1244,28 @@ mod tests {
         ];
         for (col, hidden, expected) in cases {
             assert_eq!(band_cols(col, &hidden), expected, "band {col:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[test]
+    fn null_aligns_with_its_column() {
+        let cases = [
+            ("bigint", true),
+            ("integer", true),
+            ("int4", true),
+            ("smallint", true),
+            ("numeric(12,2)", true),
+            ("double precision", true),
+            ("real", true),
+            ("text", false),
+            ("timestamptz", false),
+            ("boolean", false),
+            ("", false),
+            ("interval", false),
+            ("point", false),
+        ];
+        for (ty, right) in cases {
+            assert_eq!(is_numeric_type(ty), right, "type {ty:?}");
         }
     }
 
