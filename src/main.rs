@@ -355,7 +355,8 @@ impl Shell {
     fn overflow_search_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity();
         let search = self.overflow_search.clone();
-        let rows: Vec<_> = self.tabs.tabs.iter().enumerate().map(|(ix, t)| (ix, t.title.clone())).collect();
+        let query = search.read(cx).value();
+        let rows: Vec<_> = tabs::match_tabs(&self.tabs.tabs, &query).into_iter().map(|ix| (ix, self.tabs.tabs[ix].title.clone())).collect();
         let active_ix = self.tabs.active;
         Popover::new("all-tabs-popover")
             .anchor(Anchor::TopRight)
