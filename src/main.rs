@@ -175,6 +175,8 @@ struct Shell {
     theme: theme::ThemeChoice,
     /// Themes loaded from the `UserThemeDir`, listed under the built-ins.
     user_themes: Vec<Rc<gpui_kit::component::theme::ThemeConfig>>,
+    /// Problems last notified for the `UserThemeDir`.
+    user_theme_errors: Vec<String>,
     /// Overflow list: open state and its search field (shown above `tabs::SEARCH_MIN_TABS` tabs).
     overflow_open: bool,
     overflow_search: Entity<InputState>,
@@ -255,6 +257,7 @@ impl Shell {
             focus_content: false,
             theme: theme::ThemeChoice::default(),
             user_themes: Vec::new(),
+            user_theme_errors: Vec::new(),
             _appearance: cx.observe_window_appearance(window, |this, window, cx| this.theme.apply(&this.user_themes, window, cx)),
         };
         this.tab_changed(cx);
@@ -298,17 +301,45 @@ impl Shell {
 
     /// Loads user themes from `dir` and reloads them when its files change. Never writes to `dir`.
     fn watch_user_themes(&mut self, dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        // shortcut: polls the dir's listing once a second instead of a file watcher. gpui-kit's
+        // `ThemeRegistry::watch_dir` creates the dir and drops our built-ins on reload, and `notify`
+        // isn't a dependency; switch to a watcher if polling ever shows up in a profile.
+        let mut stamp = theme::user_theme_stamp(&dir);
         self.reload_user_themes(&dir, window, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_secs(1)).await;
+                let now = theme::user_theme_stamp(&dir);
+                let changed = now != stamp;
+                stamp = now;
+                let alive = this.update_in(cx, |this, window, cx| {
+                    if changed {
+                        this.reload_user_themes(&dir, window, cx);
+                    }
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// Lists the themes in `dir`, notifies about skipped files and re-applies the active theme.
     fn reload_user_themes(&mut self, dir: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
         use gpui_kit::component::{WindowExt as _, notification::Notification};
         let (themes, errors) = theme::load_user_themes(dir);
-        for error in errors {
-            window.push_notification(Notification::error(error), cx);
+        // Only new problems: an unrelated edit shouldn't repeat every notification.
+        for error in errors.iter().filter(|e| !self.user_theme_errors.contains(e)) {
+            window.push_notification(Notification::error(error.clone()), cx);
         }
+        self.user_theme_errors = errors;
         self.user_themes = themes;
+        if let theme::ThemeChoice::User(name) = &self.theme
+            && !self.user_themes.iter().any(|t| t.name == *name)
+        {
+            self.theme = theme::ThemeChoice::Dark;
+        }
         self.theme.apply(&self.user_themes, window, cx);
         cx.notify();
     }
@@ -882,7 +913,17 @@ fn main() {
                 window_min_size: Some(size(px(900.), px(600.))),
                 ..TitleBar::window_options()
             };
-            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| Shell::new(window, cx)))
+            // No home or config dir: built-in themes only.
+            let user_themes = theme::UserThemeDir::resolve(|k| std::env::var_os(k));
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| {
+                    let mut shell = Shell::new(window, cx);
+                    if let Some(themes) = user_themes {
+                        shell.watch_user_themes(themes.dir, window, cx);
+                    }
+                    shell
+                })
+            })
             .expect("open window");
             cx.activate(true);
         });

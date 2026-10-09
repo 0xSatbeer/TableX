@@ -147,6 +147,22 @@ pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
     (themes, errors)
 }
 
+/// Changes whenever a file in `dir` is added, removed or modified; empty when `dir` is missing.
+pub fn user_theme_stamp(dir: &Path) -> Vec<(OsString, Option<std::time::SystemTime>, u64)> {
+    let mut stamp: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let e = e.ok()?;
+            // Follows symlinks, so an edit to a dotfiles-managed theme counts too.
+            let meta = std::fs::metadata(e.path()).ok();
+            Some((e.file_name(), meta.as_ref().and_then(|m| m.modified().ok()), meta.map_or(0, |m| m.len())))
+        })
+        .collect();
+    stamp.sort();
+    stamp
+}
+
 /// The user's theme setting. `System` follows the OS light/dark preference live.
 /// `User` names a theme loaded from the `UserThemeDir`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
