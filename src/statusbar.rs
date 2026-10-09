@@ -113,20 +113,31 @@ pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Valu
         return None;
     }
     let plural = |n: usize, one: &str| if n == 1 { format!("{n} {one}") } else { format!("{n} {one}s") };
-    let (mut count, mut numeric, mut sum) = (0, 0, 0);
+    // Ints sum exactly; floats join only when there is one.
+    let (mut count, mut numeric, mut ints, mut floats) = (0, 0, 0, None);
     for v in values {
         match v {
             Value::Null => continue,
-            Value::Int(n) => (numeric, sum) = (numeric + 1, sum + n),
+            Value::Int(n) => (numeric, ints) = (numeric + 1, ints + n),
+            Value::Float(x) => (numeric, floats) = (numeric + 1, Some(floats.unwrap_or(0.0) + x)),
             _ => {}
         }
         count += 1;
     }
     let mut out = format!("{} × {} · count {count}", plural(rows, "row"), plural(cols, "col"));
     if numeric > 0 {
-        out += &format!(" · sum {sum} · avg {}", sum as f64 / numeric as f64);
+        let total = ints as f64 + floats.unwrap_or(0.0);
+        let sum = if floats.is_some() { decimal(total) } else { ints.to_string() };
+        out += &format!(" · sum {sum} · avg {}", decimal(total / numeric as f64));
     }
     Some(out)
+}
+
+/// At most 4 decimals, trailing zeros trimmed: `0.75`, `0.3333`, `4`.
+fn decimal(x: f64) -> String {
+    let s = format!("{x:.4}");
+    let s = if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.') } else { &s };
+    if s == "-0" { "0".into() } else { s.into() }
 }
 
 impl Render for StatusBar {
