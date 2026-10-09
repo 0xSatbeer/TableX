@@ -296,6 +296,23 @@ impl Shell {
         cx.notify();
     }
 
+    /// Loads user themes from `dir` and reloads them when its files change. Never writes to `dir`.
+    fn watch_user_themes(&mut self, dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.reload_user_themes(&dir, window, cx);
+    }
+
+    /// Lists the themes in `dir`, notifies about skipped files and re-applies the active theme.
+    fn reload_user_themes(&mut self, dir: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::{WindowExt as _, notification::Notification};
+        let (themes, errors) = theme::load_user_themes(dir);
+        for error in errors {
+            window.push_notification(Notification::error(error), cx);
+        }
+        self.user_themes = themes;
+        self.theme.apply(&self.user_themes, window, cx);
+        cx.notify();
+    }
+
     /// ⚙ in the titlebar. Holds the theme until there is a settings view (QX-020);
     /// `Ctrl+K Ctrl+T` still cycles it from the keyboard.
     fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1072,6 +1089,53 @@ mod tests {
         });
         cx.simulate_click(bottom_middle, Default::default());
         assert!(cx.update(|window, _| editor.is_focused(window)), "a click on non-focusable chrome must not steal focus");
+    }
+
+    /// Edits to the active user theme's file apply without a restart; the theme dir is only read.
+    #[gpui_kit::test]
+    fn editing_the_active_user_theme_applies_without_restart(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, component::ActiveTheme as _};
+        let theme_json = |bg: &str| format!(r##"{{"name": "Nord", "themes": [{{"name": "Nord", "mode": "dark", "colors": {{"background": "{bg}"}}}}]}}"##);
+        let dir = crate::theme::tests::test_dir("watch");
+        let missing = crate::theme::tests::test_dir("watch-missing").join("themes");
+        std::fs::write(dir.join("nord.json"), theme_json("#2E3440")).unwrap();
+        cx.update(|cx| gpui_kit::init(cx));
+        let open = |dir: std::path::PathBuf, cx: &mut gpui_kit::TestAppContext| {
+            let (window, shell) = cx.update(|cx| {
+                gpui_kit::open_window(Default::default(), cx, |window, cx| {
+                    cx.new(|cx| {
+                        let mut shell = super::Shell::new(window, cx);
+                        shell.watch_user_themes(dir, window, cx);
+                        shell
+                    })
+                })
+                .expect("open test window")
+            });
+            cx.run_until_parked();
+            (window, shell)
+        };
+        let (window, shell) = open(dir.clone(), cx);
+        let mut vcx = gpui_kit::VisualTestContext::from_window(window, cx);
+        vcx.update(|window, cx| {
+            shell.update(cx, |this, cx| {
+                this.theme = crate::theme::ThemeChoice::User("Nord".into());
+                this.theme.apply(&this.user_themes, window, cx);
+            })
+        });
+        let background = |vcx: &mut gpui_kit::VisualTestContext| vcx.update(|_, cx| cx.theme().background);
+        assert_eq!(background(&mut vcx), gpui_kit::rgb(0x2E3440).into(), "Nord applied");
+
+        std::fs::write(dir.join("nord.json"), theme_json("#3B4252")).unwrap();
+        vcx.executor().advance_clock(std::time::Duration::from_secs(5));
+        vcx.run_until_parked();
+        assert_eq!(background(&mut vcx), gpui_kit::rgb(0x3B4252).into(), "edited Nord applied without restart");
+        let files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(files, ["nord.json"], "the theme dir is only read");
+
+        open(missing.clone(), cx);
+        cx.executor().advance_clock(std::time::Duration::from_secs(5));
+        cx.run_until_parked();
+        assert!(!missing.exists(), "a missing theme dir is not created");
     }
 
     /// A Shell with 11 tabs and the overflow list open, its search field focused.
