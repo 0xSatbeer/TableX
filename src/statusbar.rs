@@ -113,15 +113,20 @@ pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Valu
         return None;
     }
     let plural = |n: usize, one: &str| if n == 1 { format!("{n} {one}") } else { format!("{n} {one}s") };
-    let (mut count, mut sum) = (0, 0);
+    let (mut count, mut numeric, mut sum) = (0, 0, 0);
     for v in values {
-        if let Value::Int(n) = v {
-            count += 1;
-            sum += n;
+        match v {
+            Value::Null => continue,
+            Value::Int(n) => (numeric, sum) = (numeric + 1, sum + n),
+            _ => {}
         }
+        count += 1;
     }
-    let avg = sum as f64 / count as f64;
-    Some(format!("{} × {} · count {count} · sum {sum} · avg {avg}", plural(rows, "row"), plural(cols, "col")))
+    let mut out = format!("{} × {} · count {count}", plural(rows, "row"), plural(cols, "col"));
+    if numeric > 0 {
+        out += &format!(" · sum {sum} · avg {}", sum as f64 / numeric as f64);
+    }
+    Some(out)
 }
 
 impl Render for StatusBar {
