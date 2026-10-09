@@ -219,6 +219,20 @@ mod tests {
     }
 
     #[test]
+    fn nulls_are_not_counted_and_non_numeric_cells_have_no_sum() {
+        let text = |s: &str| Text(s.into());
+        check([
+            (3, 1, vec![Int(3), Null, Int(4)], "3 rows × 1 col · count 2 · sum 7 · avg 3.5"),
+            (2, 1, vec![text("a"), text("b")], "2 rows × 1 col · count 2"),
+            (2, 1, vec![Null, Null], "2 rows × 1 col · count 0"),
+            // Non-numeric cells count, but sum and avg cover the numeric ones only.
+            (3, 1, vec![text("a"), Int(2), Int(4)], "3 rows × 1 col · count 3 · sum 6 · avg 3"),
+            (2, 1, vec![Bool(true), Bool(false)], "2 rows × 1 col · count 2"),
+            (1, 3, vec![Null, Int(5), Null], "1 row × 3 cols · count 1 · sum 5 · avg 5"),
+        ]);
+    }
+
+    #[test]
     fn reads_private_memory_from_proc_status() {
         let status = "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
         assert_eq!(super::rss_anon_mb(status), Some(35));
