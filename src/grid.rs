@@ -184,15 +184,16 @@ fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: us
     Some(match key {
         "up" => (r.saturating_sub(1), c),
         "down" => ((r + 1).min(rows - 1), c),
-        "left" => (r, step(c, false)),
-        "right" => (r, step(c, true)),
+        "left" => (r, c.saturating_sub(1)),
+        "right" => (r, (c + 1).min(cols - 1)),
         "pageup" => (r.saturating_sub(page.max(1)), c),
         "pagedown" => ((r + page.max(1)).min(rows - 1), c),
         "home" if secondary => (0, first),
         "end" if secondary => (rows - 1, last),
-        "home" => (r, first),
-        "end" => (r, last),
-        "tab" => (r, step(c, !shift)),
+        "home" => (r, 0),
+        "end" => (r, cols - 1),
+        "tab" if shift => (r, c.saturating_sub(1)),
+        "tab" => (r, (c + 1).min(cols - 1)),
         _ => return None,
     })
 }
@@ -1090,6 +1091,25 @@ mod tests {
         ];
         for (key, hidden, from, expected) in cases {
             assert_eq!(nav(key, true, false, from, 10, &hidden, 5), Some(expected), "Ctrl+{key} from {from:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[test]
+    fn horizontal_keys_skip_hidden_columns() {
+        // (key, shift, hidden in display order, from, expected head) over 10 rows
+        let cases: [(&str, bool, [bool; 4], (usize, usize), (usize, usize)); 9] = [
+            ("right", false, [false, true, false, false], (3, 0), (3, 2)),
+            ("right", false, [false, false, true, true], (3, 1), (3, 1)), // nothing visible to the right
+            ("left", false, [false, true, false, false], (3, 2), (3, 0)),
+            ("left", false, [true, true, false, false], (3, 2), (3, 2)), // nothing visible to the left
+            ("tab", false, [false, false, true, false], (3, 1), (3, 3)),
+            ("tab", true, [false, false, true, false], (3, 3), (3, 1)),
+            ("home", false, [true, false, false, false], (3, 3), (3, 1)),
+            ("end", false, [false, false, false, true], (3, 0), (3, 2)),
+            ("end", false, [false, true, true, true], (3, 0), (3, 0)),
+        ];
+        for (key, shift, hidden, from, expected) in cases {
+            assert_eq!(nav(key, false, shift, from, 10, &hidden, 5), Some(expected), "{key} shift={shift} from {from:?}, hidden {hidden:?}");
         }
     }
 
