@@ -45,6 +45,11 @@ fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
     }
 }
 
+/// F2 renames connections only.
+fn can_rename(kind: NodeKind) -> bool {
+    true
+}
+
 /// An inline rename in progress on a connection row.
 struct Rename {
     conn: usize,
@@ -651,8 +656,8 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey};
-    use crate::{mock, model::{ConnectionStatus, ObjectKind}};
+    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename};
+    use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
     fn flatten_follows_expanded_set() {
@@ -758,5 +763,23 @@ mod tests {
         assert_eq!(rn.error, None);
         // Esc cancels.
         assert_eq!(rn.key("escape", None, &others), RenameKey::Cancel);
+    }
+
+    #[test]
+    fn f2_renames_connections_only() {
+        let cases = [
+            (NodeKind::Connection(DbKind::Postgres), true),
+            (NodeKind::Connection(DbKind::Sqlite), true),
+            (NodeKind::Database, false),
+            (NodeKind::Schema, false),
+            (NodeKind::Group(ObjectKind::Table), false),
+            (NodeKind::Object(ObjectKind::Table), false),
+            (NodeKind::Object(ObjectKind::View), false),
+            (NodeKind::Loading, false),
+            (NodeKind::ConnError, false),
+        ];
+        for (kind, want) in cases {
+            assert_eq!(can_rename(kind), want, "{kind:?}");
+        }
     }
 }
