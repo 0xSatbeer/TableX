@@ -81,6 +81,17 @@ impl<C> Tabs<C> {
             self.tabs.push(tab);
             self.active = self.tabs.len() - 1;
         }
+        self.touch();
+    }
+
+    /// Moves the active tab to the MRU front and ends any Ctrl+Tab preview.
+    fn touch(&mut self) {
+        self.cycling = None;
+        if let Some(key) = self.tabs.get(self.active).map(|t| t.key.clone()) {
+            // Also drops keys of tabs no longer open (a preview replaced in place).
+            self.mru.retain(|k| *k != key && self.tabs.iter().any(|t| t.key == *k));
+            self.mru.insert(0, key);
+        }
     }
 
     pub fn close(&mut self, ix: usize) {
@@ -115,6 +126,7 @@ impl<C> Tabs<C> {
         let at = self.tabs.iter().take_while(|t| t.pinned).count();
         self.tabs.insert(at, tab);
         self.active = at;
+        self.touch();
     }
 
     /// Closes every unpinned tab whose index `drop` accepts, keeping the active one active if it
@@ -141,10 +153,8 @@ impl<C> Tabs<C> {
 
     /// Ctrl released: the previewed tab becomes the most recently used.
     pub fn commit(&mut self) {
-        if self.cycling.take().is_some() {
-            let key = self.tabs[self.active].key.clone();
-            self.mru.retain(|k| *k != key);
-            self.mru.insert(0, key);
+        if self.cycling.is_some() {
+            self.touch();
         }
     }
 
@@ -166,6 +176,7 @@ impl<C> Tabs<C> {
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {
             self.active = ix;
+            self.touch();
         }
     }
 }
