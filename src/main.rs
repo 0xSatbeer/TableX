@@ -288,7 +288,19 @@ impl Shell {
                     .overflow_x_scroll()
                     .track_scroll(&self.tab_scroll)
                     .children(tabs)
-                    .child(div().flex_1().h_full().border_b_1().border_color(theme.border)),
+                    .child(
+                        div()
+                            .id("tabs-end")
+                            .flex_1()
+                            .h_full()
+                            .border_b_1()
+                            .border_color(theme.border)
+                            .drag_over::<TabDrag>(|d, _, _, cx| d.border_l_2().border_color(cx.theme().primary))
+                            .on_drop(cx.listener(|this, drag: &TabDrag, _, cx| {
+                                this.tabs.move_tab(drag.ix, this.tabs.tabs.len());
+                                this.tab_changed(cx);
+                            })),
+                    ),
             )
             .child(
                 h_flex().flex_none().h_full().px(theme::SPACE_4).border_l_1().border_b_1().border_color(theme.border).child(
@@ -350,7 +362,16 @@ impl Shell {
             .when_some(t.origin.as_ref(), |d, o| {
                 d.child(div().absolute().top_0().left_0().right_0().h(theme::STRIPE).bg(theme::connection_color(o.color, theme)))
             })
-            .when_some(t.tooltip.clone(), |d, text| d.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx)))
+            .tooltip({
+                let text = SharedString::from(tabs::tooltip_text(&t.title, t.origin.as_ref()));
+                move |window, cx| Tooltip::new(text.clone()).build(window, cx)
+            })
+            .on_drag(TabDrag { ix, title: t.title.clone() }, |drag, _, _, cx| cx.new(|_| drag.clone()))
+            .drag_over::<TabDrag>(|d, _, _, cx| d.border_l_2().border_color(cx.theme().primary))
+            .on_drop(cx.listener(move |this, drag: &TabDrag, _, cx| {
+                this.tabs.move_tab(drag.ix, ix);
+                this.tab_changed(cx);
+            }))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.tabs.activate(ix);
                 this.tab_changed(cx);
@@ -396,6 +417,20 @@ impl Shell {
                 )
             })
             .into_any_element()
+    }
+}
+
+/// Drag payload of a tab; also its drag ghost. Dropping on tab `j` means "before `j`".
+#[derive(Clone)]
+struct TabDrag {
+    ix: usize,
+    title: SharedString,
+}
+
+impl Render for TabDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div().px(theme::SPACE_12).py(theme::SPACE_6).bg(theme.tab_active).border_1().border_color(theme.border).text_size(theme::UI_SM).child(self.title.clone())
     }
 }
 
