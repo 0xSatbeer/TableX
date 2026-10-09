@@ -77,4 +77,18 @@ mod tests {
             assert_eq!(split.size, px(expected), "{name} double-click at {at}");
         }
     }
+
+    #[test]
+    fn bottom_drag_at_window_height_800() {
+        let b = BOTTOM;
+        let max = (b.max)(px(800.));
+        for (to, expected) in [
+            (79., Drag::Hidden(px(240.))),
+            (80., Drag::Size(px(80.))),
+            (560., Drag::Size(px(560.))),
+            (600., Drag::Size(px(560.))),
+        ] {
+            assert_eq!(resolve_drag(px(to), b.min, max, b.size), expected, "bottom drag to {to}");
+        }
+    }
 }
