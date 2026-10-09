@@ -2,14 +2,12 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon,
     button::{Button, ButtonVariants as _}, IconName, Sizable as _, TitleBar, h_flex,
     input::{Editor, EditorState},
-    resizable::{ResizableState, h_resizable, resizable_panel, v_resizable},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::*;
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::base::{ResizeHandleRenderer, ResizeHandleState};
 
 use std::rc::Rc;
 
@@ -34,33 +32,76 @@ enum TabContent {
     Console,
 }
 
-/// 1px hairline that turns accent while dragged. Base owns the hit area, cursor and drag.
-fn splitter() -> ResizeHandleRenderer {
-    Rc::new(|handle, _, cx| {
-        let dragging = handle.state() == ResizeHandleState::Dragging;
-        let line = div().flex_none().bg(if dragging { cx.theme().primary } else { cx.theme().border });
-        Some(match handle.axis() {
-            Axis::Horizontal => line.w(px(1.)).h_full(),
-            Axis::Vertical => line.h(px(1.)).w_full(),
-        }
-        .into_any_element())
-    })
+/// Grab band of a splitter on each side of its 1px line.
+const SPLITTER_PAD: Pixels = px(4.);
+
+/// The panel edge a splitter moves.
+#[derive(Clone, Copy, PartialEq)]
+enum Edge {
+    Explorer,
+    Bottom,
 }
 
-/// Panel visibility and split sizes in one place, so QX-020 can persist it.
-/// Hidden panels keep their size because the split state is not touched while hidden.
+/// A splitter drag in progress: where the pointer went down and the panel size at that moment.
+struct Dragging {
+    edge: Edge,
+    from: Point<Pixels>,
+    start: Pixels,
+}
+
+/// Panel visibility and pixel sizes in one place, so QX-020 can persist it.
+/// Hidden panels keep their size, so showing one again brings it back as it was.
 struct LayoutState {
     explorer_visible: bool,
     bottom_visible: bool,
     /// Visibility of (explorer, bottom) from before `MaximizeEditor`, restored by the next one.
     maximized_from: Option<(bool, bool)>,
-    /// [explorer, editor column]
-    main_split: Entity<ResizableState>,
-    /// [editor, bottom panel]
-    editor_split: Entity<ResizableState>,
+    explorer: split::Split,
+    bottom: split::Split,
+    dragging: Option<Dragging>,
 }
 
 impl LayoutState {
+    fn split(&mut self, edge: Edge) -> &mut split::Split {
+        match edge {
+            Edge::Explorer => &mut self.explorer,
+            Edge::Bottom => &mut self.bottom,
+        }
+    }
+
+    /// The size `drag` asks for with the pointer at `to`, and the window extent along its axis.
+    fn requested(drag: &Dragging, to: Point<Pixels>, window: Size<Pixels>) -> (Pixels, Pixels) {
+        match drag.edge {
+            Edge::Explorer => (drag.start + (to.x - drag.from.x), window.width),
+            Edge::Bottom => (drag.start - (to.y - drag.from.y), window.height),
+        }
+    }
+
+    /// Follows the pointer, clamped; going below the minimum only hides on release.
+    fn drag_to(&mut self, to: Point<Pixels>, window: Size<Pixels>) {
+        let Some(drag) = &self.dragging else { return };
+        let (size, extent) = Self::requested(drag, to, window);
+        let edge = drag.edge;
+        let split = self.split(edge);
+        split.size = size.clamp(split.min, (split.max)(extent));
+    }
+
+    fn release(&mut self, at: Point<Pixels>, window: Size<Pixels>) {
+        let Some(drag) = self.dragging.take() else { return };
+        let (size, extent) = Self::requested(&drag, at, window);
+        let split = self.split(drag.edge);
+        match split::resolve_drag(size, split.min, (split.max)(extent), drag.start) {
+            split::Drag::Size(size) => split.size = size,
+            split::Drag::Hidden(size) => {
+                split.size = size;
+                match drag.edge {
+                    Edge::Explorer => self.explorer_visible = false,
+                    Edge::Bottom => self.bottom_visible = false,
+                }
+            }
+        }
+    }
+
     fn toggle_maximize(&mut self) {
         match self.maximized_from.take() {
             Some((explorer, bottom)) => (self.explorer_visible, self.bottom_visible) = (explorer, bottom),
@@ -133,8 +174,9 @@ impl Shell {
                 explorer_visible: true,
                 bottom_visible: true,
                 maximized_from: None,
-                main_split: cx.new(|_| ResizableState::default()),
-                editor_split: cx.new(|_| ResizableState::default()),
+                explorer: split::EXPLORER,
+                bottom: split::BOTTOM,
+                dragging: None,
             },
             status_bar: cx.new(|cx| statusbar::StatusBar::new(window, cx)),
             bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace, window, cx)),
@@ -337,6 +379,37 @@ impl Shell {
     }
 }
 
+impl Shell {
+    /// Our own handle over the panel's edge, drawn after the panels so its band sits on top.
+    /// `size` is the panel's drawn size; the 1px line covers the panel's own edge pixel.
+    fn splitter(&self, edge: Edge, size: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let dragging = self.layout.dragging.as_ref().is_some_and(|d| d.edge == edge);
+        let offset = size - px(1.) - SPLITTER_PAD;
+        let line = div().flex_none().bg(if dragging { theme.primary } else { theme.border });
+        div()
+            .absolute()
+            .occlude()
+            .map(|d| match edge {
+                Edge::Explorer => d.top_0().h_full().left(offset).px(SPLITTER_PAD).cursor_col_resize().child(line.w(px(1.)).h_full()),
+                Edge::Bottom => d.left_0().w_full().bottom(offset).py(SPLITTER_PAD).cursor_row_resize().child(line.h(px(1.)).w_full()),
+            })
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                if ev.click_count >= 2 {
+                    this.layout.dragging = None;
+                    this.layout.split(edge).reset();
+                } else {
+                    let viewport = window.viewport_size();
+                    let extent = if edge == Edge::Explorer { viewport.width } else { viewport.height };
+                    let start = this.layout.split(edge).shown(extent);
+                    this.layout.dragging = Some(Dragging { edge, from: ev.position, start });
+                }
+                cx.notify();
+            }))
+    }
+}
+
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // A vertical wheel scrolls the tab strip sideways, like VS Code.
@@ -384,6 +457,7 @@ impl Render for Shell {
         };
 
         v_flex()
+            .relative()
             .size_full()
             .bg(theme.background)
             .text_size(theme::UI)
@@ -491,37 +565,52 @@ impl Render for Shell {
             )
             .child(div().flex_1().min_h_0().map(|main| if self.gallery_visible {
                 main.child(gallery::gallery(cx))
-            } else { main.child(
-                h_resizable("main")
-                    .with_state(&self.layout.main_split)
-                    .with_handle_appearance(splitter())
-                    .child(
-                        resizable_panel()
-                            .visible(self.layout.explorer_visible)
-                            .size(px(260.))
-                            .size_range(px(180.)..px(600.))
-                            .flex_none()
-                            .child(self.explorer.clone()),
-                    )
-                    .child(
-                        resizable_panel().child(
-                            v_resizable("editor-and-panel")
-                                .with_state(&self.layout.editor_split)
-                                .with_handle_appearance(splitter())
-                                .child(resizable_panel().child(v_flex().size_full().child(tabs).child(content)))
-                                .child(
-                                    resizable_panel()
-                                        .visible(self.layout.bottom_visible)
-                                        .size(px(240.))
-                                        // ponytail: 70% of the window, not of the editor column; close enough at the 600px minimum
-                                        .size_range(px(80.)..window.viewport_size().height * 0.7)
-                                        .flex_none()
-                                        .child(self.bottom_panel.clone()),
-                                ),
-                        ),
-                    ),
-            )}))
+            } else {
+                let viewport = window.viewport_size();
+                let explorer_w = self.layout.explorer.shown(viewport.width);
+                let bottom_h = self.layout.bottom.shown(viewport.height);
+                main.child(
+                    h_flex()
+                        .relative()
+                        .size_full()
+                        .when(self.layout.explorer_visible, |d| {
+                            d.child(div().flex_none().h_full().w(explorer_w).overflow_hidden().child(self.explorer.clone()))
+                        })
+                        .child(
+                            v_flex()
+                                .relative()
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .child(div().flex_1().min_h_0().overflow_hidden().child(v_flex().size_full().child(tabs).child(content)))
+                                .when(self.layout.bottom_visible, |d| {
+                                    d.child(div().flex_none().w_full().h(bottom_h).overflow_hidden().child(self.bottom_panel.clone()))
+                                        .child(self.splitter(Edge::Bottom, bottom_h, cx))
+                                }),
+                        )
+                        .when(self.layout.explorer_visible, |d| d.child(self.splitter(Edge::Explorer, explorer_w, cx))),
+                )
+            }))
             .child(self.status_bar.clone())
+            // While a splitter is dragged, one layer over everything takes the pointer, so the
+            // panels underneath neither react nor swap the cursor.
+            .when_some(self.layout.dragging.as_ref().map(|d| d.edge), |d, edge| {
+                d.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .occlude()
+                        .map(|d| if edge == Edge::Explorer { d.cursor_col_resize() } else { d.cursor_row_resize() })
+                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
+                            this.layout.drag_to(ev.position, window.viewport_size());
+                            cx.notify();
+                        }))
+                        .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, window, cx| {
+                            this.layout.release(ev.position, window.viewport_size());
+                            cx.notify();
+                        })),
+                )
+            })
     }
 }
 
