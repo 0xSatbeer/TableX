@@ -47,6 +47,19 @@ pub fn match_tabs<C>(tabs: &[EditorTab<C>], query: &str) -> Vec<usize> {
     (0..tabs.len()).filter(|&ix| hit(&tabs[ix].title) || tabs[ix].origin.as_ref().is_some_and(|o| hit(&o.path))).collect()
 }
 
+/// Shown in the overflow list when `match_tabs` finds nothing.
+pub const NO_TABS_MATCH: &str = "No tabs match";
+
+/// The overflow list's empty state: `NO_TABS_MATCH` when `query` matches no tab.
+pub fn empty_state<C>(_tabs: &[EditorTab<C>], _query: &str) -> Option<&'static str> {
+    None
+}
+
+/// The tab Enter activates in the overflow search.
+pub fn first_match<C>(_tabs: &[EditorTab<C>], _query: &str) -> Option<usize> {
+    None
+}
+
 pub struct EditorTab<C> {
     /// Identity: opening the same key again activates the existing tab.
     pub key: SharedString,
@@ -527,5 +540,23 @@ mod tests {
         for (query, want) in [("PUBLIC", vec![0]), ("public", vec![0]), ("app_db", vec![0, 1]), ("prod-pg › app_db › audit", vec![1]), ("sample", vec![])] {
             assert_eq!(super::match_tabs(&tabs, query), want, "query {query:?}");
         }
+    }
+
+    #[test]
+    fn overflow_no_match_is_labelled() {
+        let tabs = [titled("orders"), titled("users"), titled("ord_items")];
+        for (query, want) in [("zzz", Some("No tabs match")), ("ord", None), ("", None)] {
+            assert_eq!(super::empty_state(&tabs, query), want, "query {query:?}");
+        }
+        assert_eq!(super::empty_state::<()>(&[], ""), Some("No tabs match"));
+    }
+
+    #[test]
+    fn overflow_enter_picks_first_match() {
+        let tabs = [titled("orders"), titled("users"), titled("ord_items")];
+        for (query, want) in [("ord", Some(0)), ("ite", Some(2)), ("", Some(0)), ("zzz", None)] {
+            assert_eq!(super::first_match(&tabs, query), want, "query {query:?}");
+        }
+        assert_eq!(super::first_match::<()>(&[], ""), None);
     }
 }
