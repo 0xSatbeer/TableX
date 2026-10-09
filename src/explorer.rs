@@ -96,7 +96,8 @@ enum KeyRoute {
     FocusFirstMatch,
 }
 
-fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, field_empty: bool, has_match: bool, renaming: bool) -> KeyRoute {
+fn route_key(focus: Focus, key: &str, key_char: Option<&str>, m: Modifiers, field_empty: bool, has_match: impl FnOnce() -> bool, renaming: bool) -> KeyRoute {
+    let has_match = has_match(); // STUB (red only): eager
     if focus == Focus::Field {
         return match key {
             "escape" if field_empty => KeyRoute::FocusTree,
@@ -600,7 +601,7 @@ impl Explorer {
 
     /// Esc / Down while the field has focus; runs in the capture phase so the input never sees them.
     fn on_field_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let route = route_key(Focus::Field, &ev.keystroke.key, None, ev.keystroke.modifiers, self.filter.is_empty(), first_match(&self.nodes, &self.filter).is_some(), false);
+        let route = route_key(Focus::Field, &ev.keystroke.key, None, ev.keystroke.modifiers, self.filter.is_empty(), || first_match(&self.nodes, &self.filter).is_some(), false);
         match route {
             KeyRoute::ClearField => self.put_filter(String::new(), window, cx),
             KeyRoute::FocusTree => window.focus(&self.focus, cx),
@@ -690,7 +691,7 @@ impl Explorer {
             }
             return;
         }
-        let route = route_key(Focus::Tree, &ev.keystroke.key, ev.keystroke.key_char.as_deref(), m, self.filter.is_empty(), true, false);
+        let route = route_key(Focus::Tree, &ev.keystroke.key, ev.keystroke.key_char.as_deref(), m, self.filter.is_empty(), || true, false);
         match route {
             KeyRoute::ToField(ch) => {
                 self.put_filter(format!("{}{ch}", self.filter), window, cx);
@@ -1339,7 +1340,7 @@ mod tests {
             ("escape", None, M::none(), true, false, Pass),
         ];
         for (key, key_char, m, empty, renaming, want) in cases {
-            assert_eq!(route_key(Focus::Tree, key, key_char, m, empty, true, renaming), want, "tree {key:?} {key_char:?} {m:?} empty={empty} renaming={renaming}");
+            assert_eq!(route_key(Focus::Tree, key, key_char, m, empty, || true, renaming), want, "tree {key:?} {key_char:?} {m:?} empty={empty} renaming={renaming}");
         }
     }
 
@@ -1361,12 +1362,16 @@ mod tests {
             ("backspace", M::none(), false, true, Pass),
         ];
         for (key, m, empty, has_match, want) in cases {
-            assert_eq!(route_key(Focus::Field, key, Some("x").filter(|_| key == "u"), m, empty, has_match, false), want, "field {key:?} empty={empty} match={has_match}");
+            assert_eq!(route_key(Focus::Field, key, Some("x").filter(|_| key == "u"), m, empty, || has_match, false), want, "field {key:?} empty={empty} match={has_match}");
+        }
+        // Only "down" needs the (costly) match scan.
+        for key in ["escape", "u", "backspace", "left"] {
+            route_key(Focus::Field, key, None, M::none(), false, || panic!("{key:?} must not compute first_match"), false);
         }
         // Esc twice: first clears, second leaves for the tree.
         let (mut text, mut seq) = ("ord".to_string(), vec![]);
         for _ in 0..2 {
-            let r = route_key(Focus::Field, "escape", None, M::none(), text.is_empty(), true, false);
+            let r = route_key(Focus::Field, "escape", None, M::none(), text.is_empty(), || true, false);
             if r == ClearField {
                 text.clear();
             }
@@ -1374,7 +1379,7 @@ mod tests {
         }
         assert_eq!(seq, vec![ClearField, FocusTree]);
         // F2 rename in progress keeps its keys even if Esc reaches the router.
-        assert_eq!(route_key(Focus::Tree, "escape", None, M::none(), false, true, true), Pass);
+        assert_eq!(route_key(Focus::Tree, "escape", None, M::none(), false, || true, true), Pass);
     }
 
     #[test]
