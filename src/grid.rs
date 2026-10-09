@@ -377,6 +377,30 @@ fn cmp_values(a: &Value, b: &Value) -> Ordering {
 /// Above this the sort belongs to the query (QX-011 passes it to ORDER BY), not the client.
 const CLIENT_SORT_MAX: usize = 100_000;
 
+/// A header cell being dragged to a new display position.
+#[derive(Clone)]
+struct DragColumn {
+    grid: EntityId,
+    from: usize,
+    name: SharedString,
+}
+
+impl Render for DragColumn {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .px(theme::SPACE_8)
+            .py(theme::SPACE_4)
+            .rounded(theme::RADIUS_SM)
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.table_head)
+            .text_size(theme::UI_SM)
+            .text_color(theme.foreground)
+            .child(self.name.clone())
+    }
+}
+
 pub struct Grid {
     source: Rc<dyn GridSource>,
     widths: Vec<Pixels>,
@@ -470,6 +494,14 @@ impl Grid {
             self.extra.clear();
         }
         cx.notify();
+    }
+
+    /// Header drop: display column `from` moves before `before`. A real move clears the selection.
+    fn drop_col(&mut self, from: usize, before: usize, cx: &mut Context<Self>) {
+        if move_col(&mut self.col_order, from, before) {
+            let first = self.col_order.iter().position(|&s| !self.hidden[s]).unwrap_or(0);
+            self.select((0, first), false, cx);
+        }
     }
 
     /// Ctrl+click: keep the current range and start a new one at `cell`.
@@ -749,12 +781,24 @@ impl Grid {
             .text_color(theme.table_head_foreground)
             .children(cols.map(|c| (c, self.col_order[c])).filter(|&(_, s)| !self.hidden[s]).map(|(c, s)| {
                 h_flex()
+                    .id(("col", s))
                     .absolute()
                     .left(GUTTER + offsets[c] - scroll_x)
                     .w(self.widths[s])
                     .h_full()
                     .border_r_1()
                     .border_color(theme.table_row_border)
+                    // Drag a header and drop it on another: the column moves before that one.
+                    .on_drag(DragColumn { grid: cx.entity_id(), from: c, name: columns[s].name.clone().into() }, |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    })
+                    .drag_over::<DragColumn>(|d, _, _, cx| d.border_l_2().border_color(cx.theme().drag_border))
+                    .on_drop(cx.listener(move |this, drag: &DragColumn, _, cx| {
+                        if drag.grid == cx.entity_id() {
+                            this.drop_col(drag.from, c, cx);
+                        }
+                    }))
                     .child(
                         v_flex()
                             .flex_1()
