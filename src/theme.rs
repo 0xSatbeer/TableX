@@ -11,6 +11,8 @@ use crate::model::ObjectKind;
 
 const DARK: &str = include_str!("../assets/themes/queryx-dark.json");
 const LIGHT: &str = include_str!("../assets/themes/queryx-light.json");
+/// Names of the themes in DARK and LIGHT; user themes may not reuse them.
+const BUILT_IN: [&str; 2] = ["QueryX Dark", "QueryX Light"];
 
 // Type scale. MONO matches `mono_font.size`.
 //
@@ -127,14 +129,20 @@ pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
         // A scratch registry parses the theme-set format without a JSON dependency of our own.
         let mut set = ThemeRegistry::default();
         let loaded = std::fs::read_to_string(&path).map_err(|e| e.to_string());
+        let file = path.file_name().unwrap_or_default().to_string_lossy();
         if let Err(e) = loaded.and_then(|json| set.load_themes_from_str(&json).map_err(|e| e.to_string())) {
-            let file = path.file_name().unwrap_or_default().to_string_lossy();
             errors.push(format!("Couldn't load theme {file}: {e}"));
             continue;
         }
         let mut found: Vec<_> = set.themes().values().cloned().collect();
         found.sort_by(|a, b| a.name.cmp(&b.name));
-        themes.extend(found);
+        for theme in found {
+            if BUILT_IN.contains(&theme.name.as_ref()) {
+                errors.push(format!("Theme {} in {file} clashes with a built-in theme", theme.name));
+            } else {
+                themes.push(theme);
+            }
+        }
     }
     (themes, errors)
 }
@@ -175,8 +183,8 @@ impl ThemeChoice {
     pub fn apply(&self, user: &[Rc<ThemeConfig>], window: &Window, cx: &mut App) {
         let theme = cx.global::<Theme>();
         let builtin = |name: &str| ThemeRegistry::global(cx).themes().get(name).cloned();
-        let mut dark = builtin("QueryX Dark").unwrap_or_else(|| theme.dark_theme.clone());
-        let mut light = builtin("QueryX Light").unwrap_or_else(|| theme.light_theme.clone());
+        let mut dark = builtin(BUILT_IN[0]).unwrap_or_else(|| theme.dark_theme.clone());
+        let mut light = builtin(BUILT_IN[1]).unwrap_or_else(|| theme.light_theme.clone());
         let mode = match self {
             Self::Light => ThemeMode::Light,
             Self::System => window.appearance().into(),
