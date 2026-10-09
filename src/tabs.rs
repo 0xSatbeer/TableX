@@ -276,6 +276,24 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_tab_wraps_and_shift_walks_backward() {
+        // (MRU before, steps, active after, MRU after)
+        let cases: [(&[&'static str], &str, &str, &[&str]); 6] = [
+            (&["c", "b", "a"], "pr", "a", &["a", "c", "b"]),
+            (&["c", "b", "a"], "nnnr", "c", &["c", "b", "a"]),
+            (&["c", "b", "a"], "ppr", "b", &["b", "c", "a"]),
+            (&["c", "b", "a"], "npr", "c", &["c", "b", "a"]),
+            (&["c", "b", "a"], "nnnnr", "b", &["b", "c", "a"]),
+            (&["b", "a"], "nnr", "b", &["b", "a"]),
+        ];
+        for (mru, steps, active, want) in cases {
+            let mut t = with_mru(mru);
+            run(&mut t, steps);
+            assert_eq!(state(&t), (active, want.to_vec()), "MRU {mru:?}, steps {steps}");
+        }
+    }
+
+    #[test]
     fn move_tab_unpinned() {
         // (from, drop slot, expected)
         let cases: [(usize, usize, [&str; 4]); 8] = [
