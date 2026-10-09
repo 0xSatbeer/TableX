@@ -89,6 +89,7 @@ fn visible_cols(offsets: &[Pixels], scroll_x: Pixels, viewport: Pixels, overscan
 enum CellKind {
     Null,
     Number,
+    Bool(bool),
     Text,
 }
 
@@ -1266,6 +1267,14 @@ mod tests {
         ];
         for (ty, right) in cases {
             assert_eq!(is_numeric_type(ty), right, "type {ty:?}");
+        }
+    }
+
+    #[test]
+    fn bools_format_as_words() {
+        let cases = [(true, "true", CellKind::Bool(true)), (false, "false", CellKind::Bool(false))];
+        for (b, text, kind) in cases {
+            assert_eq!(format_cell(&Value::Bool(b)), (text.into(), kind));
         }
     }
 
