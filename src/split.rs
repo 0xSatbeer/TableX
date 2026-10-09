@@ -42,4 +42,18 @@ mod tests {
             assert_eq!(resolve_drag(px(to), e.min, (e.max)(px(1200.)), e.size), expected, "explorer drag to {to}");
         }
     }
+
+    #[test]
+    fn release_below_min_hides_and_keeps_pre_drag_size() {
+        let e = EXPLORER;
+        for (to, start, expected) in [
+            (179., 260., Drag::Hidden(px(260.))),
+            (179., 412., Drag::Hidden(px(412.))),
+            (0., 300., Drag::Hidden(px(300.))),
+            (-50., 300., Drag::Hidden(px(300.))),
+            (180., 300., Drag::Size(px(180.))),
+        ] {
+            assert_eq!(resolve_drag(px(to), e.min, (e.max)(px(1200.)), px(start)), expected, "explorer drag {start} -> {to}");
+        }
+    }
 }
