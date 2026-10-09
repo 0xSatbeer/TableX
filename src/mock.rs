@@ -149,6 +149,7 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
         v.kind = ObjectKind::View;
         v.keys.clear();
         v.indexes.clear();
+        v.row_estimate = None;
         objects.push(v);
     }
     objects.push(plain(ObjectKind::MaterializedView, "revenue_by_month"));
@@ -199,7 +200,7 @@ fn table(name: String, r: u64) -> DbObject {
         });
         indexes.push(Index { name: format!("{name}_owner_id_idx"), columns: vec!["owner_id".into()], unique: false });
     }
-    DbObject { kind: ObjectKind::Table, name, columns, keys, indexes, row_estimate: None }
+    DbObject { kind: ObjectKind::Table, name, columns, keys, indexes, row_estimate: Some(mix(r) % 3_000_000) }
 }
 
 // ---------------------------------------------------------------- result sets
