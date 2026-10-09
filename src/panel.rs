@@ -268,9 +268,7 @@ const NO_MATCHES: &str = "No log entries match these filters";
 
 /// Message shown instead of the log list when the filters leave no rows.
 fn empty_message(rows: &[usize]) -> Option<&'static str> {
-    let _ = NO_MATCHES;
-    let _ = rows;
-    None
+    rows.is_empty().then_some(NO_MATCHES)
 }
 
 /// Logs column headers in row order (the status icon column has none).
@@ -448,13 +446,13 @@ impl Render for BottomPanel {
             div().size_full().flex().items_center().justify_center().text_color(theme.muted_foreground).child(text)
         };
         let body = match self.tab {
-            LOGS if self.rows.is_empty() => v_flex()
+            LOGS if let Some(message) = empty_message(&self.rows) => v_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
                 .gap(theme::SPACE_8)
                 .text_color(theme.muted_foreground)
-                .child("No log entries match these filters")
+                .child(message)
                 .child(Button::new("reset-filters").small().label("Reset filters").on_click(cx.listener(|this, _, window, cx| {
                     this.filter = LogFilter::default();
                     this.search.update(cx, |search, cx| search.set_value("", window, cx));
