@@ -87,14 +87,16 @@ impl<C> Tabs<C> {
         if ix >= self.tabs.len() {
             return;
         }
+        self.commit();
+        let keep = (ix != self.active).then(|| self.tabs[self.active].key.clone());
         let tab = self.tabs.remove(ix);
+        self.mru.retain(|k| *k != tab.key);
         if self.closed.len() == CLOSED_HISTORY {
             self.closed.remove(0);
         }
         self.closed.push(tab);
-        if self.active > ix || self.active == self.tabs.len() {
-            self.active = self.active.saturating_sub(1);
-        }
+        let next = keep.or_else(|| self.mru.first().cloned());
+        self.active = next.and_then(|k| self.tabs.iter().position(|t| t.key == k)).unwrap_or(0);
     }
 
     pub fn reopen(&mut self) {
