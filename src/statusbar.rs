@@ -109,8 +109,19 @@ fn rss_anon_mb(proc_status: &str) -> Option<u64> {
 
 /// Status-bar readout for a `rows` × `cols` selection; `None` for one cell or none.
 pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Value>) -> Option<String> {
-    let _ = values.into_iter();
-    (rows * cols > 1).then(String::new)
+    if rows * cols <= 1 {
+        return None;
+    }
+    let plural = |n: usize, one: &str| if n == 1 { format!("{n} {one}") } else { format!("{n} {one}s") };
+    let (mut count, mut sum) = (0, 0);
+    for v in values {
+        if let Value::Int(n) = v {
+            count += 1;
+            sum += n;
+        }
+    }
+    let avg = sum as f64 / count as f64;
+    Some(format!("{} × {} · count {count} · sum {sum} · avg {avg}", plural(rows, "row"), plural(cols, "col")))
 }
 
 impl Render for StatusBar {
