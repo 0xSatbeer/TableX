@@ -410,6 +410,24 @@ mod tests {
     }
 
     #[test]
+    fn introspection_hidden_by_default() {
+        let c = QuerySource::Console;
+        let i = QuerySource::Introspection;
+        let log = vec![
+            entry(1, "SELECT 1", QueryStatus::Ok, c),
+            entry(1, "SELECT * FROM pg_class", QueryStatus::Ok, i),
+            entry(1, "SELECT * FROM pg_class", QueryStatus::Err("x".into()), i),
+            entry(1, "SELECT 2", QueryStatus::Ok, QuerySource::TableView),
+        ];
+        let f = |introspection: bool, text: &str| filter_rows(&log, &LogFilter { introspection, text: text.into(), ..LogFilter::default() });
+        assert_eq!(filter_rows(&log, &LogFilter::default()), [0, 3], "default is off");
+        assert_eq!(f(false, ""), [0, 3]);
+        assert_eq!(f(true, ""), [0, 1, 2, 3]);
+        assert_eq!(f(false, "pg_class"), Vec::<usize>::new(), "text can't bring hidden rows back");
+        assert_eq!(f(true, "pg_class"), [1, 2]);
+    }
+
+    #[test]
     fn sql_spans_tag_keywords_strings_and_numbers() {
         let sql = "select id FROM users WHERE name = 'jörg' LIMIT 50";
         let tagged: Vec<_> = super::sql_spans(sql).into_iter().map(|(r, k)| (&sql[r], k)).collect();
