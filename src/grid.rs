@@ -199,7 +199,8 @@ fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: us
 
 /// Display columns (anchor, head) of a band: the clicked column, or for a whole row the first and last visible.
 fn band_cols(col: Option<usize>, hidden: &[bool]) -> (usize, usize) {
-    col.map_or((0, hidden.len() - 1), |c| (c, c))
+    let edge = |key| nav(key, false, false, (0, 0), 1, hidden, 0).map_or(0, |(_, c)| c);
+    col.map_or_else(|| (edge("home"), edge("end")), |c| (c, c))
 }
 
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
@@ -525,10 +526,10 @@ impl Grid {
 
     /// Whole row (gutter click) or whole column (header click); shift extends from the anchor.
     fn select_band(&mut self, row: Option<usize>, col: Option<usize>, extend: bool, cx: &mut Context<Self>) {
-        let last = (self.source.row_count().saturating_sub(1), self.widths.len().saturating_sub(1));
-        let head = (row.unwrap_or(last.0), col.unwrap_or(last.1));
+        let (first_col, last_col) = band_cols(col, &self.display_hidden());
+        let head = (row.unwrap_or(self.source.row_count().saturating_sub(1)), last_col);
         if !extend {
-            self.anchor = (row.unwrap_or(0), col.unwrap_or(0));
+            self.anchor = (row.unwrap_or(0), first_col);
             self.extra.clear();
         }
         self.head = head;
@@ -563,6 +564,10 @@ impl Grid {
             offset.x = -(right - view);
         }
         base.set_offset(offset);
+    }
+
+    fn display_hidden(&self) -> Vec<bool> {
+        self.col_order.iter().map(|&s| self.hidden[s]).collect()
     }
 
     /// Display-order left edges, hidden columns at zero width.
@@ -601,8 +606,7 @@ impl Grid {
             }
             _ => {}
         }
-        let hidden: Vec<bool> = self.col_order.iter().map(|&s| self.hidden[s]).collect();
-        let Some(next) = nav(&ev.keystroke.key, m.secondary(), m.shift, self.head, rows, &hidden, page) else { return };
+        let Some(next) = nav(&ev.keystroke.key, m.secondary(), m.shift, self.head, rows, &self.display_hidden(), page) else { return };
         self.select(next, m.shift && ev.keystroke.key != "tab", cx);
         self.reveal_head();
         cx.stop_propagation();
