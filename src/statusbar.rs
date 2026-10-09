@@ -238,6 +238,21 @@ mod tests {
     }
 
     #[test]
+    fn floats_show_at_most_four_decimals_trimmed() {
+        check([
+            (2, 1, vec![Int(1), Float(0.5)], "2 rows × 1 col · count 2 · sum 1.5 · avg 0.75"),
+            (2, 1, vec![Float(2.0), Float(2.0)], "2 rows × 1 col · count 2 · sum 4 · avg 2"),
+            (3, 1, vec![Int(1), Int(0), Int(0)], "3 rows × 1 col · count 3 · sum 1 · avg 0.3333"),
+            (3, 1, vec![Int(2), Int(0), Int(0)], "3 rows × 1 col · count 3 · sum 2 · avg 0.6667"),
+            (2, 1, vec![Float(0.12345), Float(0.0)], "2 rows × 1 col · count 2 · sum 0.1235 · avg 0.0617"),
+            // Rounds to zero: no "-0", no "0.0000".
+            (2, 1, vec![Float(-0.00001), Float(0.0)], "2 rows × 1 col · count 2 · sum 0 · avg 0"),
+            (2, 1, vec![Float(f64::INFINITY), Int(1)], "2 rows × 1 col · count 2 · sum inf · avg inf"),
+            (3, 1, vec![Float(1.5), Null, Text("x".into())], "3 rows × 1 col · count 2 · sum 1.5 · avg 1.5"),
+        ]);
+    }
+
+    #[test]
     fn reads_private_memory_from_proc_status() {
         let status = "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
         assert_eq!(super::rss_anon_mb(status), Some(35));
