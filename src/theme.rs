@@ -293,9 +293,19 @@ mod tests {
             ("danger.foreground", "background"),
             ("danger.foreground", "sidebar.background"),
             ("background", "danger.background"),
+            ("foreground", "muted.background"),
+            ("foreground", "list.hover.background"),
+            ("tab.active.foreground", "tab.active.background"),
+            ("muted.foreground", "sidebar.accent.background"),
         ];
+        // Status text on the surfaces it is drawn on, hover rows included.
+        let status = ["success", "warning", "info", "danger"];
+        let surfaces = ["background", "sidebar.background", "muted.background", "list.hover.background", "table.hover.background"];
+        let text: Vec<(String, &str)> = text.iter().map(|&(f, b)| (f.to_string(), b)).chain(
+            status.iter().flat_map(|s| surfaces.iter().map(move |b| (format!("{s}.foreground"), *b))),
+        ).collect();
         for (name, theme) in [("dark", DARK), ("light", LIGHT)] {
-            for (fg, bg) in text {
+            for (fg, bg) in &text {
                 let r = ratio(color(theme, fg), color(theme, bg));
                 assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1, needs 4.5:1");
             }
