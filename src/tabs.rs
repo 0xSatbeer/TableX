@@ -27,6 +27,11 @@ impl Origin {
     }
 }
 
+/// Tab tooltip: title on line 1, origin path on line 2.
+pub fn tooltip_text(title: &str, origin: Option<&Origin>) -> String {
+    String::new()
+}
+
 pub struct EditorTab<C> {
     /// Identity: opening the same key again activates the existing tab.
     pub key: SharedString,
@@ -144,7 +149,7 @@ impl<C> Tabs<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorTab, Tabs};
+    use super::{tooltip_text, EditorTab, Origin, Tabs};
 
     fn tab(key: &'static str, preview: bool) -> EditorTab<()> {
         EditorTab { key: key.into(), title: key.into(), origin: None, tooltip: None, preview, pinned: false, content: () }
@@ -267,6 +272,20 @@ mod tests {
             t.move_tab(from, to);
             assert_eq!((keys(&t), t.active), (want.to_vec(), want_active), "active {active}, move {from} before {to}");
             assert_eq!(t.tabs[t.active].key, key, "same tab stays active");
+        }
+    }
+
+    #[test]
+    fn tooltip_is_title_then_origin_path() {
+        let origin = |path: &str| Origin { color: 0, production: false, path: path.to_string().into() };
+        let cases = [
+            ("users", Some(origin("prod-pg › app_db › public")), "users\nprod-pg › app_db › public"),
+            ("big_events", None, "big_events\nSample data · not from a connection"),
+            ("Console", Some(origin("dev")), "Console\ndev"),
+            ("", None, "\nSample data · not from a connection"),
+        ];
+        for (title, o, want) in cases {
+            assert_eq!(tooltip_text(title, o.as_ref()), want, "{title}");
         }
     }
 }
