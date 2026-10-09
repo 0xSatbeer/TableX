@@ -491,6 +491,17 @@ impl Explorer {
         }
     }
 
+    /// A plain (unmodified) press: select the row, then do what `click_action` says.
+    fn press(&mut self, ix: usize, hit: Hit, cx: &mut Context<Self>) {
+        self.marked.clear();
+        self.select(ix, cx);
+        match click_action(self.nodes[ix].kind, hit) {
+            Click::Select => {}
+            Click::Toggle => self.set_expanded(ix, !self.nodes[ix].expanded, cx),
+            Click::Open { preview } => self.open(ix, preview, cx),
+        }
+    }
+
     fn select(&mut self, ix: usize, cx: &mut Context<Self>) {
         (self.selected, self.picked) = (ix, true);
         self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
@@ -644,18 +655,20 @@ impl Explorer {
                                 }
                                 return cx.notify();
                             }
-                            this.marked.clear();
-                            this.select(ix, cx);
-                            if ev.click_count == 1 {
-                                let open = this.nodes[ix].expanded;
-                                this.set_expanded(ix, !open, cx);
-                            }
-                            this.open(ix, ev.click_count < 2, cx);
+                            this.press(ix, Hit::Row { clicks: ev.click_count }, cx);
                         }),
                     )
                     .child(
                         div().flex_none().w(theme::SPACE_12).when(node.expandable, |d| {
-                            d.child(Icon::new(chevron).xsmall().text_color(theme.muted_foreground))
+                            d.child(Icon::new(chevron).xsmall().text_color(theme.muted_foreground)).on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    window.focus(&this.focus, cx);
+                                    this.rename = None;
+                                    this.press(ix, Hit::Chevron, cx);
+                                    cx.stop_propagation();
+                                }),
+                            )
                         }),
                     )
                     .child(icon.small().text_color(color))
