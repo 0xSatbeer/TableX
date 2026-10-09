@@ -33,6 +33,13 @@ pub fn tooltip_text(title: &str, origin: Option<&Origin>) -> String {
     format!("{title}\n{path}")
 }
 
+/// More tabs than this and the overflow list gets a search field.
+pub const SEARCH_MIN_TABS: usize = 10;
+
+pub fn show_search(_tab_count: usize) -> bool {
+    false
+}
+
 pub struct EditorTab<C> {
     /// Identity: opening the same key again activates the existing tab.
     pub key: SharedString,
@@ -468,6 +475,13 @@ mod tests {
         ];
         for (title, o, want) in cases {
             assert_eq!(tooltip_text(title, o.as_ref()), want, "{title}");
+        }
+    }
+
+    #[test]
+    fn overflow_search_field_only_above_ten_tabs() {
+        for (count, shown) in [(0, false), (1, false), (10, false), (11, true), (12, true)] {
+            assert_eq!(super::show_search(count), shown, "{count} tabs");
         }
     }
 }
