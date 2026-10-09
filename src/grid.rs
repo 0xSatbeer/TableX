@@ -1352,4 +1352,22 @@ mod tests {
         assert_eq!(ranges_in_order(&[r2.clone(), r3.clone()], r1.clone()), [r2, r3, r1]);
         assert_eq!(ranges_in_order(&[], (4..5, 0..1)), [(4..5, 0..1)], "no extras: just the active range");
     }
+
+    #[test]
+    fn one_range_matches_the_single_range_copy_in_every_format() {
+        let (cols, row) = vgrid();
+        // display order [c, a, b] with b hidden, rows 0..2: literal output of each format
+        let expected = [
+            (tsv as fn(&[ColumnMeta], &[Vec<Value>]) -> String, "v02\tv00\nv12\tv10\n"),
+            (csv, "c,a\nv02,v00\nv12,v10\n"),
+            (markdown, "| c | a |\n| --- | --- |\n| v02 | v00 |\n| v12 | v10 |\n"),
+            (json, "[\n  {\"c\": \"v02\", \"a\": \"v00\"},\n  {\"c\": \"v12\", \"a\": \"v10\"}\n]\n"),
+            (sql_insert, "INSERT INTO table_name (c, a) VALUES ('v02', 'v00');\nINSERT INTO table_name (c, a) VALUES ('v12', 'v10');\n"),
+            (sql_in_list, "('v02', 'v12')"),
+        ];
+        for (format, want) in expected {
+            let got = copy_ranges(format, &[(0..2, 0..3)], &[2, 0, 1], &[false, true, false], &cols, &row);
+            assert_eq!(got, want);
+        }
+    }
 }
