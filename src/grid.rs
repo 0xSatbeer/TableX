@@ -144,6 +144,13 @@ fn tsv(_: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
     out
 }
 
+/// Header drag: moves display position `from` to just before display position `before`
+/// (`before == order.len()` is the end). Returns whether the order changed.
+fn move_col(order: &mut Vec<usize>, from: usize, before: usize) -> bool {
+    let _ = (order, from, before);
+    false
+}
+
 /// Head cell after a navigation key, or `None` for other keys. `hidden` is in display order;
 /// Left/Right/Tab/Home/End skip hidden columns.
 fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: usize, hidden: &[bool], page: usize) -> Option<(usize, usize)> {
@@ -894,7 +901,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmp_values, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{cmp_values, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -905,6 +912,23 @@ mod tests {
         assert_eq!(visible_cols(&offsets, px(29_900.), px(500.), 2), 297..300, "clamped at the end");
         let hidden = prefix_sums(&[px(100.), px(0.), px(100.), px(100.)]);
         assert_eq!(visible_cols(&hidden, px(100.), px(100.), 0), 2..3, "zero-width hidden column at the left edge is skipped");
+    }
+
+    #[test]
+    fn move_col_drops_before_target() {
+        // a=0, b=1, c=2, d=3
+        let cases: [(&[usize], usize, usize, &[usize]); 5] = [
+            (&[0, 1, 2, 3], 0, 3, &[1, 2, 0, 3]), // drag a before d
+            (&[0, 1, 2], 2, 0, &[2, 0, 1]),       // drag c to start
+            (&[0, 1, 2], 0, 3, &[1, 2, 0]),       // drag a past the last column
+            (&[0, 1, 2, 3], 3, 1, &[0, 3, 1, 2]), // drag d left into the middle
+            (&[2, 0, 1], 0, 2, &[0, 2, 1]),       // already permuted order
+        ];
+        for (start, from, before, expected) in cases {
+            let mut order = start.to_vec();
+            move_col(&mut order, from, before);
+            assert_eq!(order, expected, "{start:?} move {from} before {before}");
+        }
     }
 
     #[test]
