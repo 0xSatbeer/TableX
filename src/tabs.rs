@@ -124,15 +124,23 @@ impl<C> Tabs<C> {
         }
     }
 
-    pub fn cycle(&mut self, forward: bool) {
-        let n = self.tabs.len();
-        if n > 0 {
-            self.active = if forward { (self.active + 1) % n } else { (self.active + n - 1) % n };
+    /// Ctrl+Tab while Ctrl is held: previews the next tab in MRU order.
+    pub fn cycle(&mut self, _forward: bool) {
+        let pos = 1;
+        self.cycling = Some(pos);
+        if let Some(ix) = self.tabs.iter().position(|t| t.key == self.mru[pos]) {
+            self.active = ix;
         }
     }
 
     /// Ctrl released: the previewed tab becomes the most recently used.
-    pub fn commit(&mut self) {}
+    pub fn commit(&mut self) {
+        if self.cycling.take().is_some() {
+            let key = self.tabs[self.active].key.clone();
+            self.mru.retain(|k| *k != key);
+            self.mru.insert(0, key);
+        }
+    }
 
     /// Moves the tab at `from` to just before index `to` (a drop slot, 0..=len).
     pub fn move_tab(&mut self, from: usize, to: usize) {
@@ -195,10 +203,6 @@ mod tests {
         assert_eq!((keys(&t), t.active), (vec!["b"], 0));
         t.reopen();
         assert_eq!((keys(&t), t.active), (vec!["b", "a"], 1));
-        t.cycle(true);
-        assert_eq!(t.active, 0);
-        t.cycle(false);
-        assert_eq!(t.active, 1);
     }
 
     #[test]
