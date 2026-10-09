@@ -224,9 +224,14 @@ fn block_data(block: &Block, order: &[usize], hidden: &[bool], columns: &[Column
 
 /// One `format` block per range, separated by a blank line.
 fn copy_ranges(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> Vec<Value>) -> String {
-    // stub
-    let (cols, rows) = block_data(ranges.last().unwrap(), order, hidden, columns, &row);
-    format(&cols, &rows)
+    let blocks: Vec<String> = ranges
+        .iter()
+        .map(|r| {
+            let (cols, rows) = block_data(r, order, hidden, columns, &row);
+            format(&cols, &rows)
+        })
+        .collect();
+    blocks.join("\n")
 }
 
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
