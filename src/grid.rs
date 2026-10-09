@@ -416,8 +416,12 @@ enum SortAvail {
     Disabled(&'static str),
 }
 
-fn sort_availability(_rows: usize) -> SortAvail {
-    SortAvail::Enabled
+fn sort_availability(rows: usize) -> SortAvail {
+    if rows <= CLIENT_SORT_MAX {
+        SortAvail::Enabled
+    } else {
+        SortAvail::Disabled("Too many rows to sort here; use ORDER BY")
+    }
 }
 
 /// A header cell being dragged to a new display position.
