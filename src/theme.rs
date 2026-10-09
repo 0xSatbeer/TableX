@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::{App, Hsla, Pixels, Rgba, Window, WindowAppearance, px};
+use gpui_kit::{App, Hsla, Pixels, Rgba, SharedString, Window, WindowAppearance, px};
 use gpui_kit::component::theme::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
 
 use crate::model::ObjectKind;
@@ -73,6 +73,11 @@ pub fn init(cx: &mut App) {
         ["Inter", "JetBrains Mono"].iter().all(|f| cx.text_system().all_font_names().iter().any(|n| n == f)),
         "embedded font families not registered"
     );
+    init_themes(cx);
+}
+
+/// Loads the built-in themes and starts on QueryX Dark.
+fn init_themes(cx: &mut App) {
     let registry = ThemeRegistry::global_mut(cx);
     for json in [DARK, LIGHT] {
         registry.load_themes_from_str(json).expect("embedded theme is valid JSON");
@@ -115,43 +120,47 @@ pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
 }
 
 /// The user's theme setting. `System` follows the OS light/dark preference live.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// `User` names a theme loaded from the `UserThemeDir`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ThemeChoice {
     #[default]
     Dark,
     Light,
     System,
+    User(SharedString),
 }
 
 impl ThemeChoice {
     pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::System];
 
-    pub fn next(self) -> Self {
+    pub fn next(&self) -> Self {
         match self {
             Self::Dark => Self::Light,
             Self::Light => Self::System,
-            Self::System => Self::Dark,
+            Self::System | Self::User(_) => Self::Dark,
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> &str {
         match self {
             Self::Dark => "Dark",
             Self::Light => "Light",
             Self::System => "System",
+            Self::User(name) => name,
         }
     }
 
-    fn mode(self, os: WindowAppearance) -> ThemeMode {
+    fn mode(&self, os: WindowAppearance) -> ThemeMode {
         match self {
-            Self::Dark => ThemeMode::Dark,
+            Self::Dark | Self::User(_) => ThemeMode::Dark,
             Self::Light => ThemeMode::Light,
             Self::System => os.into(),
         }
     }
 
     /// Applies the theme. Called again on OS appearance changes; a no-op unless `System`.
-    pub fn apply(self, window: &Window, cx: &mut App) {
+    pub fn apply(&self, user: &[Rc<ThemeConfig>], window: &Window, cx: &mut App) {
+        let _ = user;
         let mode = self.mode(window.appearance());
         if cx.global::<Theme>().mode != mode {
             Theme::change(mode, None, cx);
@@ -464,6 +473,56 @@ pub(crate) mod tests {
         assert!(themes.is_empty(), "themes from a missing dir");
         assert_eq!(errors, Vec::<String>::new(), "a missing dir is not an error");
         assert!(!dir.exists(), "loading must not create the dir");
+    }
+
+    const NORD: &str = r##"{"name": "Nord", "themes": [{"name": "Nord", "mode": "dark", "colors": {"background": "#2E3440"}}]}"##;
+    const PAPER: &str = r##"{"name": "Paper", "themes": [{"name": "Paper", "mode": "light", "colors": {"background": "#F7F3E8"}}]}"##;
+
+    fn names(themes: &[std::rc::Rc<gpui_kit::component::theme::ThemeConfig>]) -> Vec<String> {
+        themes.iter().map(|t| t.name.to_string()).collect()
+    }
+
+    #[test]
+    fn valid_user_theme_file_is_listed() {
+        let dir = test_dir("valid");
+        std::fs::write(dir.join("nord.json"), NORD).unwrap();
+        let (themes, errors) = super::load_user_themes(&dir);
+        assert_eq!((names(&themes), errors), (vec!["Nord".to_string()], vec![]));
+    }
+
+    /// Choosing a user theme applies it at once, in its own mode; choosing a built-in goes back.
+    #[gpui_kit::test]
+    fn choosing_a_user_theme_applies_it_immediately(cx: &mut gpui_kit::TestAppContext) {
+        use super::ThemeChoice;
+        use gpui_kit::component::ActiveTheme as _;
+        let dir = test_dir("choose");
+        std::fs::write(dir.join("nord.json"), NORD).unwrap();
+        std::fs::write(dir.join("paper.json"), PAPER).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            super::init_themes(cx);
+        });
+        let (themes, _) = super::load_user_themes(&dir);
+        let cx = cx.add_empty_window();
+        // (choice, theme name after applying it, dark?, background)
+        let cases = [
+            (ThemeChoice::User("Nord".into()), "Nord", true, Some(0x2E3440)),
+            (ThemeChoice::Light, "QueryX Light", false, None),
+            (ThemeChoice::User("Paper".into()), "Paper", false, Some(0xF7F3E8)),
+            (ThemeChoice::User("Nord".into()), "Nord", true, Some(0x2E3440)), // light -> user dark
+            (ThemeChoice::Dark, "QueryX Dark", true, None), // same mode, back to the built-in
+            (ThemeChoice::User("Gone".into()), "QueryX Dark", true, None), // removed theme falls back to Dark
+        ];
+        for (choice, name, dark, bg) in cases {
+            let (got, is_dark, background) = cx.update(|window, cx| {
+                choice.apply(&themes, window, cx);
+                (cx.theme().theme_name().to_string(), cx.theme().is_dark(), cx.theme().background)
+            });
+            assert_eq!((got.as_str(), is_dark), (name, dark), "after {choice:?}");
+            if let Some(bg) = bg {
+                assert_eq!(background, gpui_kit::Hsla::from(super::hex(bg)), "background after {choice:?}");
+            }
+        }
     }
 
     #[test]

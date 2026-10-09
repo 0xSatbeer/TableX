@@ -173,6 +173,8 @@ struct Shell {
     /// Set when a tab is activated; the next render moves keyboard focus into its content.
     focus_content: bool,
     theme: theme::ThemeChoice,
+    /// Themes loaded from the `UserThemeDir`, listed under the built-ins.
+    user_themes: Vec<Rc<gpui_kit::component::theme::ThemeConfig>>,
     /// Overflow list: open state and its search field (shown above `tabs::SEARCH_MIN_TABS` tabs).
     overflow_open: bool,
     overflow_search: Entity<InputState>,
@@ -252,7 +254,8 @@ impl Shell {
             gallery_visible: false,
             focus_content: false,
             theme: theme::ThemeChoice::default(),
-            _appearance: cx.observe_window_appearance(window, |this, window, cx| this.theme.apply(window, cx)),
+            user_themes: Vec::new(),
+            _appearance: cx.observe_window_appearance(window, |this, window, cx| this.theme.apply(&this.user_themes, window, cx)),
         };
         this.tab_changed(cx);
         this
@@ -297,7 +300,7 @@ impl Shell {
     /// `Ctrl+K Ctrl+T` still cycles it from the keyboard.
     fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity().downgrade();
-        let current = self.theme;
+        let current = self.theme.clone();
         Button::new("settings")
             .ghost()
             .small()
@@ -310,8 +313,8 @@ impl Shell {
                     menu = menu.item(PopupMenuItem::new(choice.label()).checked(choice == current).on_click(
                         move |_, window, cx| {
                             _ = shell.update(cx, |this, cx| {
-                                this.theme = choice;
-                                this.theme.apply(window, cx);
+                                this.theme = choice.clone();
+                                this.theme.apply(&this.user_themes, window, cx);
                                 cx.notify();
                             });
                         },
@@ -722,7 +725,7 @@ impl Render for Shell {
             }))
             .on_action(cx.listener(|this, _: &CycleTheme, window, cx| {
                 this.theme = this.theme.next();
-                this.theme.apply(window, cx);
+                this.theme.apply(&this.user_themes, window, cx);
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleGallery, _, cx| {
