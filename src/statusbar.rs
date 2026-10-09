@@ -264,6 +264,24 @@ mod tests {
     }
 
     #[test]
+    fn over_a_million_cells_shows_shape_only_without_reading_values() {
+        // (rows, cols, expected); no value may be read.
+        let skipped = [
+            (1_000_001, 1, "1000001 rows × 1 col · aggregate skipped (too many cells)"),
+            (1, 1_000_001, "1 row × 1000001 cols · aggregate skipped (too many cells)"),
+            (1001, 1000, "1001 rows × 1000 cols · aggregate skipped (too many cells)"),
+        ];
+        for (rows, cols, expected) in skipped {
+            let reads = std::cell::Cell::new(0);
+            let values = std::iter::repeat_n(Int(1), rows * cols).inspect(|_| reads.set(reads.get() + 1));
+            assert_eq!(aggregate(rows, cols, values).as_deref(), Some(expected));
+            assert_eq!(reads.get(), 0, "{rows}x{cols} read values");
+        }
+        let at_limit = aggregate(1_000_000, 1, std::iter::repeat_n(Int(1), 1_000_000));
+        assert_eq!(at_limit.as_deref(), Some("1000000 rows × 1 col · count 1000000 · sum 1000000 · avg 1"));
+    }
+
+    #[test]
     fn reads_private_memory_from_proc_status() {
         let status = "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
         assert_eq!(super::rss_anon_mb(status), Some(35));
