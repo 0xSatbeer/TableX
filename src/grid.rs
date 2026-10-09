@@ -94,6 +94,10 @@ enum CellKind {
 
 /// Column types whose values align right, so a NULL in them lines up with the numbers.
 fn is_numeric_type(ty: &str) -> bool {
+    let ty = ty.to_lowercase();
+    if ty.ends_with("[]") || ty.ends_with("range") {
+        return false;
+    }
     const PREFIXES: [&str; 8] = ["bigint", "smallint", "numeric", "decimal", "double", "float", "real", "money"];
     (ty.starts_with("int") && !ty.starts_with("interval")) || PREFIXES.iter().any(|p| ty.starts_with(p))
 }
