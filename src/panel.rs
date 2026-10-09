@@ -7,6 +7,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     v_flex, h_flex,
 };
 use gpui_kit::*;
@@ -18,6 +19,8 @@ use crate::{ToggleBottomPanel, mock, theme};
 
 const TABS: [&str; 3] = ["Results", "Logs", "Messages"];
 const LOGS: usize = 1;
+/// Time column width in `SPACE_8` units; wide enough for the "Time (UTC)" header.
+const TIME_W: f32 = 10.;
 
 pub struct BottomPanel {
     tab: usize,
@@ -26,6 +29,9 @@ pub struct BottomPanel {
     search: Entity<InputState>,
     /// Indexes into `log` that pass the filters.
     rows: Vec<usize>,
+    list: ListState,
+    /// Log indexes of rows shown expanded.
+    expanded: BTreeSet<usize>,
     /// Connection id to (name, color index, production).
     connections: BTreeMap<u32, (String, u8, bool)>,
 }
@@ -49,7 +55,9 @@ impl BottomPanel {
             log,
             filter,
             search,
+            list: ListState::new(rows.len(), ListAlignment::Top, px(240.)),
             rows,
+            expanded: BTreeSet::new(),
             connections: workspace.connections.iter().map(|c| (c.id.0, (c.name.clone(), c.color, c.is_production))).collect(),
         }
     }
@@ -57,9 +65,44 @@ impl BottomPanel {
     fn refilter(&mut self, cx: &App) {
         self.filter.text = self.search.read(cx).value().to_string();
         self.rows = filter_rows(&self.log, &self.filter);
+        self.list.reset(self.rows.len());
     }
 
-    fn log_row(&self, ix: usize, cx: &App) -> Div {
+    /// "All connections" or the chosen ones; each item toggles one connection.
+    fn connection_menu(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let items: Vec<_> = self.connections.iter().map(|(&id, (name, ..))| (id, name.clone(), self.filter.connections.contains(&id))).collect();
+        let label = match self.filter.connections.len() {
+            0 => "All connections".to_string(),
+            1 => items.iter().find(|(_, _, on)| *on).map(|(_, name, _)| name.clone()).unwrap_or_default(),
+            n => format!("{n} connections"),
+        };
+        let panel = cx.entity().downgrade();
+        Button::new("log-connections").ghost().small().label(label).icon(IconName::ChevronDown).dropdown_menu(move |mut menu, _, _| {
+            for (id, name, on) in items.clone() {
+                let panel = panel.clone();
+                menu = menu.item(PopupMenuItem::new(name).checked(on).on_click(move |_, _, cx| {
+                    _ = panel.update(cx, |this, cx| {
+                        if !this.filter.connections.remove(&id) {
+                            this.filter.connections.insert(id);
+                        }
+                        this.refilter(cx);
+                        cx.notify();
+                    });
+                }));
+            }
+            menu
+        })
+    }
+
+    fn log_row(&self, ix: usize, cx: &Context<Self>) -> impl IntoElement {
+        let on_click = cx.listener(move |this, _, _, cx| {
+            toggle_expanded(&mut this.expanded, ix);
+            // Newest first: list position is the mirror of the filtered position.
+            if let Some(pos) = this.rows.iter().rev().position(|&r| r == ix) {
+                this.list.splice(pos..pos + 1, 1);
+            }
+            cx.notify();
+        });
         let theme = cx.theme();
         let entry = &self.log[ix];
         let (conn, color, production) = self.connections.get(&entry.connection_id.0).cloned().unwrap_or_default();
@@ -75,7 +118,7 @@ impl BottomPanel {
         };
         let col = |w: f32| div().flex_none().w(theme::SPACE_8 * w).truncate();
         let sql = entry.sql.clone();
-        h_flex()
+        let line = h_flex()
             .group("log-row")
             .w_full()
             .when(production, |d| d.bg(theme::production_tint(theme)))
@@ -84,7 +127,7 @@ impl BottomPanel {
             .gap(theme::SPACE_12)
             .text_size(theme::UI_SM)
             .text_color(theme.muted_foreground)
-            .child(col(9.).font_family(theme.mono_font_family.clone()).text_size(theme::MONO).child(time_of_day(entry)))
+            .child(col(TIME_W).font_family(theme.mono_font_family.clone()).text_size(theme::MONO).child(time_of_day(entry)))
             .child(
                 col(14.).child(
                     h_flex()
@@ -119,7 +162,27 @@ impl BottomPanel {
                         .tooltip("Copy SQL")
                         .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(sql.clone()))),
                 ),
-            )
+            );
+        let line = div().id(("log-row", ix)).w_full().cursor_pointer().on_click(on_click).child(line);
+        let mut row = v_flex().w_full().child(line);
+        if self.expanded.contains(&ix) {
+            let detail = row_detail(entry);
+            row = row.child(
+                v_flex()
+                    .w_full()
+                    .px(theme::SPACE_12)
+                    .py(theme::SPACE_8)
+                    .gap(theme::SPACE_8)
+                    .bg(theme.muted)
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .font_family(theme.mono_font_family.clone())
+                    .text_size(theme::MONO)
+                    .child(div().w_full().text_color(theme.foreground).whitespace_normal().child(detail.sql))
+                    .children(detail.error.map(|e| div().w_full().text_color(theme.danger).whitespace_normal().child(e))),
+            );
+        }
+        row
     }
 }
 
@@ -264,11 +327,37 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+/// Column headers aligned with `log_row`'s columns.
+fn log_header(theme: &gpui_kit::component::Theme) -> impl IntoElement {
+    let [time, conn, db, sql, _, duration, rows, source] = header_labels();
+    let col = |w: f32, label: &'static str| div().flex_none().w(theme::SPACE_8 * w).truncate().child(label);
+    h_flex()
+        .flex_none()
+        .w_full()
+        .h(theme::LIST_ROW)
+        .px(theme::SPACE_12)
+        .gap(theme::SPACE_12)
+        .border_b_1()
+        .border_color(theme.border)
+        .text_size(theme::UI_SM)
+        .text_color(theme.muted_foreground)
+        .child(col(TIME_W, time))
+        .child(col(14., conn))
+        .child(col(8., db))
+        .child(div().flex_1().min_w_0().child(sql))
+        .child(div().flex_none().w(theme::SPACE_16))
+        .child(col(8., duration).text_right())
+        .child(col(9., rows).text_right())
+        .child(col(11., source))
+        // Room for the hover copy button.
+        .child(div().flex_none().w(theme::SPACE_24))
+}
+
 fn filter_toggle(
     id: &'static str,
     label: &'static str,
     on: bool,
-    toggle: fn(&mut LogFilter),
+    toggle: impl Fn(&mut LogFilter) + 'static,
     cx: &mut Context<BottomPanel>,
 ) -> Button {
     // A checkbox glyph, so the off state still reads as a toggle and not a label.
@@ -282,10 +371,21 @@ fn filter_toggle(
 
 impl Render for BottomPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let errors_on = self.filter.statuses == [StatusKind::Error].into();
-        let errors_toggle = filter_toggle("errors-only", "Errors", errors_on, |f| {
-            f.statuses = if f.statuses == [StatusKind::Error].into() { LogFilter::default().statuses } else { [StatusKind::Error].into() };
-        }, cx);
+        let status_toggle = |id, label, kind: StatusKind, cx: &mut Context<Self>| {
+            let on = self.filter.statuses.contains(&kind);
+            let toggle: fn(&mut LogFilter, StatusKind) = |f, kind| {
+                if !f.statuses.remove(&kind) {
+                    f.statuses.insert(kind);
+                }
+            };
+            filter_toggle(id, label, on, move |f| toggle(f, kind), cx)
+        };
+        let status_toggles = [
+            status_toggle("status-ok", "Ok", StatusKind::Ok, cx),
+            status_toggle("status-error", "Error", StatusKind::Error, cx),
+            status_toggle("status-cancelled", "Cancelled", StatusKind::Cancelled, cx),
+        ];
+        let connection_menu = self.connection_menu(cx);
         let introspection_toggle =
             filter_toggle("show-introspection", "Introspection", self.filter.introspection, |f| f.introspection = !f.introspection, cx);
         let theme = cx.theme();
@@ -322,7 +422,8 @@ impl Render for BottomPanel {
                     .gap(theme::SPACE_8)
                     .when(self.tab == LOGS, |this| {
                         this.child(div().w(theme::SPACE_24 * 8.).child(Input::new(&self.search).small()))
-                            .child(errors_toggle)
+                            .child(connection_menu)
+                            .children(status_toggles)
                             .child(introspection_toggle)
                     })
                     .child(
@@ -338,16 +439,33 @@ impl Render for BottomPanel {
             div().size_full().flex().items_center().justify_center().text_color(theme.muted_foreground).child(text)
         };
         let body = match self.tab {
-            LOGS => uniform_list(
-                "logs",
-                self.rows.len(),
-                // Newest first: during an incident the last query is the one you want.
-                cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
-                    range.map(|ix| this.log_row(this.rows[this.rows.len() - 1 - ix], cx)).collect()
-                }),
-            )
-            .size_full()
-            .into_any_element(),
+            LOGS if self.rows.is_empty() => v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap(theme::SPACE_8)
+                .text_color(theme.muted_foreground)
+                .child("No log entries match these filters")
+                .child(Button::new("reset-filters").small().label("Reset filters").on_click(cx.listener(|this, _, window, cx| {
+                    this.filter = LogFilter::default();
+                    this.search.update(cx, |search, cx| search.set_value("", window, cx));
+                    this.refilter(cx);
+                    cx.notify();
+                })))
+                .into_any_element(),
+            // Newest first: during an incident the last query is the one you want.
+            LOGS => v_flex()
+                .size_full()
+                .child(log_header(theme))
+                .child(
+                    list(
+                        self.list.clone(),
+                        cx.processor(|this, ix: usize, _, cx| this.log_row(this.rows[this.rows.len() - 1 - ix], cx).into_any_element()),
+                    )
+                    .flex_1()
+                    .w_full(),
+                )
+                .into_any_element(),
             0 => empty("Console results will show here").into_any_element(),
             _ => empty("No messages").into_any_element(),
         };
