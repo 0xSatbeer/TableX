@@ -22,6 +22,7 @@ mod mock;
 #[allow(dead_code)]
 mod model;
 mod panel;
+mod split;
 mod statusbar;
 mod tabs;
 mod theme;
