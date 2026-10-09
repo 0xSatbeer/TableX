@@ -956,6 +956,17 @@ mod tests {
     }
 
     #[test]
+    fn drop_on_own_position_keeps_order_and_selection() {
+        // (from, before): before itself, before its right neighbour, and the last column at the end.
+        for (from, before) in [(0, 0), (0, 1), (2, 2), (2, 3), (3, 3), (3, 4)] {
+            let mut order = vec![0, 1, 2, 3];
+            let changed = move_col(&mut order, from, before);
+            assert_eq!(order, [0, 1, 2, 3], "order after move {from} before {before}");
+            assert!(!changed, "selection kept after move {from} before {before}");
+        }
+    }
+
+    #[test]
     fn cells_format_by_type() {
         assert_eq!(format_cell(&Value::Null), ("NULL".into(), CellKind::Null));
         assert_eq!(format_cell(&Value::Int(-5)), ("-5".into(), CellKind::Number));
