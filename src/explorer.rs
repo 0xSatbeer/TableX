@@ -104,6 +104,11 @@ fn opens_tab(kind: NodeKind) -> bool {
     matches!(kind, NodeKind::Object(ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView))
 }
 
+/// A row estimate rounded for the tree: `999`, `1.2k`, `12k`, `1.2M`.
+fn row_estimate_label(_rows: Option<u64>) -> Option<String> {
+    None
+}
+
 fn part_label(part: Part) -> &'static str {
     match part {
         Part::Columns => "Columns",
@@ -177,6 +182,8 @@ struct FlatNode {
     count: Option<usize>,
     expandable: bool,
     expanded: bool,
+    /// Muted text after the label: a table's row estimate or a column's type.
+    suffix: Option<SharedString>,
 }
 
 fn group_label(kind: ObjectKind) -> &'static str {
@@ -241,6 +248,7 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
             count: None,
             expandable: false,
             expanded: false,
+            suffix: None,
         };
         let key = format!("{ci}");
         let open = push(FlatNode { expandable: !conn.databases.is_empty(), ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
@@ -801,7 +809,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, other_names, rename_swallows};
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -1032,5 +1040,44 @@ mod tests {
                 (NodeKind::Part(Part::Indexes), "Indexes".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn row_estimate_labels() {
+        let cases = [
+            (None, None),
+            (Some(0), Some("0")),
+            (Some(1), Some("1")),
+            (Some(999), Some("999")),
+            (Some(1000), Some("1k")),
+            (Some(1234), Some("1.2k")),
+            (Some(1950), Some("2k")),
+            (Some(9_999), Some("10k")),
+            (Some(10_000), Some("10k")),
+            (Some(12_345), Some("12k")),
+            (Some(99_999), Some("100k")),
+            (Some(999_499), Some("999k")),
+            (Some(999_500), Some("1M")),
+            (Some(999_999), Some("1M")),
+            (Some(1_000_000), Some("1M")),
+            (Some(1_234_567), Some("1.2M")),
+            (Some(12_345_678), Some("12M")),
+            (Some(1_500_000_000), Some("1.5B")),
+        ];
+        for (rows, want) in cases {
+            assert_eq!(row_estimate_label(rows).as_deref(), want, "{rows:?}");
+        }
+
+        let ws = &mock::workspaces()[0];
+        let nodes = flatten(ws, &Default::default(), &Default::default(), true);
+        let first = |kind| nodes.iter().find(|n| n.kind == NodeKind::Object(kind)).unwrap();
+        let table = first(ObjectKind::Table);
+        let conn = ws.connections.iter().find(|c| c.status == ConnectionStatus::Connected).unwrap();
+        let obj = conn.databases[0].schemas[0].objects.iter().find(|o| o.kind == ObjectKind::Table).unwrap();
+        assert_eq!(obj.name, table.label.as_ref());
+        let estimate = obj.row_estimate;
+        assert_eq!(table.suffix.as_deref(), row_estimate_label(estimate).as_deref(), "table row shows its estimate");
+        assert!(table.suffix.is_some());
+        assert_eq!(first(ObjectKind::View).suffix, None, "views have no estimate");
     }
 }
