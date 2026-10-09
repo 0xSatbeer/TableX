@@ -32,6 +32,12 @@ enum NodeKind {
     ConnError,
 }
 
+/// The trimmed name to commit, or the message to show inline. `others` are the other connections'
+/// names; uniqueness is case-sensitive.
+fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
+    Ok(input.to_string())
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct FlatNode {
     /// Stable path key (`conn/db/schema/group/object`, by index), used for the expanded set.
@@ -601,7 +607,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of};
+    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename};
     use crate::{mock, model::{ConnectionStatus, ObjectKind}};
 
     #[test]
@@ -665,5 +671,23 @@ mod tests {
         // Every kept node is a match or an ancestor of one, and the match has its full chain above it.
         assert_eq!((0..kept[at].depth).filter(|d| kept[..at].iter().any(|n| n.depth == *d)).count(), kept[at].depth);
         assert!(kept.len() < all.len());
+    }
+
+    #[test]
+    fn validate_rename_cases() {
+        let others = ["local.db", "staging-pg"];
+        let cases = [
+            ("  prod-main ", Ok("prod-main")),
+            ("", Err("Name can't be empty")),
+            ("   ", Err("Name can't be empty")),
+            ("local.db", Err("Another connection is already named local.db")),
+            (" local.db ", Err("Another connection is already named local.db")),
+            ("Prod-PG", Ok("Prod-PG")),
+            ("Local.db", Ok("Local.db")),
+        ];
+        for (input, want) in cases {
+            let want = want.map(String::from).map_err(String::from);
+            assert_eq!(validate_rename(input, &others), want, "input {input:?}");
+        }
     }
 }
