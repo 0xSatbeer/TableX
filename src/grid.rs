@@ -53,7 +53,6 @@ impl GridSource for BigEvents {
     }
 }
 
-const GUTTER: Pixels = px(64.);
 const DEFAULT_WIDTH: Pixels = px(160.);
 const MIN_WIDTH: Pixels = px(40.);
 /// Opening width cap: one long JSON column shouldn't push the rest off screen.
@@ -99,9 +98,14 @@ fn is_numeric_type(ty: &str) -> bool {
     (ty.starts_with("int") && !ty.starts_with("interval")) || PREFIXES.iter().any(|p| ty.starts_with(p))
 }
 
+/// Width of the row-number gutter: monospace digits plus padding.
+fn gutter_width(rows: usize) -> Pixels {
+    theme::MONO * 0.6 * gutter_digits(rows) as f32 + theme::SPACE_12
+}
+
 /// Digits the row-number gutter must fit: the row count's, but never fewer than 3.
-fn gutter_digits(_: usize) -> usize {
-    0
+fn gutter_digits(rows: usize) -> usize {
+    (rows.max(1).ilog10() as usize + 1).max(3)
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -641,13 +645,17 @@ impl Grid {
         self.widths[c] = (theme::MONO * 0.6 * chars as f32 + theme::SPACE_16 + theme::SPACE_4).max(MIN_WIDTH);
     }
 
+    fn gutter(&self) -> Pixels {
+        gutter_width(self.source.row_count())
+    }
+
     /// Scroll so the head cell is in view, both axes.
     fn reveal_head(&self) {
         self.scroll.scroll_to_item(self.head.0, ScrollStrategy::Nearest);
         let base = self.scroll.0.borrow().base_handle.clone();
         let offsets = self.offsets();
         let (left, right) = (offsets[self.head.1], offsets[self.head.1 + 1]);
-        let view = base.bounds().size.width - GUTTER;
+        let view = base.bounds().size.width - self.gutter();
         let mut offset = base.offset();
         if left < -offset.x {
             offset.x = -left;
@@ -713,7 +721,7 @@ impl Grid {
         let width = base.bounds().size.width;
         // Bounds are zero before the first layout; the window width over-covers, which is fine.
         let width = if width > Pixels::ZERO { width } else { window.viewport_size().width };
-        (-base.offset().x, width - GUTTER)
+        (-base.offset().x, width - self.gutter())
     }
 
     fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Div> {
@@ -737,7 +745,7 @@ impl Grid {
                     let selected = self.is_selected(r, c);
                     div()
                         .absolute()
-                        .left(GUTTER + offsets[c])
+                        .left(self.gutter() + offsets[c])
                         .w(self.widths[s])
                         .h_full()
                         .px(theme::SPACE_8)
@@ -779,7 +787,7 @@ impl Grid {
                 });
                 div()
                     .relative()
-                    .w(GUTTER + total)
+                    .w(self.gutter() + total)
                     .h(theme::GRID_ROW)
                     .font_family(theme.mono_font_family.clone())
                     .text_size(theme::MONO)
@@ -793,9 +801,9 @@ impl Grid {
                         div()
                             .absolute()
                             .left(scroll_x)
-                            .w(GUTTER)
+                            .w(self.gutter())
                             .h_full()
-                            .px(theme::SPACE_8)
+                            .pr(theme::SPACE_8)
                             .flex()
                             .items_center()
                             .justify_end()
@@ -888,7 +896,7 @@ impl Grid {
                 h_flex()
                     .id(("col", s))
                     .absolute()
-                    .left(GUTTER + offsets[c] - scroll_x)
+                    .left(self.gutter() + offsets[c] - scroll_x)
                     .w(self.widths[s])
                     .h_full()
                     .border_r_1()
@@ -994,7 +1002,7 @@ impl Grid {
                             ),
                     )
             }))
-            .child(div().absolute().left_0().w(GUTTER).h_full().bg(theme.table_head).border_r_1().border_color(theme.border))
+            .child(div().absolute().left_0().w(self.gutter()).h_full().bg(theme.table_head).border_r_1().border_color(theme.border))
     }
 }
 
@@ -1256,6 +1264,14 @@ mod tests {
     }
 
     #[test]
+    fn bools_format_as_words() {
+        let cases = [(true, "true", CellKind::Bool(true)), (false, "false", CellKind::Bool(false))];
+        for (b, text, kind) in cases {
+            assert_eq!(format_cell(&Value::Bool(b)), (text.into(), kind));
+        }
+    }
+
+    #[test]
     fn null_aligns_with_its_column() {
         let cases = [
             ("bigint", true),
@@ -1274,14 +1290,6 @@ mod tests {
         ];
         for (ty, right) in cases {
             assert_eq!(is_numeric_type(ty), right, "type {ty:?}");
-        }
-    }
-
-    #[test]
-    fn bools_format_as_words() {
-        let cases = [(true, "true", CellKind::Bool(true)), (false, "false", CellKind::Bool(false))];
-        for (b, text, kind) in cases {
-            assert_eq!(format_cell(&Value::Bool(b)), (text.into(), kind));
         }
     }
 
