@@ -998,6 +998,25 @@ mod tests {
         }
     }
 
+    #[gpui_kit::test]
+    fn clicking_chrome_keeps_focus_when_not_maximized(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Focusable as _};
+        cx.update(|cx| gpui_kit::init(cx));
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let editor = shell.read_with(&cx, |this, cx| this.editor.focus_handle(cx));
+        cx.update(|window, cx| window.focus(&editor, cx));
+        let bottom_middle = cx.update(|window, _| {
+            let v = window.viewport_size();
+            gpui_kit::point(v.width / 2., v.height - gpui_kit::px(4.))
+        });
+        cx.simulate_click(bottom_middle, Default::default());
+        assert!(cx.update(|window, _| editor.is_focused(window)), "a click on non-focusable chrome must not steal focus");
+    }
+
     /// A Shell with 11 tabs and the overflow list open, its search field focused.
     fn open_overflow(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
         use gpui_kit::AppContext as _;
