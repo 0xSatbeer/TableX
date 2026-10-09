@@ -517,6 +517,44 @@ pub(crate) mod tests {
         assert_eq!((names(&themes), errors), (vec!["Nord".to_string()], vec![]));
     }
 
+    /// Each case is a fresh dir: (files written into it, theme names loaded, errors expected).
+    /// An expected error ending in ": " is matched as a prefix followed by the parse error.
+    #[test]
+    fn user_theme_files_load_skip_or_report() {
+        const TWO: &str = r##"{"name": "Set", "themes": [{"name": "B", "mode": "dark"}, {"name": "A", "mode": "light"}]}"##;
+        let bad = "Couldn't load theme bad.json: ";
+        let cases: [(&[(&str, &str)], &[&str], &[&str]); 11] = [
+            (&[("bad.json", "not json")], &[], &[bad]),
+            (&[("x.txt", NORD)], &[], &[]), // valid theme, wrong extension
+            (&[("nord", NORD)], &[], &[]), // no extension
+            (&[("NORD.JSON", NORD)], &[], &[]), // does not end in `.json`
+            (&[("nord.json", NORD), ("bad.json", "{")], &["Nord"], &[bad]), // a broken file doesn't stop the rest
+            (&[("bad.json", "")], &[], &[bad]),
+            (&[("bad.json", r#"{"themes": 5}"#)], &[], &[bad]), // JSON, but not a theme set
+            (&[("empty.json", "{}")], &[], &[]), // a theme set with no themes
+            (&[("two.json", TWO)], &["A", "B"], &[]),
+            (&[("a.json", "["), ("b.json", "[")], &[], &["Couldn't load theme a.json: ", "Couldn't load theme b.json: "]),
+            (&[], &[], &[]), // empty dir
+        ];
+        for (ix, (files, want_names, want_errors)) in cases.into_iter().enumerate() {
+            let dir = test_dir(&format!("files-{ix}"));
+            for (name, json) in files {
+                std::fs::write(dir.join(name), json).unwrap();
+            }
+            let (themes, errors) = super::load_user_themes(&dir);
+            assert_eq!(names(&themes), want_names, "themes from {files:?}");
+            assert_eq!(errors.len(), want_errors.len(), "errors from {files:?}: {errors:?}");
+            for (got, want) in errors.iter().zip(want_errors) {
+                assert!(got.starts_with(want) && got.len() > want.len(), "error {got:?} should be {want:?} + the parse error");
+            }
+        }
+        // A directory named like a theme file is not a file.
+        let dir = test_dir("files-dir");
+        std::fs::create_dir(dir.join("folder.json")).unwrap();
+        let (themes, errors) = super::load_user_themes(&dir);
+        assert_eq!((names(&themes), errors), (vec![], vec![]), "a dir named folder.json");
+    }
+
     /// Choosing a user theme applies it at once, in its own mode; choosing a built-in goes back.
     #[gpui_kit::test]
     fn choosing_a_user_theme_applies_it_immediately(cx: &mut gpui_kit::TestAppContext) {
