@@ -926,7 +926,7 @@ mod tests {
 
     #[test]
     fn copy_formats_escape_their_syntax() {
-        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into() }, ColumnMeta { name: "b".into(), data_type: "int".into() }];
+        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into(), is_pk: false }, ColumnMeta { name: "b".into(), data_type: "int".into(), is_pk: false }];
         let rows = vec![vec![Value::Text("it's, \"x\"|".into()), Value::Null], vec![Value::Text("y".into()), Value::Int(2)]];
         assert_eq!(csv(&cols, &rows), "a,b\n\"it's, \"\"x\"\"|\",\ny,2\n");
         assert_eq!(json(&cols, &rows), "[\n  {\"a\": \"it's, \\\"x\\\"|\", \"b\": null},\n  {\"a\": \"y\", \"b\": 2}\n]\n");

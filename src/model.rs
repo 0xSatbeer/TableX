@@ -128,6 +128,8 @@ pub struct DbObject {
     pub columns: Vec<Column>,
     pub keys: Vec<Key>,
     pub indexes: Vec<Index>,
+    /// Tables only; views and other kinds have none.
+    pub row_estimate: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,6 +159,7 @@ pub enum Key {
 pub struct ColumnMeta {
     pub name: Arc<str>,
     pub data_type: Arc<str>,
+    pub is_pk: bool,
 }
 
 pub type Row = Box<[Value]>;
