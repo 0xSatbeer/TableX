@@ -167,6 +167,8 @@ struct Shell {
     layout: LayoutState,
     status_bar: Entity<statusbar::StatusBar>,
     bottom_panel: Entity<panel::BottomPanel>,
+    /// Keeps focus under the shell's key context when maximize unmounts the focused editor, so Esc reaches it.
+    focus_handle: FocusHandle,
     gallery_visible: bool,
     /// Set when a tab is activated; the next render moves keyboard focus into its content.
     focus_content: bool,
@@ -246,6 +248,7 @@ impl Shell {
             },
             status_bar: cx.new(|cx| statusbar::StatusBar::new(window, cx)),
             bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace, window, cx)),
+            focus_handle: cx.focus_handle(),
             gallery_visible: false,
             focus_content: false,
             theme: theme::ThemeChoice::default(),
@@ -623,6 +626,7 @@ impl Render for Shell {
         v_flex()
             .relative()
             .size_full()
+            .track_focus(&self.focus_handle)
             .when(self.layout.panel_maximized, |d| d.key_context(PANEL_MAXIMIZED_CONTEXT))
             .bg(theme.background)
             .text_size(theme::UI)
@@ -635,8 +639,11 @@ impl Render for Shell {
                 this.layout.toggle_bottom();
                 cx.notify();
             }))
-            .on_action(cx.listener(|this, _: &MaximizePanel, _, cx| {
+            .on_action(cx.listener(|this, _: &MaximizePanel, window, cx| {
                 this.layout.toggle_panel_maximize();
+                if this.layout.panel_maximized {
+                    window.focus(&this.focus_handle, cx);
+                }
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &RestorePanel, _, cx| {
