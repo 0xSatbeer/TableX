@@ -202,7 +202,7 @@ mod tests {
         let mut t = Tabs::new(vec![tab("a", false), tab("b", false), tab("c", false)]);
         t.activate(2);
         t.close(2);
-        assert_eq!(t.active, 1, "closing the last active tab activates its left neighbour");
+        assert_eq!(t.active, 0, "closing the active tab activates the next MRU tab");
         t.close(0);
         assert_eq!((keys(&t), t.active), (vec!["b"], 0));
         t.reopen();
@@ -307,6 +307,33 @@ mod tests {
             run(&mut t, steps);
             assert_eq!((t.tabs.len(), t.active, t.mru.len()), (0, 0, 0), "no tabs, steps {steps}");
         }
+    }
+
+    #[test]
+    fn close_activates_next_mru_tab() {
+        // (MRU before, steps before the close, closed key, active after, MRU after); tabs [a, b, c]
+        let cases: [(&[&'static str], &str, &str, &str, &[&str]); 7] = [
+            (&["c", "b", "a"], "", "c", "b", &["b", "a"]),
+            (&["a", "c", "b"], "", "a", "c", &["c", "b"]),
+            (&["c", "b", "a"], "", "a", "c", &["c", "b"]),
+            (&["c", "b", "a"], "", "b", "c", &["c", "a"]),
+            // Mid-cycle: the previewed tab is committed first, as if Ctrl were released.
+            (&["c", "b", "a"], "n", "b", "c", &["c", "a"]),
+            (&["c", "b", "a"], "n", "a", "b", &["b", "c"]),
+            (&["c", "b", "a"], "nn", "c", "a", &["a", "b"]),
+        ];
+        for (mru, steps, closed, active, want) in cases {
+            let mut t = with_mru(mru);
+            run(&mut t, steps);
+            let ix = t.tabs.iter().position(|x| x.key == closed).unwrap();
+            t.close(ix);
+            assert_eq!(state(&t), (active, want.to_vec()), "MRU {mru:?}, steps {steps}, close {closed}");
+            t.commit();
+            assert_eq!(state(&t), (active, want.to_vec()), "release after the close changes nothing");
+        }
+        let mut t = with_mru(&["a"]);
+        t.close(0);
+        assert_eq!((t.tabs.len(), t.active, t.mru.len()), (0, 0, 0), "closing the last tab");
     }
 
     #[test]
