@@ -40,6 +40,11 @@ pub fn show_search(tab_count: usize) -> bool {
     tab_count > SEARCH_MIN_TABS
 }
 
+/// Indices of the tabs matching `query` in the overflow search.
+pub fn match_tabs<C>(_tabs: &[EditorTab<C>], _query: &str) -> Vec<usize> {
+    Vec::new()
+}
+
 pub struct EditorTab<C> {
     /// Identity: opening the same key again activates the existing tab.
     pub key: SharedString,
@@ -483,5 +488,29 @@ mod tests {
         for (count, shown) in [(0, false), (1, false), (10, false), (11, true), (12, true)] {
             assert_eq!(super::show_search(count), shown, "{count} tabs");
         }
+    }
+
+    fn titled(title: &'static str) -> EditorTab<()> {
+        EditorTab { title: title.into(), ..tab(title, false) }
+    }
+
+    fn matches(titles: &[&'static str], query: &str) -> Vec<&'static str> {
+        let tabs: Vec<_> = titles.iter().map(|t| titled(t)).collect();
+        super::match_tabs(&tabs, query).into_iter().map(|ix| titles[ix]).collect()
+    }
+
+    #[test]
+    fn match_tabs_filters_by_title() {
+        let all = ["orders", "users", "ord_items"];
+        for (query, want) in [
+            ("ord", vec!["orders", "ord_items"]),
+            ("ORD", vec!["orders", "ord_items"]),
+            ("items", vec!["ord_items"]),
+            ("", vec!["orders", "users", "ord_items"]),
+            ("zzz", vec![]),
+        ] {
+            assert_eq!(matches(&all, query), want, "query {query:?}");
+        }
+        assert!(matches(&[], "ord").is_empty());
     }
 }
