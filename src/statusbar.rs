@@ -109,8 +109,8 @@ fn rss_anon_mb(proc_status: &str) -> Option<u64> {
 
 /// Status-bar readout for a `rows` × `cols` selection; `None` for one cell or none.
 pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Value>) -> Option<String> {
-    let _ = (rows, cols, values.into_iter());
-    Some(String::new())
+    let _ = values.into_iter();
+    (rows * cols > 1).then(String::new)
 }
 
 impl Render for StatusBar {
