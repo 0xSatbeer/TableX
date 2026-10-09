@@ -223,23 +223,35 @@ fn target(conn: &Connection) -> String {
 /// in `loading` show a single loading row instead of their objects.
 fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>, all: bool) -> Vec<FlatNode> {
     let mut out = Vec::new();
-    let mut push = |key: String, kind, label: &str, depth, conn, count, expandable: bool| {
+    let mut push = |mut node: FlatNode| {
         // Filtering opens everything but structure, so a query doesn't list every table's columns.
-        let open = expandable && (expanded.contains(&key) || all && !matches!(kind, NodeKind::Object(_) | NodeKind::Part(_)));
-        out.push(FlatNode { key, kind, label: label.to_string().into(), depth, conn, count, expandable, expanded: open });
+        let structure = matches!(node.kind, NodeKind::Object(_) | NodeKind::Part(_));
+        node.expanded = node.expandable && (expanded.contains(&node.key) || all && !structure);
+        let open = node.expanded;
+        out.push(node);
         open
     };
     for (ci, conn) in ws.connections.iter().enumerate() {
+        let node = |key: String, kind, label: &str, depth| FlatNode {
+            key,
+            kind,
+            label: label.to_string().into(),
+            depth,
+            conn: ci,
+            count: None,
+            expandable: false,
+            expanded: false,
+        };
         let key = format!("{ci}");
-        let open = push(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0, ci, None, !conn.databases.is_empty());
+        let open = push(FlatNode { expandable: !conn.databases.is_empty(), ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
         match &conn.status {
             ConnectionStatus::Connected => {}
             ConnectionStatus::Error(msg) => {
-                push(format!("{key}/error"), NodeKind::ConnError, msg, 1, ci, None, false);
+                push(node(format!("{key}/error"), NodeKind::ConnError, msg, 1));
                 continue;
             }
             ConnectionStatus::Connecting if open => {
-                push(format!("{key}/loading"), NodeKind::Loading, &format!("Connecting to {}…", target(conn)), 1, ci, None, false);
+                push(node(format!("{key}/loading"), NodeKind::Loading, &format!("Connecting to {}…", target(conn)), 1));
                 continue;
             }
             ConnectionStatus::Connecting | ConnectionStatus::Disconnected => continue,
@@ -249,16 +261,16 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
         }
         for (di, db) in conn.databases.iter().enumerate() {
             let key = format!("{key}/{di}");
-            if !push(key.clone(), NodeKind::Database, &db.name, 1, ci, None, !db.schemas.is_empty()) {
+            if !push(FlatNode { expandable: !db.schemas.is_empty(), ..node(key.clone(), NodeKind::Database, &db.name, 1) }) {
                 continue;
             }
             for (si, schema) in db.schemas.iter().enumerate() {
                 let key = format!("{key}/{si}");
-                if !push(key.clone(), NodeKind::Schema, &schema.name, 2, ci, None, !schema.objects.is_empty()) {
+                if !push(FlatNode { expandable: !schema.objects.is_empty(), ..node(key.clone(), NodeKind::Schema, &schema.name, 2) }) {
                     continue;
                 }
                 if loading.contains(&key) {
-                    push(format!("{key}/loading"), NodeKind::Loading, "Loading objects…", 3, ci, None, false);
+                    push(node(format!("{key}/loading"), NodeKind::Loading, "Loading objects…", 3));
                     continue;
                 }
                 let mut groups: BTreeMap<ObjectKind, Vec<&DbObject>> = BTreeMap::new();
@@ -267,19 +279,20 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                 }
                 for (kind, objects) in groups {
                     let key = format!("{key}/{}", kind.as_str());
-                    let label = group_label(kind);
-                    if !push(key.clone(), NodeKind::Group(kind), label, 3, ci, Some(objects.len()), true) {
+                    let group = node(key.clone(), NodeKind::Group(kind), group_label(kind), 3);
+                    if !push(FlatNode { count: Some(objects.len()), expandable: true, ..group }) {
                         continue;
                     }
                     for (oi, obj) in objects.into_iter().enumerate() {
                         let key = format!("{key}/{oi}");
                         let kind = NodeKind::Object(kind);
-                        if !push(key.clone(), kind, &obj.name, 4, ci, None, opens_tab(kind)) {
+                        if !push(FlatNode { expandable: opens_tab(kind), ..node(key.clone(), kind, &obj.name, 4) }) {
                             continue;
                         }
                         let parts = [(Part::Columns, obj.columns.len()), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
                         for (part, n) in parts {
-                            push(format!("{key}/{}", part_label(part)), NodeKind::Part(part), part_label(part), 5, ci, Some(n), true);
+                            let label = part_label(part);
+                            push(FlatNode { count: Some(n), expandable: true, ..node(format!("{key}/{label}"), NodeKind::Part(part), label, 5) });
                         }
                     }
                 }
