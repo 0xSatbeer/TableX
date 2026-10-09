@@ -184,16 +184,15 @@ fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: us
     Some(match key {
         "up" => (r.saturating_sub(1), c),
         "down" => ((r + 1).min(rows - 1), c),
-        "left" => (r, c.saturating_sub(1)),
-        "right" => (r, (c + 1).min(cols - 1)),
+        "left" => (r, step(c, false)),
+        "right" => (r, step(c, true)),
         "pageup" => (r.saturating_sub(page.max(1)), c),
         "pagedown" => ((r + page.max(1)).min(rows - 1), c),
         "home" if secondary => (0, first),
         "end" if secondary => (rows - 1, last),
-        "home" => (r, 0),
-        "end" => (r, cols - 1),
-        "tab" if shift => (r, c.saturating_sub(1)),
-        "tab" => (r, (c + 1).min(cols - 1)),
+        "home" => (r, first),
+        "end" => (r, last),
+        "tab" => (r, step(c, !shift)),
         _ => return None,
     })
 }
