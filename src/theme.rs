@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::{App, Hsla, Pixels, Rgba, SharedString, Window, WindowAppearance, px};
+use gpui_kit::{App, Hsla, Pixels, Rgba, SharedString, Window, px};
 use gpui_kit::component::theme::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
 
 use crate::model::ObjectKind;
@@ -112,11 +112,29 @@ impl UserThemeDir {
 
 /// Loads every theme in `dir/*.json`, with one notification message per file or theme skipped.
 pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
-    match std::fs::read_dir(dir) {
-        Ok(_) => (Vec::new(), Vec::new()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Vec::new(), Vec::new()),
-        Err(e) => (Vec::new(), vec![format!("Couldn't read theme folder {}: {e}", dir.display())]),
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), Vec::new()),
+        Err(e) => return (Vec::new(), vec![format!("Couldn't read theme folder {}: {e}", dir.display())]),
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|e| Some(e.ok()?.path()))
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let mut themes = Vec::new();
+    for path in files {
+        // A scratch registry parses the theme-set format without a JSON dependency of our own.
+        let mut set = ThemeRegistry::default();
+        let Ok(json) = std::fs::read_to_string(&path) else { continue };
+        if set.load_themes_from_str(&json).is_err() {
+            continue;
+        }
+        let mut found: Vec<_> = set.themes().values().cloned().collect();
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+        themes.extend(found);
     }
+    (themes, Vec::new())
 }
 
 /// The user's theme setting. `System` follows the OS light/dark preference live.
@@ -150,19 +168,28 @@ impl ThemeChoice {
         }
     }
 
-    fn mode(&self, os: WindowAppearance) -> ThemeMode {
-        match self {
-            Self::Dark | Self::User(_) => ThemeMode::Dark,
-            Self::Light => ThemeMode::Light,
-            Self::System => os.into(),
-        }
-    }
-
-    /// Applies the theme. Called again on OS appearance changes; a no-op unless `System`.
+    /// Applies the theme. Called again on OS appearance changes and user theme reloads;
+    /// a no-op when nothing changed. A user theme that no longer exists falls back to Dark.
     pub fn apply(&self, user: &[Rc<ThemeConfig>], window: &Window, cx: &mut App) {
-        let _ = user;
-        let mode = self.mode(window.appearance());
-        if cx.global::<Theme>().mode != mode {
+        let theme = cx.global::<Theme>();
+        let builtin = |name: &str| ThemeRegistry::global(cx).themes().get(name).cloned();
+        let mut dark = builtin("QueryX Dark").unwrap_or_else(|| theme.dark_theme.clone());
+        let mut light = builtin("QueryX Light").unwrap_or_else(|| theme.light_theme.clone());
+        let mode = match self {
+            Self::Light => ThemeMode::Light,
+            Self::System => window.appearance().into(),
+            Self::User(name) => match user.iter().find(|t| t.name == *name) {
+                Some(t) => {
+                    *(if t.mode.is_dark() { &mut dark } else { &mut light }) = t.clone();
+                    t.mode
+                }
+                None => ThemeMode::Dark,
+            },
+            Self::Dark => ThemeMode::Dark,
+        };
+        // `Theme::change` loads whichever of these two matches the mode it is given.
+        if theme.mode != mode || !Rc::ptr_eq(&theme.dark_theme, &dark) || !Rc::ptr_eq(&theme.light_theme, &light) {
+            Theme::update(cx, |theme| (theme.dark_theme, theme.light_theme) = (dark, light));
             Theme::change(mode, None, cx);
         }
     }

@@ -301,6 +301,9 @@ impl Shell {
     fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity().downgrade();
         let current = self.theme.clone();
+        // User themes from the `UserThemeDir`, under the built-ins.
+        let user = self.user_themes.iter().map(|t| theme::ThemeChoice::User(t.name.clone()));
+        let choices: Vec<_> = theme::ThemeChoice::ALL.into_iter().chain(user).collect();
         Button::new("settings")
             .ghost()
             .small()
@@ -308,7 +311,10 @@ impl Shell {
             .tooltip("Settings")
             .dropdown_menu(move |mut menu, _, _| {
                 menu = menu.label("Theme");
-                for choice in theme::ThemeChoice::ALL {
+                for (ix, choice) in choices.iter().cloned().enumerate() {
+                    if ix == theme::ThemeChoice::ALL.len() {
+                        menu = menu.separator();
+                    }
                     let shell = shell.clone();
                     menu = menu.item(PopupMenuItem::new(choice.label()).checked(choice == current).on_click(
                         move |_, window, cx| {
