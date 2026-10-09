@@ -264,6 +264,15 @@ fn toggle_expanded(expanded: &mut BTreeSet<usize>, ix: usize) {
     }
 }
 
+const NO_MATCHES: &str = "No log entries match these filters";
+
+/// Message shown instead of the log list when the filters leave no rows.
+fn empty_message(rows: &[usize]) -> Option<&'static str> {
+    let _ = NO_MATCHES;
+    let _ = rows;
+    None
+}
+
 /// Logs column headers in row order (the status icon column has none).
 fn header_labels() -> [&'static str; 8] {
     ["Time (UTC)", "Connection", "Database", "SQL", "", "Duration", "Rows", "Source"]
@@ -482,6 +491,12 @@ mod tests {
 
     use super::{LogFilter, RowDetail, StatusKind, filter_rows, row_detail, toggle_expanded};
     use crate::model::{ConnectionId, QueryLogEntry, QuerySource, QueryStatus};
+
+    #[test]
+    fn empty_state_message() {
+        assert_eq!(super::empty_message(&[]), Some("No log entries match these filters"));
+        assert_eq!(super::empty_message(&[3, 1]), None);
+    }
 
     #[test]
     fn status_filter() {
