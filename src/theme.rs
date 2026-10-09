@@ -91,8 +91,16 @@ pub struct UserThemeDir {
 impl UserThemeDir {
     /// `queryx/themes/` under the platform config dir; `env` reads an environment variable.
     pub fn resolve(env: impl Fn(&str) -> Option<OsString>) -> Option<Self> {
-        let _ = env;
-        None
+        // Empty or relative values count as unset, as the XDG spec says.
+        let abs = |k: &str| env(k).map(PathBuf::from).filter(|p| p.is_absolute());
+        let config = if cfg!(target_os = "macos") {
+            abs("HOME").map(|h| h.join("Library/Application Support"))
+        } else if cfg!(windows) {
+            abs("APPDATA")
+        } else {
+            abs("XDG_CONFIG_HOME").or_else(|| abs("HOME").map(|h| h.join(".config")))
+        };
+        config.map(|c| Self { dir: c.join("queryx/themes") })
     }
 }
 
