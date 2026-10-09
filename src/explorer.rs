@@ -45,6 +45,26 @@ fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
     }
 }
 
+/// An inline rename in progress on a connection row.
+struct Rename {
+    conn: usize,
+    text: String,
+    error: Option<String>,
+}
+
+#[derive(Debug, PartialEq)]
+enum RenameKey {
+    Open,
+    Commit(String),
+    Cancel,
+}
+
+impl Rename {
+    fn key(&mut self, key: &str, key_char: Option<&str>, others: &[&str]) -> RenameKey {
+        RenameKey::Open
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct FlatNode {
     /// Stable path key (`conn/db/schema/group/object`, by index), used for the expanded set.
@@ -614,7 +634,7 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename};
+    use super::{NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey};
     use crate::{mock, model::{ConnectionStatus, ObjectKind}};
 
     #[test]
@@ -696,5 +716,30 @@ mod tests {
             let want = want.map(String::from).map_err(String::from);
             assert_eq!(validate_rename(input, &others), want, "input {input:?}");
         }
+    }
+
+    #[test]
+    fn rename_keys() {
+        let others = ["local.db"];
+        let mut rn = Rename { conn: 0, text: "prod-pg".into(), error: None };
+        // Typing edits the buffer and the input stays open.
+        assert_eq!(rn.key("x", Some("x"), &others), RenameKey::Open);
+        assert_eq!(rn.text, "prod-pgx");
+        assert_eq!(rn.key("backspace", None, &others), RenameKey::Open);
+        assert_eq!(rn.text, "prod-pg");
+        // Enter commits the trimmed name.
+        rn.text = "  prod-main ".into();
+        assert_eq!(rn.key("enter", None, &others), RenameKey::Commit("prod-main".into()));
+        // A rejected name keeps the input open with the message; typing clears it.
+        rn.text = "local.db".into();
+        assert_eq!(rn.key("enter", None, &others), RenameKey::Open);
+        assert_eq!(rn.error.as_deref(), Some("Another connection is already named local.db"));
+        rn.text.clear();
+        assert_eq!(rn.key("enter", None, &others), RenameKey::Open);
+        assert_eq!(rn.error.as_deref(), Some("Name can't be empty"));
+        assert_eq!(rn.key("a", Some("a"), &others), RenameKey::Open);
+        assert_eq!(rn.error, None);
+        // Esc cancels.
+        assert_eq!(rn.key("escape", None, &others), RenameKey::Cancel);
     }
 }
