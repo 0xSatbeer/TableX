@@ -557,6 +557,29 @@ pub(crate) mod tests {
         assert_eq!((names(&themes), errors), (vec![], vec![]), "a dir named folder.json");
     }
 
+    #[test]
+    fn user_theme_named_like_a_built_in_is_skipped_and_reported() {
+        let set = |names: &[&str]| {
+            let themes: Vec<String> = names.iter().map(|n| format!(r#"{{"name": "{n}", "mode": "dark"}}"#)).collect();
+            format!(r#"{{"name": "Set", "themes": [{}]}}"#, themes.join(","))
+        };
+        let clash = |theme: &str, file: &str| format!("Theme {theme} in {file} clashes with a built-in theme");
+        // (file, themes in it, themes loaded, errors)
+        let cases = [
+            ("dark.json", vec!["QueryX Dark"], vec![], vec![clash("QueryX Dark", "dark.json")]),
+            ("light.json", vec!["QueryX Light"], vec![], vec![clash("QueryX Light", "light.json")]),
+            ("mixed.json", vec!["Nord", "QueryX Dark"], vec!["Nord"], vec![clash("QueryX Dark", "mixed.json")]), // the rest of the file loads
+            ("both.json", vec!["QueryX Dark", "QueryX Light"], vec![], vec![clash("QueryX Dark", "both.json"), clash("QueryX Light", "both.json")]),
+            ("case.json", vec!["queryx dark"], vec!["queryx dark"], vec![]), // names match exactly
+        ];
+        for (ix, (file, inside, want_names, want_errors)) in cases.into_iter().enumerate() {
+            let dir = test_dir(&format!("clash-{ix}"));
+            std::fs::write(dir.join(file), set(&inside)).unwrap();
+            let (themes, errors) = super::load_user_themes(&dir);
+            assert_eq!((names(&themes), errors), (want_names.iter().map(|n| n.to_string()).collect(), want_errors), "{file} with {inside:?}");
+        }
+    }
+
     /// Choosing a user theme applies it at once, in its own mode; choosing a built-in goes back.
     #[gpui_kit::test]
     fn choosing_a_user_theme_applies_it_immediately(cx: &mut gpui_kit::TestAppContext) {
