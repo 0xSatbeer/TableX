@@ -184,12 +184,22 @@ struct RowDetail {
 }
 
 fn row_detail(entry: &QueryLogEntry) -> RowDetail {
-    RowDetail { sql: entry.sql.clone(), error: None }
+    RowDetail {
+        sql: entry.sql.clone(),
+        error: match &entry.status {
+            QueryStatus::Err(message) => Some(message.clone()),
+            _ => None,
+        },
+    }
 }
 
 /// Click on a row: expand it, or collapse it when already open. Keyed by log index, so an
 /// expanded row stays expanded while filters hide and show it.
-fn toggle_expanded(_expanded: &mut BTreeSet<usize>, _ix: usize) {}
+fn toggle_expanded(expanded: &mut BTreeSet<usize>, ix: usize) {
+    if !expanded.remove(&ix) {
+        expanded.insert(ix);
+    }
+}
 
 // ponytail: keyword list, not a parser; the log line only needs a hint of structure.
 // Swap for the editor's tree-sitter highlighter if rows need full fidelity.
