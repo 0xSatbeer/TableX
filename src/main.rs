@@ -123,7 +123,10 @@ impl LayoutState {
     }
 
     /// Ctrl+Alt+F / reveal: shows the explorer if hidden; never hides it.
-    fn show_explorer(&mut self) {}
+    fn show_explorer(&mut self) {
+        self.maximized_from = None;
+        self.explorer_visible = true;
+    }
 
     fn toggle_maximize(&mut self) {
         match self.maximized_from.take() {
