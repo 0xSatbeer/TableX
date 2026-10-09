@@ -589,8 +589,10 @@ impl Render for Shell {
             cx.notify();
         }))
         .child(self.tab_bar(cx));
-        // Stay pending while maximized: the content is unmounted, and restore consumes it.
-        if !self.layout.panel_maximized && std::mem::take(&mut self.focus_content) {
+        // Every way out of maximize refocuses the content: it is unmounted while maximized, so stay pending.
+        if self.layout.panel_maximized {
+            self.focus_content = true;
+        } else if std::mem::take(&mut self.focus_content) {
             let handle = match self.tabs.active().map(|t| &t.content) {
                 Some(TabContent::Grid(grid)) => Some(grid.focus_handle(cx)),
                 Some(TabContent::Console) => Some(self.editor.focus_handle(cx)),
@@ -644,14 +646,11 @@ impl Render for Shell {
                 this.layout.toggle_panel_maximize();
                 if this.layout.panel_maximized {
                     window.focus(&this.focus_handle, cx);
-                } else {
-                    this.focus_content = true;
                 }
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &RestorePanel, _, cx| {
                 this.layout.restore_panel();
-                this.focus_content = true;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &MaximizeEditor, _, cx| {
