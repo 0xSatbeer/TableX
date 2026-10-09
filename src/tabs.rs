@@ -514,4 +514,17 @@ mod tests {
         }
         assert!(matches(&[], "ord").is_empty());
     }
+
+    #[test]
+    fn match_tabs_filters_by_path() {
+        let origin = |path: &'static str| Some(Origin { color: 0, production: false, path: path.into() });
+        let tabs = [
+            EditorTab { origin: origin("prod-pg › app_db › public"), ..titled("users") },
+            EditorTab { origin: origin("prod-pg › app_db › audit"), ..titled("log") },
+            titled("big_events"),
+        ];
+        for (query, want) in [("PUBLIC", vec![0]), ("public", vec![0]), ("app_db", vec![0, 1]), ("prod-pg › app_db › audit", vec![1]), ("sample", vec![])] {
+            assert_eq!(super::match_tabs(&tabs, query), want, "query {query:?}");
+        }
+    }
 }
