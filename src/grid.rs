@@ -209,7 +209,7 @@ type Selection = ((usize, usize), (usize, usize), Vec<(Range<usize>, Range<usize
 /// Selection after a header drop: a real move (`Some(first visible display column)`) resets it
 /// to row 0 of that column, a no-op drop (`None`) keeps it.
 fn selection_after_drop(reset_col: Option<usize>, selection: Selection) -> Selection {
-    selection
+    reset_col.map_or(selection, |c| ((0, c), (0, c), Vec::new()))
 }
 
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
