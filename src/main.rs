@@ -900,4 +900,17 @@ mod tests {
             assert!(this.overflow_open, "list stays open");
         });
     }
+
+    #[gpui_kit::test]
+    fn overflow_list_closes_when_closing_tabs_drops_the_search_field(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_overflow(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        shell.update(&mut cx, |this, cx| {
+            while crate::tabs::show_search(this.tabs.tabs.len()) {
+                this.tabs.close(0);
+                this.tab_changed(cx);
+            }
+            assert!(!this.overflow_open, "open flag cleared once the list has no search field");
+        });
+    }
 }
