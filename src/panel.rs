@@ -164,8 +164,8 @@ impl Default for LogFilter {
 }
 
 /// Indexes of `log` entries that pass `filter`.
-fn filter_rows(log: &[QueryLogEntry], _filter: &LogFilter) -> Vec<usize> {
-    (0..log.len()).collect()
+fn filter_rows(log: &[QueryLogEntry], filter: &LogFilter) -> Vec<usize> {
+    (0..log.len()).filter(|&ix| filter.statuses.contains(&StatusKind::of(&log[ix].status))).collect()
 }
 
 // ponytail: keyword list, not a parser; the log line only needs a hint of structure.
