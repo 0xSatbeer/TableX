@@ -217,21 +217,18 @@ fn selection_after_drop(reset_col: Option<usize>, selection: Selection) -> Selec
 type Block = (Range<usize>, Range<usize>);
 
 /// Columns and rows of one selected block, hidden columns skipped, in display order.
-fn block_data(block: &Block, order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: &impl Fn(usize) -> Vec<Value>) -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
+fn block_data<R: AsRef<[Value]>>(block: &Block, order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: &impl Fn(usize) -> R) -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
     let ix = copy_cols(order, hidden, block.1.clone());
-    (pick(columns, &ix), block.0.clone().map(|r| pick(&row(r), &ix)).collect())
+    (pick(columns, &ix), block.0.clone().map(|r| pick(row(r).as_ref(), &ix)).collect())
 }
 
 /// Every range in the order it was added: the extras, then the active one.
 fn ranges_in_order(extra: &[Block], active: Block) -> Vec<Block> {
-    // stub
-    let mut all = vec![active];
-    all.extend(extra.iter().cloned());
-    all
+    extra.iter().cloned().chain(std::iter::once(active)).collect()
 }
 
 /// One `format` block per range, separated by a blank line.
-fn copy_ranges(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> Vec<Value>) -> String {
+fn copy_ranges<R: AsRef<[Value]>>(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> R) -> String {
     let blocks: Vec<String> = ranges
         .iter()
         .map(|r| {
@@ -648,10 +645,8 @@ impl Grid {
     }
 
     fn copy_as(&self, format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, cx: &mut Context<Self>) {
-        let (rows, cols) = self.selection();
-        let cols = copy_cols(&self.col_order, &self.hidden, cols);
-        let rows: Vec<Vec<Value>> = rows.map(|r| pick(&self.row(r), &cols)).collect();
-        let text = format(&pick(self.source.columns(), &cols), &rows);
+        let ranges = ranges_in_order(&self.extra, self.selection());
+        let text = copy_ranges(format, &ranges, &self.col_order, &self.hidden, self.source.columns(), |r| self.row(r));
         cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
 
