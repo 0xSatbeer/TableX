@@ -150,6 +150,7 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
         v.keys.clear();
         v.indexes.clear();
         v.row_estimate = None;
+        v.columns.iter_mut().for_each(|c| c.is_pk = false);
         objects.push(v);
     }
     objects.push(plain(ObjectKind::MaterializedView, "revenue_by_month"));
@@ -206,7 +207,7 @@ fn table(name: String, r: u64) -> DbObject {
 // ---------------------------------------------------------------- result sets
 
 fn meta(cols: &[(&str, &str)]) -> Vec<ColumnMeta> {
-    cols.iter().map(|(n, t)| ColumnMeta { name: (*n).into(), data_type: (*t).into(), is_pk: false }).collect()
+    cols.iter().map(|(n, t)| ColumnMeta { name: (*n).into(), data_type: (*t).into(), is_pk: *n == "id" }).collect()
 }
 
 pub fn big_events_columns() -> Vec<ColumnMeta> {
