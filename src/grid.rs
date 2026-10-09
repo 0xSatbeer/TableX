@@ -162,8 +162,8 @@ fn move_col(order: &mut Vec<usize>, from: usize, before: usize) -> bool {
 
 /// Source columns a copy of display positions `display` emits, in display order, hidden ones skipped.
 fn copy_cols(order: &[usize], hidden: &[bool], display: Range<usize>) -> Vec<usize> {
-    let _ = (order, hidden);
-    display.collect()
+    let _ = order;
+    display.filter(|&d| !hidden[d]).collect()
 }
 
 /// `items` at the indices `ix`, in that order.
