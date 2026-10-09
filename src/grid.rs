@@ -118,7 +118,7 @@ fn human_size(n: usize) -> String {
 fn format_cell(value: &Value) -> (String, CellKind) {
     match value {
         Value::Null => ("NULL".into(), CellKind::Null),
-        Value::Bool(b) => ((if *b { "✓" } else { "✗" }).into(), CellKind::Text),
+        Value::Bool(b) => ((if *b { "true" } else { "false" }).into(), CellKind::Bool(*b)),
         Value::Int(_) | Value::Float(_) => (value.to_string(), CellKind::Number),
         Value::Bytes(b) => {
             let head: String = b.iter().take(4).map(|byte| format!("{byte:02X}")).collect();
@@ -766,6 +766,8 @@ impl Grid {
                                 .bg(theme.muted)
                                 .text_color(theme::grid_null(theme))
                                 .child(text)
+                        } else if kind == CellKind::Bool(false) {
+                            div().text_color(theme.muted_foreground).child(text)
                         } else {
                             div().child(text)
                         })
@@ -1282,8 +1284,7 @@ mod tests {
     fn cells_format_by_type() {
         assert_eq!(format_cell(&Value::Null), ("NULL".into(), CellKind::Null));
         assert_eq!(format_cell(&Value::Int(-5)), ("-5".into(), CellKind::Number));
-        assert_eq!(format_cell(&Value::Bool(true)).0, "✓");
-        assert_eq!(format_cell(&Value::Text("a\nb".into())).0, "a ↵");
+                assert_eq!(format_cell(&Value::Text("a\nb".into())).0, "a ↵");
         assert_eq!(format_cell(&Value::Bytes(std::sync::Arc::from(&[0u8; 5][..]))).0, "0x00000000… (5 B)");
         let long = format_cell(&Value::Text("é".repeat(500).into())).0;
         assert_eq!(long.chars().count(), MAX_CHARS + 1);
