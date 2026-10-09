@@ -42,11 +42,13 @@ enum Edge {
     Bottom,
 }
 
-/// A splitter drag in progress: where the pointer went down and the panel size at that moment.
+/// A splitter drag in progress: where the pointer went down, the panel's drawn size at that
+/// moment, and its stored size, which can be larger than drawn when the window is short.
 struct Dragging {
     edge: Edge,
     from: Point<Pixels>,
     start: Pixels,
+    stored: Pixels,
 }
 
 /// Panel visibility and pixel sizes in one place, so QX-020 can persist it.
@@ -80,8 +82,9 @@ impl LayoutState {
     /// Starts a drag of `edge` from the panel's drawn size.
     fn press(&mut self, edge: Edge, at: Point<Pixels>, window: Size<Pixels>) {
         let extent = if edge == Edge::Explorer { window.width } else { window.height };
-        let start = self.split(edge).shown(extent);
-        self.dragging = Some(Dragging { edge, from: at, start });
+        let split = self.split(edge);
+        let (start, stored) = (split.shown(extent), split.size);
+        self.dragging = Some(Dragging { edge, from: at, start, stored });
     }
 
     /// Follows the pointer, clamped; going below the minimum only hides on release.
@@ -97,6 +100,11 @@ impl LayoutState {
         let Some(drag) = self.dragging.take() else { return };
         let (size, extent) = Self::requested(&drag, at, window);
         let split = self.split(drag.edge);
+        // A click is not a resize: keep the stored size instead of the drawn one.
+        if at == drag.from {
+            split.size = drag.stored;
+            return;
+        }
         match split::resolve_drag(size, split.min, (split.max)(extent), drag.start) {
             split::Drag::Size(size) => split.size = size,
             split::Drag::Hidden(size) => {
