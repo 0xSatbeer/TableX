@@ -305,7 +305,9 @@ impl Shell {
         // `ThemeRegistry::watch_dir` creates the dir and drops our built-ins on reload, and `notify`
         // isn't a dependency; switch to a watcher if polling ever shows up in a profile.
         let mut stamp = theme::user_theme_stamp(&dir);
-        self.reload_user_themes(&dir, window, cx);
+        // Deferred: this runs while the window is being built, and notifications need its Root.
+        let first = dir.clone();
+        cx.defer_in(window, move |this, window, cx| this.reload_user_themes(&first, window, cx));
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(std::time::Duration::from_secs(1)).await;
