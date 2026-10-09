@@ -13,6 +13,7 @@ use gpui_kit::*;
 
 use gpui_kit::prelude::FluentBuilder as _;
 
+use crate::model::Value;
 use crate::tabs::Origin;
 use crate::{ToggleBottomPanel, ToggleExplorer, theme};
 
@@ -106,6 +107,12 @@ fn rss_anon_mb(proc_status: &str) -> Option<u64> {
     Some(kb / 1024)
 }
 
+/// Status-bar readout for a `rows` × `cols` selection; `None` for one cell or none.
+pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Value>) -> Option<String> {
+    let _ = (rows, cols, values.into_iter());
+    Some(String::new())
+}
+
 impl Render for StatusBar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
@@ -166,6 +173,24 @@ impl Render for StatusBar {
 
 #[cfg(test)]
 mod tests {
+    use super::aggregate;
+    use crate::model::Value::{self, *};
+
+    #[test]
+    fn single_cell_or_no_selection_is_hidden() {
+        // (rows, cols, values, expected shown)
+        let cases: [(usize, usize, Vec<Value>, bool); 5] = [
+            (1, 1, vec![Int(3)], false),
+            (1, 1, vec![Null], false),
+            (0, 0, vec![], false), // no grid focused
+            (2, 1, vec![Int(3), Int(4)], true),
+            (1, 2, vec![Null, Null], true),
+        ];
+        for (rows, cols, values, shown) in cases {
+            assert_eq!(aggregate(rows, cols, values.clone()).is_some(), shown, "{rows}x{cols} {values:?}");
+        }
+    }
+
     #[test]
     fn reads_private_memory_from_proc_status() {
         let status = "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
