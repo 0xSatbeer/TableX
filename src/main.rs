@@ -254,9 +254,14 @@ impl Shell {
     fn tab_changed(&mut self, cx: &mut Context<Self>) {
         let console = matches!(self.tabs.active().map(|t| &t.content), Some(TabContent::Console));
         let editor = console.then_some(&self.editor);
+        let grid = match self.tabs.active().map(|t| &t.content) {
+            Some(TabContent::Grid(grid)) => Some(grid.clone()),
+            _ => None,
+        };
         let (origin, has_tab) = (self.tabs.active().and_then(|t| t.origin.clone()), self.tabs.active().is_some());
         self.status_bar.update(cx, |bar, cx| {
             bar.set_editor(editor, cx);
+            bar.set_grid(grid.as_ref(), cx);
             bar.set_origin(origin, has_tab, cx);
         });
         self.focus_content = true;

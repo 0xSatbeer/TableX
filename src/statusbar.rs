@@ -13,6 +13,7 @@ use gpui_kit::*;
 
 use gpui_kit::prelude::FluentBuilder as _;
 
+use crate::grid::{Grid, SelectionKey};
 use crate::model::Value;
 use crate::tabs::Origin;
 use crate::{ToggleBottomPanel, ToggleExplorer, theme};
@@ -30,6 +31,10 @@ pub struct StatusBar {
     /// 1-based line and column of the focused console editor, and its selection length in chars.
     cursor: Option<(u32, u32, usize)>,
     _editor: Option<Subscription>,
+    /// Aggregate of the active grid's selection, and the selection it was computed for.
+    selection: Option<String>,
+    selection_key: Option<SelectionKey>,
+    _grid: Option<Subscription>,
     /// Runs only while the window is active; dropping it stops sampling.
     sampler: Option<Task<()>>,
     _activation: Subscription,
@@ -43,6 +48,9 @@ impl StatusBar {
             memory_mb: None,
             cursor: None,
             _editor: None,
+            selection: None,
+            selection_key: None,
+            _grid: None,
             sampler: None,
             _activation: cx.observe_window_activation(window, Self::sync_sampler),
         };
@@ -76,6 +84,29 @@ impl StatusBar {
         });
         self.cursor = editor.map(|editor| position(editor, cx));
         cx.notify();
+    }
+
+    /// Follow `grid`'s selection aggregate, or hide it when `None`.
+    pub fn set_grid(&mut self, grid: Option<&Entity<Grid>>, cx: &mut Context<Self>) {
+        self.selection_key = None;
+        self._grid = grid.map(|grid| {
+            // The grid notifies on scroll too; re-aggregate only when the selection changes.
+            cx.observe(grid, |this, grid, cx| this.sync_selection(&grid, cx))
+        });
+        match grid {
+            Some(grid) => self.sync_selection(grid, cx),
+            None => self.selection = None,
+        }
+        cx.notify();
+    }
+
+    fn sync_selection(&mut self, grid: &Entity<Grid>, cx: &mut Context<Self>) {
+        let key = grid.read(cx).selection_key();
+        if self.selection_key.as_ref() != Some(&key) {
+            self.selection = grid.read(cx).selection_summary();
+            self.selection_key = Some(key);
+            cx.notify();
+        }
     }
 
     fn sync_sampler(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -119,12 +150,12 @@ pub fn aggregate(rows: usize, cols: usize, values: impl IntoIterator<Item = Valu
     if rows.saturating_mul(cols) > AGGREGATE_MAX {
         return Some(format!("{shape} · aggregate skipped (too many cells)"));
     }
-    // Ints sum exactly; floats join only when there is one.
-    let (mut count, mut numeric, mut ints, mut floats) = (0, 0, 0, None);
+    // Ints sum exactly in i128 (no i64 overflow); floats join only when there is one.
+    let (mut count, mut numeric, mut ints, mut floats) = (0, 0, 0i128, None);
     for v in values {
         match v {
             Value::Null => continue,
-            Value::Int(n) => (numeric, ints) = (numeric + 1, ints + n),
+            Value::Int(n) => (numeric, ints) = (numeric + 1, ints + n as i128),
             Value::Float(x) => (numeric, floats) = (numeric + 1, Some(floats.unwrap_or(0.0) + x)),
             _ => {}
         }
@@ -189,6 +220,7 @@ impl Render for StatusBar {
             // ponytail: tx state is fixed until QX-012/025 give it a model; hidden without a connection
             .when(self.origin.is_some(), |d| d.child("AUTO-COMMIT"))
             .child(div().flex_1())
+            .children(self.selection.clone())
             .children(self.cursor.map(|(line, col, selected)| match selected {
                 0 => format!("Ln {line}, Col {col}"),
                 n => format!("Ln {line}, Col {col} ({n} selected)"),

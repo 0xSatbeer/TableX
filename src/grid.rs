@@ -537,6 +537,8 @@ pub struct Grid {
     menu_col: usize,
 }
 
+pub type SelectionKey = (Range<usize>, Vec<usize>, Option<(usize, bool)>);
+
 impl Grid {
     pub fn new(source: Rc<dyn GridSource>, cx: &mut Context<Self>) -> Self {
         let n = source.columns().len();
@@ -594,6 +596,27 @@ impl Grid {
     fn selection(&self) -> (Range<usize>, Range<usize>) {
         let (a, h) = (self.anchor, self.head);
         (a.0.min(h.0)..a.0.max(h.0) + 1, a.1.min(h.1)..a.1.max(h.1) + 1)
+    }
+
+    /// Active range as display rows and visible source columns, plus the sort that maps those rows.
+    pub fn selection_key(&self) -> SelectionKey {
+        let (rows, cols) = self.selection();
+        let cols = cols.filter_map(|c| self.col_order.get(c).copied()).filter(|&s| !self.hidden[s]).collect();
+        (rows, cols, self.sort)
+    }
+
+    /// Status-bar aggregate of the active range, hidden columns skipped.
+    // shortcut: Ctrl+click ranges are left out (one shape can't describe them); add them if users ask.
+    pub fn selection_summary(&self) -> Option<String> {
+        if self.source.row_count() == 0 {
+            return None;
+        }
+        let (rows, cols, _) = self.selection_key();
+        let values = rows.clone().flat_map(|r| {
+            let row = self.row(r);
+            cols.iter().map(|&c| row[c].clone()).collect::<Vec<_>>()
+        });
+        crate::statusbar::aggregate(rows.len(), cols.len(), values)
     }
 
     fn select(&mut self, cell: (usize, usize), extend: bool, cx: &mut Context<Self>) {
