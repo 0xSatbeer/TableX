@@ -260,7 +260,7 @@ impl Shell {
             theme: theme::ThemeChoice::default(),
             user_themes: Vec::new(),
             user_theme_errors: Vec::new(),
-            console_mono: theme::mono(),
+            console_mono: theme::MONO,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| this.theme.apply(&this.user_themes, window, cx)),
         };
         this.tab_changed(cx);
@@ -304,7 +304,7 @@ impl Shell {
 
     /// The size the console editor is given: its zoom at the current UI scale.
     fn console_text_size(&self) -> Pixels {
-        self.console_mono
+        theme::scaled(self.console_mono)
     }
 
     fn zoom_console(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
