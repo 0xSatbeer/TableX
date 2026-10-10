@@ -1412,7 +1412,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn truncated_tree_names_show_their_full_text_in_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
-        use gpui_kit::{AppContext as _, Bounds, Entity, Modifiers, WindowBounds, WindowOptions, point, px, size};
+        use gpui_kit::{AppContext as _, Bounds, Entity, WindowBounds, WindowOptions, point, px, size};
         cx.update(gpui_kit::init);
         let long = "shipment_line_item_carrier_tracking_events_archive_partitioned_by_month_2026_q3x";
         assert_eq!(long.len(), 80);
@@ -1434,11 +1434,8 @@ mod tests {
             explorer.update_in(&mut cx, |e, window, cx| e.reveal(&key, window, cx));
             cx.run_until_parked();
             let ix = explorer.read_with(&cx, |e, _| e.selected);
-            let label = cx.debug_bounds(Box::leak(format!("tree-label-{ix}").into_boxed_str())).expect("row label drawn");
-            cx.simulate_mouse_move(label.center(), None, Modifiers::none());
-            cx.executor().advance_clock(std::time::Duration::from_secs(1));
-            cx.run_until_parked();
-            assert_eq!(cx.debug_bounds("truncation-tip").is_some(), tip, "{} chars at {width}px: tooltip shown", name.len());
+            let shown = crate::theme::tests::hover_shows_truncation_tip(&mut cx, format!("tree-label-{ix}"));
+            assert_eq!(shown, tip, "{} chars at {width}px: tooltip shown", name.len());
         }
     }
 }
