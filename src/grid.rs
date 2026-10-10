@@ -879,6 +879,7 @@ impl Grid {
             .text_size(self.mono_px())
             .child(
                 div()
+                    .debug_selector(|| "record-header".into())
                     .px(theme::space_8())
                     .h(theme::grid_row())
                     .flex()
@@ -1393,6 +1394,23 @@ mod tests {
             let got: f32 = row_height(px(mono)).into();
             assert!((got - want).abs() < 0.01, "mono {mono}: row {got}, want {want}");
         }
+    }
+
+    #[gpui_kit::test]
+    fn record_header_row_follows_the_zoom(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| gpui_kit::init(cx));
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(super::BigEvents::new()), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        grid.update(&mut cx, |grid, cx| {
+            grid.record = true;
+            grid.zoom(crate::theme::Zoom::In, cx);
+        });
+        cx.run_until_parked();
+        let header = cx.debug_bounds("record-header").expect("record view renders its header").size.height;
+        assert_eq!(header, grid.read_with(&cx, |grid, _| grid.row_h()), "header row height at mono 13.5");
     }
 
     #[test]
