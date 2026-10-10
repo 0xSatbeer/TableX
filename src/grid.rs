@@ -881,7 +881,7 @@ impl Grid {
                 div()
                     .debug_selector(|| "record-header".into())
                     .px(theme::space_8())
-                    .h(theme::grid_row())
+                    .h(self.row_h())
                     .flex()
                     .items_center()
                     .text_size(theme::ui_sm())
@@ -1409,8 +1409,10 @@ mod tests {
             grid.zoom(crate::theme::Zoom::In, cx);
         });
         cx.run_until_parked();
-        let header = cx.debug_bounds("record-header").expect("record view renders its header").size.height;
-        assert_eq!(header, grid.read_with(&cx, |grid, _| grid.row_h()), "header row height at mono 13.5");
+        let header: f32 = cx.debug_bounds("record-header").expect("record view renders its header").size.height.into();
+        let row: f32 = grid.read_with(&cx, |grid, _| grid.row_h()).into();
+        // Layout snaps to whole pixels.
+        assert!((header - row).abs() < 0.5, "header row {header}px, field rows {row}px at mono 13.5");
     }
 
     #[test]
