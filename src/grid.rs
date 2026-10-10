@@ -978,7 +978,10 @@ impl Grid {
                                     .text_size(theme::ui_sm())
                                     .text_color(theme.foreground)
                                     .when(m.pk, |d| d.child(Icon::new(IconName::KeyRound).size_3().text_color(theme.muted_foreground)))
-                                    .child(div().debug_selector(|| format!("header-name-{s}")).child(m.name))
+                                    .child({
+                                        let name = SharedString::from(m.name);
+                                        div().debug_selector(|| format!("header-name-{s}")).min_w_0().truncate().child(theme::truncating(("header-name", s), StyledText::new(name.clone()), name))
+                                    })
                             })
                             .child(
                                 div()
@@ -987,7 +990,11 @@ impl Grid {
                                     .font_family(theme.mono_font_family.clone())
                                     .text_size(theme::ui_sm())
                                     .text_color(theme.muted_foreground)
-                                    .child(header_model(&columns[s]).data_type),
+                                    .truncate()
+                                    .child({
+                                        let data_type = SharedString::from(header_model(&columns[s]).data_type);
+                                        theme::truncating(("header-type", s), StyledText::new(data_type.clone()), data_type)
+                                    }),
                             )
                             .context_menu({
                                 let focus = self.focus.clone();

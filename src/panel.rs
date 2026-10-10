@@ -163,7 +163,10 @@ impl BottomPanel {
                     .font_family(theme.mono_font_family.clone())
                     .text_size(theme::mono())
                     .text_color(theme.foreground)
-                    .child(sql_line(&entry.sql, theme)),
+                    .child({
+                        let line = SharedString::from(entry.sql.replace('\n', " "));
+                        theme::truncating(("log-sql", ix), sql_line(&line, theme), line)
+                    }),
             )
             // Status next to the numbers it qualifies; machine facts in mono, words in Inter.
             .child(Icon::new(icon).small().text_color(icon_color))
@@ -345,13 +348,13 @@ fn sql_spans(sql: &str) -> Vec<(std::ops::Range<usize>, &'static str)> {
     spans
 }
 
-fn sql_line(sql: &str, theme: &gpui_kit::component::Theme) -> StyledText {
-    let line = sql.replace('\n', " ");
-    let spans: Vec<_> = sql_spans(&line)
+/// `line` (SQL flattened to one line) with syntax colors.
+fn sql_line(line: &SharedString, theme: &gpui_kit::component::Theme) -> StyledText {
+    let spans: Vec<_> = sql_spans(line)
         .into_iter()
         .filter_map(|(range, key)| Some((range, theme.highlight_theme.style(key)?)))
         .collect();
-    StyledText::new(line).with_highlights(spans)
+    StyledText::new(line.clone()).with_highlights(spans)
 }
 
 fn time_of_day(entry: &QueryLogEntry) -> String {

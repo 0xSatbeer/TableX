@@ -190,9 +190,18 @@ impl Render for StatusBar {
         };
         let context = match &self.origin {
             Some(o) => h_flex()
+                .min_w_0()
                 .gap(theme::space_6())
                 .child(div().size(theme::space_6()).rounded_full().bg(theme::connection_color(o.color, theme)))
-                .child(div().debug_selector(|| "status-path".into()).text_color(theme.foreground).font_family(theme.mono_font_family.clone()).child(o.path.clone()))
+                .child(
+                    div()
+                        .debug_selector(|| "status-path".into())
+                        .min_w_0()
+                        .truncate()
+                        .text_color(theme.foreground)
+                        .font_family(theme.mono_font_family.clone())
+                        .child(theme::truncating("status-path", StyledText::new(o.path.clone()), o.path.clone())),
+                )
                 .when(o.production, |d| d.child(theme::prod_badge(theme))),
             None if self.has_tab => h_flex().child("Sample data · not from a connection"),
             None => h_flex(),
