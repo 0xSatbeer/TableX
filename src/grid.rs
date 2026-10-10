@@ -109,12 +109,12 @@ fn aligns_right(kind: &CellKind, data_type: &str) -> bool {
 
 /// Grid row height for a pane's mono font size: GRID_ROW at MONO, in proportion otherwise.
 fn row_height(mono: Pixels) -> Pixels {
-    theme::GRID_ROW
+    theme::GRID_ROW * (mono / theme::MONO)
 }
 
 /// Width of the row-number gutter: monospace digits plus padding.
-fn gutter_width(rows: usize) -> Pixels {
-    theme::MONO * 0.6 * gutter_digits(rows) as f32 + theme::SPACE_12
+fn gutter_width(rows: usize, mono: Pixels) -> Pixels {
+    mono * 0.6 * gutter_digits(rows) as f32 + theme::SPACE_12
 }
 
 /// Digits the row-number gutter must fit: the row count's, but never fewer than 3.
@@ -673,7 +673,7 @@ impl Grid {
 
     /// Width that fits the header and the rows currently in view.
     fn autofit(&mut self, c: usize) {
-        let top = (-self.scroll.0.borrow().base_handle.offset().y / theme::GRID_ROW) as usize;
+        let top = (-self.scroll.0.borrow().base_handle.offset().y / row_height(self.mono)) as usize;
         let rows = top..(top + AUTOFIT_SAMPLE).min(self.source.row_count());
         let meta = &self.source.columns()[c];
         let chars = rows
@@ -682,11 +682,11 @@ impl Grid {
             .max()
             .unwrap_or(0);
         // ponytail: advance estimated as 0.6em (mono); Inter headers can be under-sized, measure with the text system if that shows
-        self.widths[c] = (theme::MONO * 0.6 * chars as f32 + theme::SPACE_16 + theme::SPACE_4).max(MIN_WIDTH);
+        self.widths[c] = (self.mono * 0.6 * chars as f32 + theme::SPACE_16 + theme::SPACE_4).max(MIN_WIDTH);
     }
 
     fn gutter(&self) -> Pixels {
-        gutter_width(self.source.row_count())
+        gutter_width(self.source.row_count(), self.mono)
     }
 
     /// Scroll so the head cell is in view, both axes.
@@ -732,7 +732,7 @@ impl Grid {
             return;
         }
         let m = ev.keystroke.modifiers;
-        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / theme::GRID_ROW) as usize;
+        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / row_height(self.mono)) as usize;
         match ev.keystroke.key.as_str() {
             "c" if m.secondary() => return self.copy_as(tsv, cx),
             "r" if m.secondary() && m.shift => {
@@ -828,7 +828,7 @@ impl Grid {
                 div()
                     .relative()
                     .w(self.gutter() + total)
-                    .h(theme::GRID_ROW)
+                    .h(row_height(self.mono))
                     .font_family(theme.mono_font_family.clone())
                     .text_size(self.mono)
                     .bg(if r % 2 == 1 { theme.table_even } else { theme.table })
@@ -890,7 +890,7 @@ impl Grid {
             .children(self.source.columns().iter().zip(row.iter()).enumerate().map(|(c, (meta, value))| {
                 let (text, kind) = format_cell(value);
                 h_flex()
-                    .min_h(theme::GRID_ROW)
+                    .min_h(row_height(self.mono))
                     .px(theme::SPACE_8)
                     .gap(theme::SPACE_8)
                     .border_b_1()
@@ -1390,7 +1390,7 @@ mod tests {
         // Spec rule: digits * one mono digit width (0.6 em) + SPACE_12.
         let cases = [(9, 3.0 * 7.5 + 12.0), (1_000_000, 7.0 * 7.5 + 12.0)];
         for (rows, px_width) in cases {
-            let got: f32 = gutter_width(rows).into();
+            let got: f32 = gutter_width(rows, crate::theme::MONO).into();
             assert!((got - px_width).abs() < 0.01, "{rows} rows: {got}");
         }
     }
