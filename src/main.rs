@@ -302,6 +302,11 @@ impl Shell {
         cx.notify();
     }
 
+    /// The size the console editor is given: its zoom at the current UI scale.
+    fn console_text_size(&self) -> Pixels {
+        self.console_mono
+    }
+
     fn zoom_console(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
         self.console_mono = theme::zoom(self.console_mono, step);
         cx.notify();
@@ -694,7 +699,7 @@ impl Render for Shell {
                             .on_action(cx.listener(|this, _: &theme::ZoomIn, _, cx| this.zoom_console(theme::Zoom::In, cx)))
                             .on_action(cx.listener(|this, _: &theme::ZoomOut, _, cx| this.zoom_console(theme::Zoom::Out, cx)))
                             .on_action(cx.listener(|this, _: &theme::ZoomReset, _, cx| this.zoom_console(theme::Zoom::Reset, cx)))
-                            .child(Editor::new(&self.editor).bordered(false).h_full().text_size(self.console_mono)),
+                            .child(Editor::new(&self.editor).bordered(false).h_full().text_size(self.console_text_size())),
                     )
                     .into_any_element()
             }
@@ -1221,6 +1226,35 @@ mod tests {
             });
             cx.simulate_keystrokes(keys);
             assert_eq!(sizes(&cx), (px(grid_mono), px(console_mono)), "{keys} with {focus} focused");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn console_editor_follows_ui_scale_like_the_grid(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Focusable as _};
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            super::bind_zoom_keys(cx);
+            crate::theme::set_ui_scale(130, cx);
+        });
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        shell.update(&mut cx, |this, cx| {
+            let console = this.tabs.tabs.iter().position(|t| matches!(t.content, super::TabContent::Console)).expect("launch opens a console");
+            this.tabs.activate(console);
+            this.tab_changed(cx);
+        });
+        cx.run_until_parked();
+        let editor = shell.read_with(&cx, |this, cx| this.editor.focus_handle(cx));
+        cx.update(|window, cx| window.focus(&editor, cx));
+        for (keys, want) in [("", 16.25), ("ctrl-=", 17.55)] {
+            if !keys.is_empty() {
+                cx.simulate_keystrokes(keys);
+            }
+            let got: f32 = shell.read_with(&cx, |this, _| this.console_text_size()).into();
+            assert!((got - want).abs() < 0.001, "after {keys:?} at 130%: console {got}px, want {want}px");
         }
     }
 
