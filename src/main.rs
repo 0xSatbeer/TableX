@@ -302,6 +302,11 @@ impl Shell {
         cx.notify();
     }
 
+    fn zoom_console(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
+        self.console_mono = theme::zoom(self.console_mono, step);
+        cx.notify();
+    }
+
     /// Loads user themes from `dir` and reloads them when its files change. Never writes to `dir`.
     fn watch_user_themes(&mut self, dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         // shortcut: polls the dir's listing once a second instead of a file watcher. gpui-kit's
@@ -673,7 +678,15 @@ impl Render for Shell {
                 h_flex()
                     .size_full()
                     .when(production, |d| d.child(div().flex_none().w(theme::STRIPE).h_full().bg(theme.danger)))
-                    .child(div().flex_1().h_full().child(Editor::new(&self.editor).bordered(false).h_full()))
+                    .child(
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .on_action(cx.listener(|this, _: &theme::ZoomIn, _, cx| this.zoom_console(theme::Zoom::In, cx)))
+                            .on_action(cx.listener(|this, _: &theme::ZoomOut, _, cx| this.zoom_console(theme::Zoom::Out, cx)))
+                            .on_action(cx.listener(|this, _: &theme::ZoomReset, _, cx| this.zoom_console(theme::Zoom::Reset, cx)))
+                            .child(Editor::new(&self.editor).bordered(false).h_full().text_size(self.console_mono)),
+                    )
                     .into_any_element()
             }
             None => v_flex()
@@ -881,7 +894,12 @@ fn bind_overflow_keys(cx: &mut App) {
 }
 
 /// Zoom the focused grid's or editor's mono font; with neither focused nothing handles them.
-fn bind_zoom_keys(_cx: &mut App) {
+fn bind_zoom_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("ctrl-=", theme::ZoomIn, None),
+        KeyBinding::new("ctrl--", theme::ZoomOut, None),
+        KeyBinding::new("ctrl-0", theme::ZoomReset, None),
+    ]);
 }
 
 fn bind_panel_keys(cx: &mut App) {
@@ -1173,6 +1191,15 @@ mod tests {
             ("nothing", "ctrl-=", (11.5, 12.5)),
         ];
         for (focus, keys, (grid_mono, console_mono)) in steps {
+            if focus == "editor" {
+                // The console is only mounted while its tab is active.
+                shell.update(&mut cx, |this, cx| {
+                    let console = this.tabs.tabs.iter().position(|t| matches!(t.content, super::TabContent::Console)).expect("launch opens a console");
+                    this.tabs.activate(console);
+                    this.tab_changed(cx);
+                });
+                cx.run_until_parked();
+            }
             let handle = shell.read_with(&cx, |this, cx| match focus {
                 "grid" => Some(grid.focus_handle(cx)),
                 "editor" => Some(this.editor.focus_handle(cx)),

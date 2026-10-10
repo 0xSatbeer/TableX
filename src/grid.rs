@@ -825,7 +825,7 @@ impl Grid {
                     .w(self.gutter() + total)
                     .h(theme::GRID_ROW)
                     .font_family(theme.mono_font_family.clone())
-                    .text_size(theme::MONO)
+                    .text_size(self.mono)
                     .bg(if r % 2 == 1 { theme.table_even } else { theme.table })
                     .hover(|d| d.bg(theme.table_hover))
                     .border_b_1()
@@ -871,7 +871,7 @@ impl Grid {
             .min_h_0()
             .overflow_y_scroll()
             .font_family(theme.mono_font_family.clone())
-            .text_size(theme::MONO)
+            .text_size(self.mono)
             .child(
                 div()
                     .px(theme::SPACE_8)
@@ -1045,6 +1045,11 @@ impl Grid {
     pub fn mono(&self) -> Pixels {
         self.mono
     }
+
+    fn zoom(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
+        self.mono = theme::zoom(self.mono, step);
+        cx.notify();
+    }
 }
 
 impl Focusable for Grid {
@@ -1059,6 +1064,9 @@ impl Render for Grid {
             .size_full()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .on_action(cx.listener(|this, _: &theme::ZoomIn, _, cx| this.zoom(theme::Zoom::In, cx)))
+            .on_action(cx.listener(|this, _: &theme::ZoomOut, _, cx| this.zoom(theme::Zoom::Out, cx)))
+            .on_action(cx.listener(|this, _: &theme::ZoomReset, _, cx| this.zoom(theme::Zoom::Reset, cx)))
             .on_action(cx.listener(|this, _: &CopyCsv, _, cx| this.copy_as(csv, cx)))
             .on_action(cx.listener(|this, _: &HideColumn, _, cx| {
                 // Keep at least one column visible.
@@ -1132,7 +1140,7 @@ impl Render for Grid {
                                 .overflow_y_scroll()
                                 .px(theme::SPACE_8)
                                 .font_family(theme.mono_font_family.clone())
-                                .text_size(theme::MONO)
+                                .text_size(self.mono)
                                 .child(inspect_text(&self.row(r)[c])),
                         ),
                 )
