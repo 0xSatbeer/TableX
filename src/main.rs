@@ -860,7 +860,8 @@ impl Render for Shell {
                         .relative()
                         .size_full()
                         .when(self.layout.explorer_visible, |d| {
-                            let pane = div().flex_none().h_full().w(explorer_w).overflow_hidden().child(self.explorer.clone());
+                            // The last 1px column is the splitter line's own, so it never paints over the ring.
+                            let pane = div().flex_none().h_full().w(explorer_w - px(1.)).mr(px(1.)).overflow_hidden().child(self.explorer.clone());
                             d.child(theme::focus_ring("pane-explorer", pane, explorer_focused, cx.theme()))
                         })
                         .child(
@@ -876,7 +877,8 @@ impl Render for Shell {
                                     if maximized {
                                         d.child(panel.flex_1().min_h_0())
                                     } else {
-                                        d.child(panel.flex_none().h(bottom_h)).child(self.splitter(Edge::Bottom, bottom_h, cx))
+                                        // The top 1px row is the splitter line's own, as with the explorer.
+                                        d.child(panel.flex_none().h(bottom_h - px(1.)).mt(px(1.))).child(self.splitter(Edge::Bottom, bottom_h, cx))
                                     }
                                 }),
                         )
