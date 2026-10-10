@@ -63,7 +63,12 @@ pub enum Zoom {
 
 /// The mono font size after one zoom step: 1px steps within 9..=24px; Reset goes back to MONO.
 pub fn zoom(size: Pixels, step: Zoom) -> Pixels {
-    size
+    let (min, max) = (px(9.), px(24.));
+    match step {
+        Zoom::In => (size + px(1.)).clamp(min, max),
+        Zoom::Out => (size - px(1.)).clamp(min, max),
+        Zoom::Reset => MONO,
+    }
 }
 
 /// Enter/exit for our own overlays, eased out. Library popovers (150 ms), tooltips (150 ms)
