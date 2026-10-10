@@ -53,6 +53,19 @@ pub const STRIPE: Pixels = px(2.);
 pub const TITLEBAR: Pixels = px(38.);
 pub const STATUS_BAR: Pixels = px(24.);
 
+/// A Ctrl+= / Ctrl+- / Ctrl+0 step on a pane's mono font.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zoom {
+    In,
+    Out,
+    Reset,
+}
+
+/// The mono font size after one zoom step: 1px steps within 9..=24px; Reset goes back to MONO.
+pub fn zoom(size: Pixels, step: Zoom) -> Pixels {
+    size
+}
+
 /// Enter/exit for our own overlays, eased out. Library popovers (150 ms), tooltips (150 ms)
 /// and dialogs (250 ms) hard-code their durations and ignore this.
 pub const MOTION_OVERLAY: Duration = Duration::from_millis(120);
@@ -347,7 +360,35 @@ pub const SYNTAX: [&str; 8] = ["keyword", "string", "number", "comment", "functi
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{CONNECTION_COLORS, CONNECTION_COLORS_LIGHT, DARK, LIGHT, Rgba};
+    use super::{CONNECTION_COLORS, CONNECTION_COLORS_LIGHT, DARK, LIGHT, Rgba, Zoom, px, zoom};
+
+    #[test]
+    fn zoom_steps_1px_within_9_to_24_and_resets_to_12_5() {
+        use Zoom::*;
+        let cases = [
+            (12.5, In, 13.5),
+            (24., In, 24.),
+            (23.5, In, 24.),
+            (23., In, 24.),
+            (9.5, Out, 9.),
+            (9., Out, 9.),
+            (10., Out, 9.),
+            (13.5, Out, 12.5),
+            (9., In, 10.),
+            (24., Out, 23.),
+            (24., Reset, 12.5),
+            (9., Reset, 12.5),
+            (12.5, Reset, 12.5),
+            // Out of range (never produced by zoom itself) lands back inside it.
+            (30., In, 24.),
+            (30., Out, 24.),
+            (5., Out, 9.),
+            (5., In, 9.),
+        ];
+        for (size, step, want) in cases {
+            assert_eq!(zoom(px(size), step), px(want), "{size} {step:?}");
+        }
+    }
 
     fn rgb(hex: &str) -> [f64; 3] {
         [0, 2, 4].map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap() as f64 / 255.)
