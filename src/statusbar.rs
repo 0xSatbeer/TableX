@@ -33,6 +33,7 @@ pub struct StatusBar {
     _editor: Option<Subscription>,
     /// Aggregate of the active grid's selection, and the selection it was computed for.
     selection: Option<String>,
+    grid_focused: bool,
     selection_key: Option<SelectionKey>,
     _grid: Option<Subscription>,
     /// Runs only while the window is active; dropping it stops sampling.
@@ -49,6 +50,7 @@ impl StatusBar {
             cursor: None,
             _editor: None,
             selection: None,
+            grid_focused: false,
             selection_key: None,
             _grid: None,
             sampler: None,
@@ -100,9 +102,16 @@ impl StatusBar {
         cx.notify();
     }
 
-    /// The aggregate as drawn.
+    /// The aggregate as drawn: only while the grid holds focus.
     pub fn aggregate_text(&self) -> Option<String> {
-        self.selection.clone()
+        self.selection.clone().filter(|_| self.grid_focused)
+    }
+
+    pub fn set_grid_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.grid_focused != focused {
+            self.grid_focused = focused;
+            cx.notify();
+        }
     }
 
     fn sync_selection(&mut self, grid: &Entity<Grid>, cx: &mut Context<Self>) {

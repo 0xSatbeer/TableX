@@ -690,6 +690,9 @@ impl Render for Shell {
         }
         let focused = |handle: Option<FocusHandle>, cx: &App| handle.is_some_and(|h| h.contains_focused(window, cx));
         let content_focused = focused(self.content_focus(cx), cx);
+        // The console editor shares the content pane; only the grid itself counts for the aggregate.
+        let grid_focused = content_focused && matches!(self.tabs.active().map(|t| &t.content), Some(TabContent::Grid(_)));
+        self.status_bar.update(cx, |bar, cx| bar.set_grid_focused(grid_focused, cx));
         let explorer_focused = focused(Some(self.explorer.focus_handle(cx)), cx);
         let panel_focused = focused(Some(self.bottom_panel.focus_handle(cx)), cx);
         let theme = cx.theme();
