@@ -190,8 +190,8 @@ impl Render for StatusBar {
         };
         let context = match &self.origin {
             Some(o) => h_flex()
-                .gap(theme::SPACE_6)
-                .child(div().size(theme::SPACE_6).rounded_full().bg(theme::connection_color(o.color, theme)))
+                .gap(theme::space_6())
+                .child(div().size(theme::space_6()).rounded_full().bg(theme::connection_color(o.color, theme)))
                 .child(div().text_color(theme.foreground).font_family(theme.mono_font_family.clone()).child(o.path.clone()))
                 .when(o.production, |d| d.child(theme::prod_badge(theme))),
             None if self.has_tab => h_flex().child("Sample data · not from a connection"),
@@ -199,9 +199,9 @@ impl Render for StatusBar {
         };
         h_flex()
             .flex_none()
-            .h(theme::STATUS_BAR)
-            .px(theme::SPACE_4)
-            .gap(theme::SPACE_12)
+            .h(theme::status_bar())
+            .px(theme::space_4())
+            .gap(theme::space_12())
             .relative()
             .bg(theme.status_bar)
             .when(self.origin.as_ref().is_some_and(|o| o.production), |d| {
@@ -209,7 +209,7 @@ impl Render for StatusBar {
             })
             .border_t_1()
             .border_color(theme.status_bar_border)
-            .text_size(theme::UI_SM)
+            .text_size(theme::ui_sm())
             .text_color(theme.muted_foreground)
             .child(
                 h_flex()
@@ -229,7 +229,7 @@ impl Render for StatusBar {
                 div()
                     .id("memory")
                     .font_family(theme.mono_font_family.clone())
-                    .pr(theme::SPACE_4)
+                    .pr(theme::space_4())
                     .tooltip(|window, cx| Tooltip::new("QueryX private memory (RssAnon)").build(window, cx))
                     .child(format!("{mb} MB"))
             }))

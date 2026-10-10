@@ -130,23 +130,23 @@ impl BottomPanel {
             QuerySource::TableView => "Table",
             QuerySource::Introspection => "Introspection",
         };
-        let col = |w: f32| div().flex_none().w(theme::SPACE_8 * w).truncate();
+        let col = |w: f32| div().flex_none().w(theme::space_8() * w).truncate();
         let sql = entry.sql.clone();
         let line = h_flex()
             .group("log-row")
             .w_full()
             .when(production, |d| d.bg(theme::production_tint(theme)))
-            .h(theme::LIST_ROW)
-            .px(theme::SPACE_12)
-            .gap(theme::SPACE_12)
-            .text_size(theme::UI_SM)
+            .h(theme::list_row())
+            .px(theme::space_12())
+            .gap(theme::space_12())
+            .text_size(theme::ui_sm())
             .text_color(theme.muted_foreground)
-            .child(col(TIME_W).font_family(theme.mono_font_family.clone()).text_size(theme::MONO).child(time_of_day(entry)))
+            .child(col(TIME_W).font_family(theme.mono_font_family.clone()).text_size(theme::mono()).child(time_of_day(entry)))
             .child(
                 col(14.).child(
                     h_flex()
-                        .gap(theme::SPACE_6)
-                        .child(div().flex_none().size(theme::SPACE_6).rounded_full().bg(theme::connection_color(color, theme)))
+                        .gap(theme::space_6())
+                        .child(div().flex_none().size(theme::space_6()).rounded_full().bg(theme::connection_color(color, theme)))
                         .child(div().truncate().child(conn))
                         .when(production, |d| d.child(theme::prod_badge(theme))),
                 ),
@@ -158,14 +158,14 @@ impl BottomPanel {
                     .min_w_0()
                     .truncate()
                     .font_family(theme.mono_font_family.clone())
-                    .text_size(theme::MONO)
+                    .text_size(theme::mono())
                     .text_color(theme.foreground)
                     .child(sql_line(&entry.sql, theme)),
             )
             // Status next to the numbers it qualifies; machine facts in mono, words in Inter.
             .child(Icon::new(icon).small().text_color(icon_color))
-            .child(col(8.).text_right().font_family(theme.mono_font_family.clone()).text_size(theme::MONO).child(format_duration(entry.duration)))
-            .child(col(9.).text_right().font_family(theme.mono_font_family.clone()).text_size(theme::MONO).child(entry.rows.map(|r| format!("{r} rows")).unwrap_or_default()))
+            .child(col(8.).text_right().font_family(theme.mono_font_family.clone()).text_size(theme::mono()).child(format_duration(entry.duration)))
+            .child(col(9.).text_right().font_family(theme.mono_font_family.clone()).text_size(theme::mono()).child(entry.rows.map(|r| format!("{r} rows")).unwrap_or_default()))
             .child(col(11.).child(source))
             .child(
                 div().opacity(0.).group_hover("log-row", |s| s.opacity(1.)).child(
@@ -188,14 +188,14 @@ impl BottomPanel {
             row = row.child(
                 v_flex()
                     .w_full()
-                    .px(theme::SPACE_12)
-                    .py(theme::SPACE_8)
-                    .gap(theme::SPACE_8)
+                    .px(theme::space_12())
+                    .py(theme::space_8())
+                    .gap(theme::space_8())
                     .bg(theme.muted)
                     .border_b_1()
                     .border_color(theme.border)
                     .font_family(theme.mono_font_family.clone())
-                    .text_size(theme::MONO)
+                    .text_size(theme::mono())
                     .child(div().w_full().text_color(theme.foreground).whitespace_normal().child(detail.sql))
                     .children(detail.error.map(|e| div().w_full().text_color(theme.danger).whitespace_normal().child(e))),
             );
@@ -367,27 +367,27 @@ fn format_duration(d: Duration) -> String {
 /// Column headers aligned with `log_row`'s columns.
 fn log_header(theme: &gpui_kit::component::Theme) -> impl IntoElement {
     let [time, conn, db, sql, _, duration, rows, source] = header_labels();
-    let col = |w: f32, label: &'static str| div().flex_none().w(theme::SPACE_8 * w).truncate().child(label);
+    let col = |w: f32, label: &'static str| div().flex_none().w(theme::space_8() * w).truncate().child(label);
     h_flex()
         .flex_none()
         .w_full()
-        .h(theme::LIST_ROW)
-        .px(theme::SPACE_12)
-        .gap(theme::SPACE_12)
+        .h(theme::list_row())
+        .px(theme::space_12())
+        .gap(theme::space_12())
         .border_b_1()
         .border_color(theme.border)
-        .text_size(theme::UI_SM)
+        .text_size(theme::ui_sm())
         .text_color(theme.muted_foreground)
         .child(col(TIME_W, time))
         .child(col(14., conn))
         .child(col(8., db))
         .child(div().flex_1().min_w_0().child(sql))
-        .child(div().flex_none().w(theme::SPACE_16))
+        .child(div().flex_none().w(theme::space_16()))
         .child(col(8., duration).text_right())
         .child(col(9., rows).text_right())
         .child(col(11., source))
         // Room for the hover copy button.
-        .child(div().flex_none().w(theme::SPACE_24))
+        .child(div().flex_none().w(theme::space_24()))
 }
 
 fn filter_toggle(
@@ -429,10 +429,10 @@ impl Render for BottomPanel {
         // Flat, same height as the editor strip; the active view is underlined, not boxed.
         let header = h_flex()
             .flex_none()
-            .h(theme::TAB)
-            .pl(theme::SPACE_12)
-            .pr(theme::SPACE_8)
-            .gap(theme::SPACE_16)
+            .h(theme::tab())
+            .pl(theme::space_12())
+            .pr(theme::space_8())
+            .gap(theme::space_16())
             .border_b_1()
             .border_color(theme.border)
             .children(TABS.iter().enumerate().map(|(ix, label)| {
@@ -442,7 +442,7 @@ impl Render for BottomPanel {
                     .h_full()
                     .flex()
                     .items_center()
-                    .text_size(theme::UI_SM)
+                    .text_size(theme::ui_sm())
                     .border_b_2()
                     .border_color(if active { theme.foreground } else { transparent_black() })
                     .text_color(if active { theme.foreground } else { theme.muted_foreground })
@@ -456,9 +456,9 @@ impl Render for BottomPanel {
             .child(div().flex_1())
             .child(
                 h_flex()
-                    .gap(theme::SPACE_8)
+                    .gap(theme::space_8())
                     .when(self.tab == LOGS, |this| {
-                        this.child(div().w(theme::SPACE_24 * 8.).child(Input::new(&self.search).small()))
+                        this.child(div().w(theme::space_24() * 8.).child(Input::new(&self.search).small()))
                             .child(connection_menu)
                             .children(status_toggles)
                             .child(introspection_toggle)
@@ -489,7 +489,7 @@ impl Render for BottomPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .gap(theme::SPACE_8)
+                .gap(theme::space_8())
                 .text_color(theme.muted_foreground)
                 .child(message)
                 .child(Button::new("reset-filters").small().label("Reset filters").on_click(cx.listener(|this, _, window, cx| {

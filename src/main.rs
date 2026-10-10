@@ -260,7 +260,7 @@ impl Shell {
             theme: theme::ThemeChoice::default(),
             user_themes: Vec::new(),
             user_theme_errors: Vec::new(),
-            console_mono: theme::MONO,
+            console_mono: theme::mono(),
             _appearance: cx.observe_window_appearance(window, |this, window, cx| this.theme.apply(&this.user_themes, window, cx)),
         };
         this.tab_changed(cx);
@@ -354,8 +354,8 @@ impl Shell {
         cx.notify();
     }
 
-    /// ⚙ in the titlebar. Holds the theme until there is a settings view (QX-020);
-    /// `Ctrl+K Ctrl+T` still cycles it from the keyboard.
+    /// ⚙ in the titlebar. Holds the theme and UI scale until there is a settings view (QX-020);
+    /// `Ctrl+K Ctrl+T` still cycles the theme from the keyboard.
     fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity().downgrade();
         let current = self.theme.clone();
@@ -384,6 +384,15 @@ impl Shell {
                         },
                     ));
                 }
+                menu = menu.separator().label("UI scale");
+                for percent in theme::UI_SCALES {
+                    menu = menu.item(PopupMenuItem::new(format!("{percent}%")).checked(percent == theme::ui_scale()).on_click(
+                        move |_, window, cx| {
+                            theme::set_ui_scale(percent, cx);
+                            window.refresh();
+                        },
+                    ));
+                }
                 menu
             })
             .anchor(Anchor::TopRight)
@@ -399,7 +408,7 @@ impl Shell {
         let active_ix = self.tabs.active;
         h_flex()
             .flex_none()
-            .h(theme::TAB)
+            .h(theme::tab())
             .bg(theme.tab_bar)
             // The hairline under the strip is drawn per piece, so the active tab can leave a gap
             // and join the content below it.
@@ -426,7 +435,7 @@ impl Shell {
                     ),
             )
             .child(
-                h_flex().flex_none().h_full().px(theme::SPACE_4).border_l_1().border_b_1().border_color(theme.border).child(
+                h_flex().flex_none().h_full().px(theme::space_4()).border_l_1().border_b_1().border_color(theme.border).child(
                     if tabs::show_search(titles.len()) { self.overflow_search_list(cx).into_any_element() } else {
                         Button::new("all-tabs")
                             .ghost()
@@ -484,11 +493,11 @@ impl Shell {
             .trigger(Button::new("all-tabs").ghost().xsmall().icon(IconName::ChevronDown).tooltip("All open tabs"))
             .content(move |_, _, cx| {
                 let list = if let Some(label) = empty {
-                    div().p(theme::SPACE_8).text_color(cx.theme().muted_foreground).child(label).into_any_element()
+                    div().p(theme::space_8()).text_color(cx.theme().muted_foreground).child(label).into_any_element()
                 } else {
                     v_flex()
                         .id("overflow-list")
-                        .max_h(theme::SPACE_24 * 10.)
+                        .max_h(theme::space_24() * 10.)
                         .overflow_y_scroll()
                         .children(rows.iter().map(|(ix, title)| {
                             let (ix, shell) = (*ix, shell.clone());
@@ -507,7 +516,7 @@ impl Shell {
                         }))
                         .into_any_element()
                 };
-                v_flex().key_context(OVERFLOW_CONTEXT).w(theme::SPACE_24 * 10.).gap(theme::SPACE_4).child(Input::new(&search).small()).child(list)
+                v_flex().key_context(OVERFLOW_CONTEXT).w(theme::space_24() * 10.).gap(theme::space_4()).child(Input::new(&search).small()).child(list)
             })
     }
 
@@ -527,13 +536,13 @@ impl Shell {
             .relative()
             .flex_none()
             .h_full()
-            .pl(theme::SPACE_12)
-            .pr(if pinned { theme::SPACE_12 } else { theme::SPACE_6 })
-            .gap(theme::SPACE_6)
+            .pl(theme::space_12())
+            .pr(if pinned { theme::space_12() } else { theme::space_6() })
+            .gap(theme::space_6())
             .border_r_1()
             .when(!active, |d| d.border_b_1())
             .border_color(theme.border)
-            .text_size(theme::UI_SM)
+            .text_size(theme::ui_sm())
             .map(|d| if active {
                 d.bg(theme.tab_active).text_color(theme.tab_active_foreground)
             } else {
@@ -542,7 +551,7 @@ impl Shell {
             // Tint and stripe are overlays so they sit on top of the active/hover background.
             .when(production, |d| d.child(div().absolute().inset_0().bg(theme::production_tint(theme))))
             .when_some(t.origin.as_ref(), |d, o| {
-                d.child(div().absolute().top_0().left_0().right_0().h(theme::STRIPE).bg(theme::connection_color(o.color, theme)))
+                d.child(div().absolute().top_0().left_0().right_0().h(theme::stripe()).bg(theme::connection_color(o.color, theme)))
             })
             .tooltip({
                 let text = SharedString::from(tabs::tooltip_text(&t.title, t.origin.as_ref()));
@@ -585,8 +594,8 @@ impl Shell {
                     .child(
                     div()
                         .id(("close-tab", ix))
-                        .rounded(theme::RADIUS_SM)
-                        .p(theme::SPACE_2)
+                        .rounded(theme::radius_sm())
+                        .p(theme::space_2())
                         .text_color(if active { theme.muted_foreground } else { transparent_black() })
                         .group_hover(group, |d| d.text_color(theme.muted_foreground))
                         .hover(|d| d.bg(theme.secondary_hover).text_color(theme.foreground))
@@ -612,7 +621,7 @@ struct TabDrag {
 impl Render for TabDrag {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        div().px(theme::SPACE_12).py(theme::SPACE_6).bg(theme.tab_active).border_1().border_color(theme.border).text_size(theme::UI_SM).child(self.title.clone())
+        div().px(theme::space_12()).py(theme::space_6()).bg(theme.tab_active).border_1().border_color(theme.border).text_size(theme::ui_sm()).child(self.title.clone())
     }
 }
 
@@ -677,7 +686,7 @@ impl Render for Shell {
                 // ponytail: a rule, not the full background tint QX-012 brings with the console toolbar
                 h_flex()
                     .size_full()
-                    .when(production, |d| d.child(div().flex_none().w(theme::STRIPE).h_full().bg(theme.danger)))
+                    .when(production, |d| d.child(div().flex_none().w(theme::stripe()).h_full().bg(theme.danger)))
                     .child(
                         div()
                             .flex_1()
@@ -693,10 +702,10 @@ impl Render for Shell {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .gap(theme::SPACE_8)
-                .text_size(theme::UI_SM)
+                .gap(theme::space_8())
+                .text_size(theme::ui_sm())
                 .text_color(theme.muted_foreground)
-                .child(div().text_size(theme::UI).text_color(theme::text_secondary(theme)).child("Nothing open."))
+                .child(div().text_size(theme::ui()).text_color(theme::text_secondary(theme)).child("Nothing open."))
                 .child("Pick a table in the explorer (Ctrl+Alt+F) · Ctrl+Shift+T brings the last tab back")
                 .into_any_element(),
         };
@@ -707,7 +716,7 @@ impl Render for Shell {
             // Only while maximized: a tracked root focuses itself on every click on plain chrome.
             .when(self.layout.panel_maximized, |d| d.track_focus(&self.focus_handle).key_context(PANEL_MAXIMIZED_CONTEXT))
             .bg(theme.background)
-            .text_size(theme::UI)
+            .text_size(theme::ui())
             .text_color(theme.foreground)
             .on_action(cx.listener(|this, _: &ToggleExplorer, _, cx| {
                 this.layout.toggle_explorer();
@@ -805,10 +814,10 @@ impl Render for Shell {
                 cx.notify();
             }))
             .child(
-                TitleBar::new().h(theme::TITLEBAR).child(
+                TitleBar::new().h(theme::titlebar()).child(
                     h_flex()
                         .w_full()
-                        .pr(theme::SPACE_8)
+                        .pr(theme::space_8())
                         .justify_between()
                         // Wordmark: a console prompt with its cursor parked. Static, nothing moves when idle.
                         .child(
@@ -817,9 +826,9 @@ impl Render for Shell {
                                 .gap(px(1.))
                                 .font_family(theme.mono_font_family.clone())
                                 .font_weight(FontWeight::BOLD)
-                                .text_size(theme::UI)
+                                .text_size(theme::ui())
                                 .child("queryx")
-                                .child(div().w(theme::SPACE_6 + px(1.)).h(theme::UI).bg(theme.primary)),
+                                .child(div().w(theme::space_6() + px(1.)).h(theme::ui()).bg(theme.primary)),
                         )
                         .child(self.settings_menu(cx)),
                 ),

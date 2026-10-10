@@ -114,7 +114,7 @@ fn row_height(mono: Pixels) -> Pixels {
 
 /// Width of the row-number gutter: monospace digits plus padding.
 fn gutter_width(rows: usize, mono: Pixels) -> Pixels {
-    mono * 0.6 * gutter_digits(rows) as f32 + theme::SPACE_12
+    mono * 0.6 * gutter_digits(rows) as f32 + theme::space_12()
 }
 
 /// Digits the row-number gutter must fit: the row count's, but never fewer than 3.
@@ -503,13 +503,13 @@ impl Render for DragColumn {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         div()
-            .px(theme::SPACE_8)
-            .py(theme::SPACE_4)
-            .rounded(theme::RADIUS_SM)
+            .px(theme::space_8())
+            .py(theme::space_4())
+            .rounded(theme::radius_sm())
             .border_1()
             .border_color(theme.border)
             .bg(theme.table_head)
-            .text_size(theme::UI_SM)
+            .text_size(theme::ui_sm())
             .text_color(theme.foreground)
             .child(self.name.clone())
     }
@@ -673,7 +673,7 @@ impl Grid {
 
     /// Width that fits the header and the rows currently in view.
     fn autofit(&mut self, c: usize) {
-        let top = (-self.scroll.0.borrow().base_handle.offset().y / row_height(self.mono)) as usize;
+        let top = (-self.scroll.0.borrow().base_handle.offset().y / self.row_h()) as usize;
         let rows = top..(top + AUTOFIT_SAMPLE).min(self.source.row_count());
         let meta = &self.source.columns()[c];
         let chars = rows
@@ -682,11 +682,11 @@ impl Grid {
             .max()
             .unwrap_or(0);
         // ponytail: advance estimated as 0.6em (mono); Inter headers can be under-sized, measure with the text system if that shows
-        self.widths[c] = (self.mono * 0.6 * chars as f32 + theme::SPACE_16 + theme::SPACE_4).max(MIN_WIDTH);
+        self.widths[c] = (self.mono_px() * 0.6 * chars as f32 + theme::space_16() + theme::space_4()).max(MIN_WIDTH);
     }
 
     fn gutter(&self) -> Pixels {
-        gutter_width(self.source.row_count(), self.mono)
+        gutter_width(self.source.row_count(), self.mono_px())
     }
 
     /// Scroll so the head cell is in view, both axes.
@@ -732,7 +732,7 @@ impl Grid {
             return;
         }
         let m = ev.keystroke.modifiers;
-        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / row_height(self.mono)) as usize;
+        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / self.row_h()) as usize;
         match ev.keystroke.key.as_str() {
             "c" if m.secondary() => return self.copy_as(tsv, cx),
             "r" if m.secondary() && m.shift => {
@@ -788,7 +788,7 @@ impl Grid {
                         .left(self.gutter() + offsets[c])
                         .w(self.widths[s])
                         .h_full()
-                        .px(theme::SPACE_8)
+                        .px(theme::space_8())
                         .flex()
                         .items_center()
                         .overflow_hidden()
@@ -814,8 +814,8 @@ impl Grid {
                         )
                         .child(if kind == CellKind::Null {
                             div()
-                                .px(theme::SPACE_4)
-                                .rounded(theme::RADIUS_SM)
+                                .px(theme::space_4())
+                                .rounded(theme::radius_sm())
                                 .bg(theme.muted)
                                 .text_color(theme::grid_null(theme))
                                 .child(text)
@@ -828,9 +828,9 @@ impl Grid {
                 div()
                     .relative()
                     .w(self.gutter() + total)
-                    .h(row_height(self.mono))
+                    .h(self.row_h())
                     .font_family(theme.mono_font_family.clone())
-                    .text_size(self.mono)
+                    .text_size(self.mono_px())
                     .bg(if r % 2 == 1 { theme.table_even } else { theme.table })
                     .hover(|d| d.bg(theme.table_hover))
                     .border_b_1()
@@ -843,7 +843,7 @@ impl Grid {
                             .left(scroll_x)
                             .w(self.gutter())
                             .h_full()
-                            .pr(theme::SPACE_8)
+                            .pr(theme::space_8())
                             .flex()
                             .items_center()
                             .justify_end()
@@ -869,30 +869,30 @@ impl Grid {
         let theme = cx.theme();
         let r = self.head.0;
         let row = self.row(r);
-        let name_w = theme::SPACE_24 * 8.;
+        let name_w = theme::space_24() * 8.;
         div()
             .id("grid-record")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .font_family(theme.mono_font_family.clone())
-            .text_size(self.mono)
+            .text_size(self.mono_px())
             .child(
                 div()
-                    .px(theme::SPACE_8)
-                    .h(theme::GRID_ROW)
+                    .px(theme::space_8())
+                    .h(theme::grid_row())
                     .flex()
                     .items_center()
-                    .text_size(theme::UI_SM)
+                    .text_size(theme::ui_sm())
                     .text_color(theme.muted_foreground)
                     .child(format!("Row {} of {}   (Ctrl+Shift+R back to grid, ↑↓ change row)", r + 1, self.source.row_count())),
             )
             .children(self.source.columns().iter().zip(row.iter()).enumerate().map(|(c, (meta, value))| {
                 let (text, kind) = format_cell(value);
                 h_flex()
-                    .min_h(row_height(self.mono))
-                    .px(theme::SPACE_8)
-                    .gap(theme::SPACE_8)
+                    .min_h(self.row_h())
+                    .px(theme::space_8())
+                    .gap(theme::space_8())
                     .border_b_1()
                     .border_color(theme.table_row_border)
                     .when(c % 2 == 1, |d| d.bg(theme.table_even))
@@ -925,7 +925,7 @@ impl Grid {
         div()
             .relative()
             .flex_none()
-            .h(header_height(theme::BADGE_LINE, theme::SPACE_8))
+            .h(header_height(theme::badge_line(), theme::space_8()))
             .w_full()
             .overflow_hidden()
             .bg(theme.table_head)
@@ -966,24 +966,24 @@ impl Grid {
                                 }),
                             )
                             .on_mouse_down(MouseButton::Right, cx.listener(move |this, _, _, _| this.menu_col = s))
-                            .px(theme::SPACE_8)
+                            .px(theme::space_8())
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .child({
                                 let m = header_model(&columns[s]);
                                 h_flex()
-                                    .gap(theme::SPACE_4)
-                                    .h(theme::BADGE_LINE)
-                                    .text_size(theme::UI_SM)
+                                    .gap(theme::space_4())
+                                    .h(theme::badge_line())
+                                    .text_size(theme::ui_sm())
                                     .text_color(theme.foreground)
                                     .when(m.pk, |d| d.child(Icon::new(IconName::KeyRound).size_3().text_color(theme.muted_foreground)))
                                     .child(m.name)
                             })
                             .child(
                                 div()
-                                    .h(theme::BADGE_LINE)
+                                    .h(theme::badge_line())
                                     .font_family(theme.mono_font_family.clone())
-                                    .text_size(theme::UI_SM)
+                                    .text_size(theme::ui_sm())
                                     .text_color(theme.muted_foreground)
                                     .child(header_model(&columns[s]).data_type),
                             )
@@ -1005,8 +1005,8 @@ impl Grid {
                         };
                         div()
                             .id(("sort", s))
-                            .px(theme::SPACE_4)
-                            .text_size(theme::UI_SM)
+                            .px(theme::space_4())
+                            .text_size(theme::ui_sm())
                             // Drag must not start from the sort control.
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .map(|d| match avail {
@@ -1024,7 +1024,7 @@ impl Grid {
                     .child(
                         div()
                             .id(("resize", s))
-                            .w(theme::SPACE_4)
+                            .w(theme::space_4())
                             .h_full()
                             .cursor_col_resize()
                             .hover(|d| d.bg(theme.primary))
@@ -1047,8 +1047,18 @@ impl Grid {
 }
 
 impl Grid {
+    #[cfg(test)]
     pub fn mono(&self) -> Pixels {
         self.mono
+    }
+
+    /// The pane's mono font size at the current UI scale.
+    fn mono_px(&self) -> Pixels {
+        theme::scaled(self.mono)
+    }
+
+    fn row_h(&self) -> Pixels {
+        theme::scaled(row_height(self.mono))
     }
 
     fn zoom(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
@@ -1132,9 +1142,9 @@ impl Render for Grid {
                         .bg(theme.background)
                         .child(
                             div()
-                                .px(theme::SPACE_8)
-                                .py(theme::SPACE_4)
-                                .text_size(theme::UI_SM)
+                                .px(theme::space_8())
+                                .py(theme::space_4())
+                                .text_size(theme::ui_sm())
                                 .text_color(theme.muted_foreground)
                                 .child(format!("{} · {} · row {}   (Esc closes)", meta.name, meta.data_type, r + 1)),
                         )
@@ -1143,9 +1153,9 @@ impl Render for Grid {
                                 .id("grid-inspector")
                                 .flex_1()
                                 .overflow_y_scroll()
-                                .px(theme::SPACE_8)
+                                .px(theme::space_8())
                                 .font_family(theme.mono_font_family.clone())
-                                .text_size(self.mono)
+                                .text_size(self.mono_px())
                                 .child(inspect_text(&self.row(r)[c])),
                         ),
                 )
@@ -1462,11 +1472,11 @@ mod tests {
 
     #[test]
     fn header_height_fits_two_lines() {
-        use crate::theme::{BADGE_LINE, SPACE_4, SPACE_8};
-        assert_eq!(header_height(BADGE_LINE, SPACE_8), px(40.));
+        use crate::theme::{badge_line, space_4, space_8};
+        assert_eq!(header_height(badge_line(), space_8()), px(40.));
         assert_eq!(header_height(px(16.), px(0.)), px(32.));
-        assert_eq!(header_height(px(14.), SPACE_4), px(32.));
-        assert!(header_height(BADGE_LINE, SPACE_8) >= BADGE_LINE * 2.);
+        assert_eq!(header_height(px(14.), space_4()), px(32.));
+        assert!(header_height(badge_line(), space_8()) >= badge_line() * 2.);
     }
 
     #[test]

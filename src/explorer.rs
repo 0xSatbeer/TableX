@@ -794,11 +794,11 @@ impl Explorer {
                 h_flex()
                     .id(ix)
                     .relative()
-                    .h(theme::TREE_ROW)
+                    .h(theme::tree_row())
                     .w_full()
-                    .gap(theme::SPACE_6)
-                    .pl(theme::SPACE_4 + theme::SPACE_12 * node.depth as f32)
-                    .pr(theme::SPACE_8)
+                    .gap(theme::space_6())
+                    .pl(theme::space_4() + theme::space_12() * node.depth as f32)
+                    .pr(theme::space_8())
                     .when(!selected && self.marked.contains(&node.key), |d| d.bg(theme::selected_inactive(theme)))
                     .when(selected, |d| d.bg(if focused { theme.list_active } else { theme::selected_inactive(theme) }))
                     .when(!selected, |d| d.hover(|d| d.bg(theme.list_hover)))
@@ -808,7 +808,7 @@ impl Explorer {
                     .children((1..node.depth).map(|level| {
                         div()
                             .absolute()
-                            .left(theme::SPACE_4 + theme::SPACE_12 * level as f32 + theme::SPACE_6)
+                            .left(theme::space_4() + theme::space_12() * level as f32 + theme::space_6())
                             .top_0()
                             .h_full()
                             .w(px(1.))
@@ -833,7 +833,7 @@ impl Explorer {
                         }),
                     )
                     .child(
-                        div().flex_none().w(theme::SPACE_12).when(node.expandable, |d| {
+                        div().flex_none().w(theme::space_12()).when(node.expandable, |d| {
                             d.child(Icon::new(chevron).xsmall().text_color(theme.muted_foreground)).on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, window, cx| {
@@ -849,7 +849,7 @@ impl Explorer {
                     .when(is_conn, |d| {
                         // Solid = connected, 2px ring otherwise; an error also has its own row below.
                         let color = theme::connection_color(conn.color, theme);
-                        let dot = div().flex_none().size(theme::SPACE_8).rounded_full();
+                        let dot = div().flex_none().size(theme::space_8()).rounded_full();
                         d.child(if status_style(&conn.status).0 { dot.bg(color) } else { dot.border_2().border_color(color) })
                     })
                     .when(is_conn, |d| {
@@ -865,7 +865,7 @@ impl Explorer {
                         let ranges = highlight_ranges(&node.label, &self.filter).into_iter().map(|r| (r, style));
                         StyledText::new(node.label.clone()).with_highlights(ranges.collect::<Vec<_>>())
                         }
-                    }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError), |d| d.text_size(theme::UI_SM).text_color(theme.muted_foreground)))
+                    }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError), |d| d.text_size(theme::ui_sm()).text_color(theme.muted_foreground)))
                     .when(node.kind == NodeKind::ConnError, |d| {
                         let help: SharedString = format!(
                             "{}\nCheck that {} is reachable (VPN, firewall), then retry. Ctrl+C copies this message.",
@@ -883,11 +883,11 @@ impl Explorer {
                         )
                     })
                     .when_some(node.suffix.clone(), |d, suffix| {
-                        d.child(div().flex_none().text_size(theme::UI_SM).text_color(theme.muted_foreground).child(suffix))
+                        d.child(div().flex_none().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child(suffix))
                     })
-                    .when(node.pk, |d| d.child(div().flex_none().text_size(theme::UI_SM).text_color(theme.muted_foreground).child("PK")))
+                    .when(node.pk, |d| d.child(div().flex_none().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child("PK")))
                     .when_some(node.count, |d, n| {
-                        d.child(div().text_size(theme::UI_SM).text_color(theme.muted_foreground).child(n.to_string()))
+                        d.child(div().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child(n.to_string()))
                     })
                     .when(is_conn && conn.is_production, |d| {
                         d.child(theme::prod_badge(theme))
@@ -913,7 +913,7 @@ impl Render for Explorer {
             .child(
                 div()
                     .flex_none()
-                    .p(theme::SPACE_6)
+                    .p(theme::space_6())
                     .border_b_1()
                     .border_color(theme.border)
                     .capture_key_down(cx.listener(Self::on_field_key))
@@ -923,11 +923,11 @@ impl Render for Explorer {
                 d.child(
                     h_flex()
                         .flex_none()
-                        .h(theme::TREE_ROW)
-                        .px(theme::SPACE_8)
+                        .h(theme::tree_row())
+                        .px(theme::space_8())
                         .border_b_1()
                         .border_color(theme.border)
-                        .text_size(theme::UI_SM)
+                        .text_size(theme::ui_sm())
                         .text_color(theme.danger)
                         .child(msg),
                 )
@@ -936,11 +936,11 @@ impl Render for Explorer {
                 d.child(
                     div()
                         .flex_none()
-                        .px(theme::SPACE_8)
-                        .h(theme::TREE_ROW)
+                        .px(theme::space_8())
+                        .h(theme::tree_row())
                         .flex()
                         .items_center()
-                        .text_size(theme::UI_SM)
+                        .text_size(theme::ui_sm())
                         .text_color(theme.muted_foreground)
                         .child(no_match_text(&self.filter)),
                 )

@@ -22,59 +22,88 @@ const BUILT_IN: [&str; 2] = ["QueryX Dark", "QueryX Light"];
 // UI_SM; with 13 it rendered at 11.4px and 9.75px. The shell pins body text to UI, so our own
 // text never inherits the rem. Labeled library widgets use `.small()`, never `.xsmall()`.
 /// Secondary UI text: tabs, table headers, counts.
-pub const UI_SM: Pixels = px(12.);
-pub const UI: Pixels = px(13.);
-pub const UI_LG: Pixels = px(15.);
-pub const UI_XL: Pixels = px(18.);
+const UI_SM: Pixels = px(12.);
+const UI: Pixels = px(13.);
+const UI_LG: Pixels = px(15.);
+const UI_XL: Pixels = px(18.);
 pub const MONO: Pixels = px(12.5);
 
-pub const SPACE_2: Pixels = px(2.);
-pub const SPACE_4: Pixels = px(4.);
-pub const SPACE_6: Pixels = px(6.);
-pub const SPACE_8: Pixels = px(8.);
-pub const SPACE_12: Pixels = px(12.);
-pub const SPACE_16: Pixels = px(16.);
-pub const SPACE_24: Pixels = px(24.);
+const SPACE_2: Pixels = px(2.);
+const SPACE_4: Pixels = px(4.);
+const SPACE_6: Pixels = px(6.);
+const SPACE_8: Pixels = px(8.);
+const SPACE_12: Pixels = px(12.);
+const SPACE_16: Pixels = px(16.);
+const SPACE_24: Pixels = px(24.);
 
 /// Controls. Cards and menus use RADIUS_MD, dialogs RADIUS_LG (the theme's `radius` and `radius.lg`).
-pub const RADIUS_SM: Pixels = px(4.);
-pub const RADIUS_MD: Pixels = px(6.);
-pub const RADIUS_LG: Pixels = px(10.);
+const RADIUS_SM: Pixels = px(4.);
+const RADIUS_MD: Pixels = px(6.);
+const RADIUS_LG: Pixels = px(10.);
 
-pub const TREE_ROW: Pixels = px(24.);
+const TREE_ROW: Pixels = px(24.);
 /// Log and result-list rows: one line of mono SQL plus badges needs more air than the tree.
-pub const LIST_ROW: Pixels = px(28.);
+const LIST_ROW: Pixels = px(28.);
 /// Line height inside badges, so a badge sits inside a row instead of filling it.
-pub const BADGE_LINE: Pixels = px(16.);
+const BADGE_LINE: Pixels = px(16.);
 pub const GRID_ROW: Pixels = px(26.);
-pub const TAB: Pixels = px(34.);
+const TAB: Pixels = px(34.);
 /// Connection-color rule on tabs.
-pub const STRIPE: Pixels = px(2.);
-pub const TITLEBAR: Pixels = px(38.);
-pub const STATUS_BAR: Pixels = px(24.);
+const STRIPE: Pixels = px(2.);
+const TITLEBAR: Pixels = px(38.);
+const STATUS_BAR: Pixels = px(24.);
+
+// Every token is read through its function, which applies the UI scale.
+macro_rules! scaled_tokens {
+    ($($token:ident => $name:ident),* $(,)?) => {
+        $(pub fn $name() -> Pixels { scaled($token) })*
+    };
+}
+
+scaled_tokens! {
+    UI_SM => ui_sm, UI => ui, UI_LG => ui_lg, UI_XL => ui_xl, MONO => mono,
+    SPACE_2 => space_2, SPACE_4 => space_4, SPACE_6 => space_6, SPACE_8 => space_8,
+    SPACE_12 => space_12, SPACE_16 => space_16, SPACE_24 => space_24,
+    RADIUS_SM => radius_sm, RADIUS_MD => radius_md, RADIUS_LG => radius_lg,
+    TREE_ROW => tree_row, LIST_ROW => list_row, BADGE_LINE => badge_line, GRID_ROW => grid_row,
+    TAB => tab, STRIPE => stripe, TITLEBAR => titlebar, STATUS_BAR => status_bar,
+}
 
 /// The settings menu's UI scale choices, in percent.
 pub const UI_SCALES: [u16; 5] = [90, 100, 110, 120, 130];
 pub const DEFAULT_UI_SCALE: u16 = 100;
 
+thread_local! {
+    // The UI runs on one thread; per-thread state also keeps parallel tests apart.
+    static UI_SCALE: std::cell::Cell<u16> = const { std::cell::Cell::new(DEFAULT_UI_SCALE) };
+}
+
 /// `token` at `percent` UI scale.
 pub fn scale(token: Pixels, percent: u16) -> Pixels {
-    token
+    token * (percent as f32 / 100.)
+}
+
+/// `token` at the current UI scale.
+pub fn scaled(token: Pixels) -> Pixels {
+    scale(token, ui_scale())
 }
 
 pub fn ui_scale() -> u16 {
-    DEFAULT_UI_SCALE
+    UI_SCALE.get()
 }
 
-/// Sets the UI scale for every token and the library's rem-based text; the caller refreshes the window.
-pub fn set_ui_scale(_percent: u16, _cx: &mut App) {}
-
-pub fn ui() -> Pixels {
-    UI
+/// Sets the UI scale (clamped to the menu's range) for every token and the library's rem-based
+/// text; the caller refreshes the window.
+pub fn set_ui_scale(percent: u16, cx: &mut App) {
+    UI_SCALE.set(percent.clamp(UI_SCALES[0], UI_SCALES[UI_SCALES.len() - 1]));
+    scale_library_text(cx);
 }
 
-pub fn tree_row() -> Pixels {
-    TREE_ROW
+/// The library sizes its text in rems of `font_size`, which `Theme::change` resets from the theme JSON.
+fn scale_library_text(cx: &mut App) {
+    let theme = Theme::global_mut(cx);
+    theme.font_size = scaled(UI_SM / 0.875);
+    theme.mono_font_size = mono();
 }
 
 gpui_kit::actions!(theme, [ZoomIn, ZoomOut, ZoomReset]);
@@ -132,6 +161,7 @@ fn init_themes(cx: &mut App) {
     // `Theme::change` loads whichever of these two matches the mode it is given.
     Theme::update(cx, |theme| (theme.dark_theme, theme.light_theme) = (dark, light));
     Theme::change(ThemeMode::Dark, None, cx);
+    scale_library_text(cx);
 }
 
 /// Where users drop gpui-kit theme-set JSON files (`*.json`). QueryX only reads it.
@@ -261,6 +291,7 @@ impl ThemeChoice {
         if theme.mode != mode || !Rc::ptr_eq(&theme.dark_theme, &dark) || !Rc::ptr_eq(&theme.light_theme, &light) {
             Theme::update(cx, |theme| (theme.dark_theme, theme.light_theme) = (dark, light));
             Theme::change(mode, None, cx);
+            scale_library_text(cx);
         }
     }
 }
@@ -358,14 +389,14 @@ pub fn prod_badge(theme: &Theme) -> gpui_kit::Div {
     use gpui_kit::{FontWeight, ParentElement as _, Styled as _};
     gpui_kit::div()
         .flex_none()
-        .px(SPACE_4)
-        .rounded(RADIUS_SM)
+        .px(space_4())
+        .rounded(radius_sm())
         .bg(theme.danger)
         .text_color(theme.background)
         .font_family(theme.mono_font_family.clone())
         .font_weight(FontWeight::BOLD)
-        .text_size(UI_SM)
-        .line_height(BADGE_LINE)
+        .text_size(ui_sm())
+        .line_height(badge_line())
         .child("PROD")
 }
 
