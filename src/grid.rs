@@ -107,6 +107,11 @@ fn aligns_right(kind: &CellKind, data_type: &str) -> bool {
     *kind == CellKind::Number || (*kind == CellKind::Null && is_numeric_type(data_type))
 }
 
+/// Grid row height for a pane's mono font size: GRID_ROW at MONO, in proportion otherwise.
+fn row_height(mono: Pixels) -> Pixels {
+    theme::GRID_ROW
+}
+
 /// Width of the row-number gutter: monospace digits plus padding.
 fn gutter_width(rows: usize) -> Pixels {
     theme::MONO * 0.6 * gutter_digits(rows) as f32 + theme::SPACE_12
@@ -1150,7 +1155,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{aligns_right, gutter_digits, gutter_width, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{aligns_right, gutter_digits, gutter_width, row_height, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -1368,6 +1373,15 @@ mod tests {
         ];
         for (kind, ty, right) in cases {
             assert_eq!(aligns_right(&kind, ty), right, "{kind:?} in {ty:?}");
+        }
+    }
+
+    #[test]
+    fn row_height_scales_with_the_zoomed_font() {
+        let cases = [(12.5, 26.), (13.5, 28.08), (11.5, 23.92), (9., 18.72), (24., 49.92)];
+        for (mono, want) in cases {
+            let got: f32 = row_height(px(mono)).into();
+            assert!((got - want).abs() < 0.01, "mono {mono}: row {got}, want {want}");
         }
     }
 
