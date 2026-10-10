@@ -100,6 +100,11 @@ impl StatusBar {
         cx.notify();
     }
 
+    /// The aggregate as drawn.
+    pub fn aggregate_text(&self) -> Option<String> {
+        self.selection.clone()
+    }
+
     fn sync_selection(&mut self, grid: &Entity<Grid>, cx: &mut Context<Self>) {
         let key = grid.read(cx).selection_key();
         if self.selection_key.as_ref() != Some(&key) {
@@ -229,7 +234,7 @@ impl Render for StatusBar {
             // ponytail: tx state is fixed until QX-012/025 give it a model; hidden without a connection
             .when(self.origin.is_some(), |d| d.child("AUTO-COMMIT"))
             .child(div().flex_1())
-            .children(self.selection.clone())
+            .children(self.aggregate_text())
             .children(self.cursor.map(|(line, col, selected)| match selected {
                 0 => format!("Ln {line}, Col {col}"),
                 n => format!("Ln {line}, Col {col} ({n} selected)"),

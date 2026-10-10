@@ -1473,4 +1473,48 @@ mod tests {
             }
         }
     }
+
+    #[gpui_kit::test]
+    fn aggregate_shows_only_while_the_grid_is_focused(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{ColumnMeta, ResultSet, Value};
+        use gpui_kit::{AppContext as _, Focusable as _};
+        cx.update(gpui_kit::init);
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let ints = ResultSet {
+            columns: vec![ColumnMeta { name: "n".into(), data_type: "int".into(), is_pk: false }],
+            rows: vec![[Value::Int(3)].into(), [Value::Int(4)].into()],
+        };
+        let grid = shell.update(&mut cx, |this, cx| {
+            this.tabs.open(super::grid_tab("ints", std::rc::Rc::new(ints), cx));
+            this.tab_changed(cx);
+            match this.tabs.active().map(|t| &t.content) {
+                Some(super::TabContent::Grid(grid)) => grid.clone(),
+                _ => panic!("opened tab is a grid"),
+            }
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("shift-down");
+        let shown = Some("2 rows × 1 col · count 2 · sum 7 · avg 3.5".to_string());
+        // Grid first, then each other pane and nothing, then back to the grid; the console editor shares the content pane.
+        for (focus, expected) in [("grid", &shown), ("explorer", &None), ("console", &None), ("panel", &None), ("nothing", &None), ("grid", &shown)] {
+            let handle = shell.read_with(&cx, |this, cx| match focus {
+                "explorer" => Some(this.explorer.focus_handle(cx)),
+                "grid" => Some(grid.focus_handle(cx)),
+                "console" => Some(this.editor.focus_handle(cx)),
+                "panel" => Some(this.bottom_panel.focus_handle(cx)),
+                _ => None,
+            });
+            cx.update(|window, cx| match &handle {
+                Some(handle) => window.focus(handle, cx),
+                None => window.blur(cx),
+            });
+            cx.run_until_parked();
+            let text = shell.read_with(&cx, |this, cx| this.status_bar.read(cx).aggregate_text());
+            assert_eq!(&text, expected, "{focus} focused");
+        }
+    }
 }
