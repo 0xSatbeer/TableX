@@ -856,14 +856,15 @@ impl Explorer {
                         let tip: SharedString = status_style(&conn.status).1.into();
                         d.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     })
-                    .child(div().debug_selector(|| format!("tree-label-{ix}")).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child({
+                    .child(div().debug_selector(|| format!("tree-label-{ix}")).flex_1().min_w_0().truncate().child({
                         // shortcut: the rename input is the typed text plus a caret glyph, no cursor movement; AltGr-as-alt characters and IME input aren't supported
                         if let Some(rn) = self.rename.as_ref().filter(|rn| is_conn && rn.conn == node.conn) {
-                            StyledText::new(format!("{}▏", rn.text))
+                            StyledText::new(format!("{}▏", rn.text)).into_any_element()
                         } else {
                         let style = HighlightStyle { color: Some(theme.primary), ..Default::default() };
                         let ranges = highlight_ranges(&node.label, &self.filter).into_iter().map(|r| (r, style));
-                        StyledText::new(node.label.clone()).with_highlights(ranges.collect::<Vec<_>>())
+                        let text = StyledText::new(node.label.clone()).with_highlights(ranges.collect::<Vec<_>>());
+                        theme::truncating(("tree-label", ix), text, node.label.clone()).into_any_element()
                         }
                     }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError), |d| d.text_size(theme::ui_sm()).text_color(theme.muted_foreground)))
                     .when(node.kind == NodeKind::ConnError, |d| {

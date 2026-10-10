@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use gpui_kit::{App, Hsla, Pixels, Rgba, SharedString, Window, px};
 use gpui_kit::component::theme::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
+use gpui_kit::component::tooltip::Tooltip;
 
 use crate::model::ObjectKind;
 
@@ -411,8 +412,18 @@ pub fn focus_ring(name: &'static str, pane: gpui_kit::Div, focused: bool, theme:
 
 /// The tooltip for text drawn as `shown`: its `full` text, only when the box cut it.
 pub fn truncation_tip(full: &SharedString, shown: &str) -> Option<SharedString> {
-    let _ = (full, shown);
-    None
+    (shown != full.as_ref()).then(|| full.clone())
+}
+
+/// `text` (built from `full`) on one line. Inside a `.truncate()` box it ends in "…" when it
+/// doesn't fit, and only then does hovering show `full` in a tooltip.
+pub fn truncating(id: impl Into<gpui_kit::ElementId>, text: gpui_kit::StyledText, full: SharedString) -> gpui_kit::InteractiveText {
+    use gpui_kit::{InteractiveElement as _, ParentElement as _};
+    let layout = text.layout().clone();
+    gpui_kit::InteractiveText::new(id, text).tooltip(move |_, window, cx| {
+        let tip = truncation_tip(&full, &layout.text())?;
+        Some(Tooltip::element(move |_, _| gpui_kit::div().debug_selector(|| "truncation-tip".into()).child(tip.clone())).build(window, cx))
+    })
 }
 
 pub fn grid_null(theme: &Theme) -> Hsla {
