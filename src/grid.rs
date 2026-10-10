@@ -978,10 +978,11 @@ impl Grid {
                                     .text_size(theme::ui_sm())
                                     .text_color(theme.foreground)
                                     .when(m.pk, |d| d.child(Icon::new(IconName::KeyRound).size_3().text_color(theme.muted_foreground)))
-                                    .child(m.name)
+                                    .child(div().debug_selector(|| format!("header-name-{s}")).child(m.name))
                             })
                             .child(
                                 div()
+                                    .debug_selector(|| format!("header-type-{s}"))
                                     .h(theme::badge_line())
                                     .font_family(theme.mono_font_family.clone())
                                     .text_size(theme::ui_sm())
@@ -1592,6 +1593,36 @@ mod tests {
         ];
         for (ranges, order, hidden, expected) in cases {
             assert_eq!(copy_in_list(&ranges, &order, &hidden, &cols, row), expected, "ranges {ranges:?}, order {order:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn truncated_header_names_and_types_show_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use crate::model::ResultSet;
+        use crate::theme::tests::hover_shows_truncation_tip;
+        cx.update(gpui_kit::init);
+        let long = "shipment_line_item_carrier_tracking_events_archive_partitioned_by_month_2026_q3x";
+        let col = |name: &str, data_type: &str| ColumnMeta { name: name.into(), data_type: data_type.into(), is_pk: false };
+        let source = ResultSet {
+            columns: vec![col("id", "bigint"), col(long, "text"), col("created_at", "timestamp with time zone")],
+            rows: vec![vec![Value::Int(1), Value::Text("a".into()), Value::Text("2026-10-10".into())].into()],
+        };
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(source), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        // As if dragged by the user: wide enough for id/bigint, narrow for created_at.
+        grid.update(&mut cx, |grid, cx| {
+            grid.widths[0] = px(200.);
+            grid.widths[2] = px(60.);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        // (selector, tooltip shown); ones that fit first, so no earlier tooltip lingers.
+        let cases = [("header-name-0", false), ("header-type-0", false), ("header-type-1", false), ("header-name-1", true), ("header-type-2", true)];
+        for (selector, tip) in cases {
+            assert_eq!(hover_shows_truncation_tip(&mut cx, selector.into()), tip, "{selector}");
         }
     }
 }

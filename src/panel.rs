@@ -156,6 +156,7 @@ impl BottomPanel {
             .child(col(8.).child(entry.database.clone()))
             .child(
                 div()
+                    .debug_selector(|| format!("log-sql-{ix}"))
                     .flex_1()
                     .min_w_0()
                     .truncate()
@@ -715,5 +716,34 @@ mod tests {
         assert_eq!(super::format_duration(Duration::from_micros(400)), "0.4 ms");
         assert_eq!(super::format_duration(Duration::from_micros(12_345)), "12 ms");
         assert_eq!(super::format_duration(Duration::from_millis(1_250)), "1.2 s");
+    }
+
+    #[gpui_kit::test]
+    fn truncated_log_sql_shows_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Bounds, Entity, WindowBounds, WindowOptions, point, px, size};
+        use crate::theme::tests::hover_shows_truncation_tip;
+        cx.update(gpui_kit::init);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(400.))))),
+            ..Default::default()
+        };
+        let (window, panel): (_, Entity<super::BottomPanel>) = cx.update(|cx| {
+            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::BottomPanel::new(&crate::mock::workspaces()[0], window, cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        let long = format!("SELECT {} FROM orders", (0..40).map(|i| format!("column_{i}")).collect::<Vec<_>>().join(", "));
+        panel.update(&mut cx, |p, cx| {
+            let entry = p.log[0].clone();
+            p.log = vec![super::QueryLogEntry { sql: "SELECT 1".into(), ..entry.clone() }, super::QueryLogEntry { sql: long, ..entry }];
+            p.filter = super::LogFilter { introspection: true, ..Default::default() };
+            p.show_logs();
+            p.refilter(cx);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        // (selector, tooltip shown); the one that fits first, so no earlier tooltip lingers.
+        for (selector, tip) in [("log-sql-0", false), ("log-sql-1", true)] {
+            assert_eq!(hover_shows_truncation_tip(&mut cx, selector.into()), tip, "{selector}");
+        }
     }
 }

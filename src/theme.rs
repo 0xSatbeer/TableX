@@ -448,6 +448,17 @@ pub const SYNTAX: [&str; 8] = ["keyword", "string", "number", "comment", "functi
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// Hovers the start of the element drawn as `selector` past the tooltip delay, and says
+    /// whether a truncation tooltip came up.
+    pub(crate) fn hover_shows_truncation_tip(cx: &mut gpui_kit::VisualTestContext, selector: String) -> bool {
+        use gpui_kit::{Modifiers, point, px};
+        let target = cx.debug_bounds(selector.clone().leak()).unwrap_or_else(|| panic!("{selector} drawn"));
+        cx.simulate_mouse_move(point(target.left() + px(4.), target.center().y), None, Modifiers::none());
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        cx.debug_bounds("truncation-tip").is_some()
+    }
+
     #[test]
     fn truncation_tip_is_the_full_text_only_when_cut() {
         let long = "shipment_line_item_carrier_tracking_events_archive_partitioned_by_month_2026_q3x";

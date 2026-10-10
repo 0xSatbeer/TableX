@@ -192,7 +192,7 @@ impl Render for StatusBar {
             Some(o) => h_flex()
                 .gap(theme::space_6())
                 .child(div().size(theme::space_6()).rounded_full().bg(theme::connection_color(o.color, theme)))
-                .child(div().text_color(theme.foreground).font_family(theme.mono_font_family.clone()).child(o.path.clone()))
+                .child(div().debug_selector(|| "status-path".into()).text_color(theme.foreground).font_family(theme.mono_font_family.clone()).child(o.path.clone()))
                 .when(o.production, |d| d.child(theme::prod_badge(theme))),
             None if self.has_tab => h_flex().child("Sample data · not from a connection"),
             None => h_flex(),
@@ -334,5 +334,26 @@ mod tests {
         let status = "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
         assert_eq!(super::rss_anon_mb(status), Some(35));
         assert_eq!(super::rss_anon_mb("Name:\tqueryx\n"), None);
+    }
+
+    #[gpui_kit::test]
+    fn truncated_status_path_shows_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Bounds, Entity, WindowBounds, WindowOptions, point, px, size};
+        use crate::{tabs::Origin, theme::tests::hover_shows_truncation_tip};
+        cx.update(gpui_kit::init);
+        let long = "prod-pg › analytics_warehouse_replica_eu_west › shipment_tracking_archive_partitioned_2026";
+        // (path, tooltip shown)
+        for (path, tip) in [("prod-pg › app_db › public", false), (long, true)] {
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(0.), px(0.)), size(px(420.), px(100.))))),
+                ..Default::default()
+            };
+            let (window, bar): (_, Entity<super::StatusBar>) =
+                cx.update(|cx| gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::StatusBar::new(window, cx))).expect("open test window"));
+            let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+            bar.update(&mut cx, |bar, cx| bar.set_origin(Some(Origin { color: 0, production: false, path: path.into() }), true, cx));
+            cx.run_until_parked();
+            assert_eq!(hover_shows_truncation_tip(&mut cx, "status-path".into()), tip, "{path}");
+        }
     }
 }
