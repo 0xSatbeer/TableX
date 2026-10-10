@@ -409,6 +409,12 @@ pub fn focus_ring(name: &'static str, pane: gpui_kit::Div, focused: bool, theme:
     })
 }
 
+/// The tooltip for text drawn as `shown`: its `full` text, only when the box cut it.
+pub fn truncation_tip(full: &SharedString, shown: &str) -> Option<SharedString> {
+    let _ = (full, shown);
+    None
+}
+
 pub fn grid_null(theme: &Theme) -> Hsla {
     theme.muted_foreground
 }
@@ -431,6 +437,23 @@ pub const SYNTAX: [&str; 8] = ["keyword", "string", "number", "comment", "functi
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn truncation_tip_is_the_full_text_only_when_cut() {
+        let long = "shipment_line_item_carrier_tracking_events_archive_partitioned_by_month_2026_q3x";
+        // (full, shown, tooltip)
+        let cases = [
+            (long, "shipment_line_item_carrier…", Some(long)),
+            (long, "…", Some(long)),
+            (long, long, None),
+            ("orders", "orders", None),
+            ("", "", None),
+            ("naïve_ünïcode_名前", "naïve_ünïcode…", Some("naïve_ünïcode_名前")),
+        ];
+        for (full, shown, want) in cases {
+            assert_eq!(super::truncation_tip(&full.into(), shown), want.map(Into::into), "{full:?} shown as {shown:?}");
+        }
+    }
+
     use super::{CONNECTION_COLORS, CONNECTION_COLORS_LIGHT, DARK, LIGHT, Rgba, Zoom, px, zoom};
 
     #[test]

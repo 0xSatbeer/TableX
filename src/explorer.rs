@@ -856,7 +856,7 @@ impl Explorer {
                         let tip: SharedString = status_style(&conn.status).1.into();
                         d.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     })
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child({
+                    .child(div().debug_selector(|| format!("tree-label-{ix}")).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child({
                         // shortcut: the rename input is the typed text plus a caret glyph, no cursor movement; AltGr-as-alt characters and IME input aren't supported
                         if let Some(rn) = self.rename.as_ref().filter(|rn| is_conn && rn.conn == node.conn) {
                             StyledText::new(format!("{}▏", rn.text))
@@ -1407,5 +1407,37 @@ mod tests {
             });
         })
         .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn truncated_tree_names_show_their_full_text_in_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Bounds, Entity, Modifiers, WindowBounds, WindowOptions, point, px, size};
+        cx.update(gpui_kit::init);
+        let long = "shipment_line_item_carrier_tracking_events_archive_partitioned_by_month_2026_q3x";
+        assert_eq!(long.len(), 80);
+        // (explorer width, table name, tooltip shown)
+        let cases = [(260., long, true), (260., "orders", false), (1200., long, false)];
+        for (width, name, tip) in cases {
+            let mut ws = mock::workspaces().remove(0);
+            let table = ws.connections[0].databases[0].schemas[0].objects.iter_mut().find(|o| o.name == "orders").expect("orders");
+            table.name = name.to_string();
+            let key = flatten(&ws, &default_expanded(&ws), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == name).expect("table row").key;
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(0.), px(0.)), size(px(width), px(600.))))),
+                ..Default::default()
+            };
+            let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
+                gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, window, cx))).expect("open test window")
+            });
+            let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&key, window, cx));
+            cx.run_until_parked();
+            let ix = explorer.read_with(&cx, |e, _| e.selected);
+            let label = cx.debug_bounds(Box::leak(format!("tree-label-{ix}").into_boxed_str())).expect("row label drawn");
+            cx.simulate_mouse_move(label.center(), None, Modifiers::none());
+            cx.executor().advance_clock(std::time::Duration::from_secs(1));
+            cx.run_until_parked();
+            assert_eq!(cx.debug_bounds("truncation-tip").is_some(), tip, "{} chars at {width}px: tooltip shown", name.len());
+        }
     }
 }
