@@ -646,7 +646,8 @@ impl Shell {
         let theme = cx.theme();
         let dragging = self.layout.dragging.as_ref().is_some_and(|d| d.edge == edge);
         let offset = size - px(1.) - SPLITTER_PAD;
-        let line = div().flex_none().bg(if dragging { theme.primary } else { theme.border });
+        let name = if edge == Edge::Explorer { "splitter-explorer" } else { "splitter-bottom" };
+        let line = div().debug_selector(move || name.into()).flex_none().bg(if dragging { theme.primary } else { theme.border });
         div()
             .absolute()
             .occlude()
@@ -1459,6 +1460,12 @@ mod tests {
                     let bounds = cx.debug_bounds(pane);
                     assert!(ring.is_some(), "{focus} focused: no focus ring drawn");
                     assert_eq!(ring, bounds, "{focus} focused: the ring outlines {pane}");
+                    // The splitter lines paint after the panes; one lying on the ring would hide that edge.
+                    let ring = ring.expect("ring drawn");
+                    for splitter in ["splitter-explorer", "splitter-bottom"] {
+                        let line = cx.debug_bounds(splitter).expect("splitter drawn");
+                        assert!(!ring.intersects(&line), "{focus} focused: {splitter} {line:?} covers an edge of the ring {ring:?}");
+                    }
                 }
                 None => assert_eq!(ring, None, "nothing focused: no ring"),
             }
