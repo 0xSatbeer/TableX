@@ -6,6 +6,9 @@ edition = "2024"
 [dependencies]
 gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql"] }
 
+[dev-dependencies]
+gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "test-support"] }
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

@@ -142,12 +142,15 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
         columns: vec![],
         keys: vec![],
         indexes: vec![],
+        row_estimate: None,
     };
     for view in ["active_users", "daily_signups", "monthly_revenue", "order_summary", "top_customers"] {
         let mut v = table(view.into(), mix(salt ^ 0xFEED));
         v.kind = ObjectKind::View;
         v.keys.clear();
         v.indexes.clear();
+        v.row_estimate = None;
+        v.columns.iter_mut().for_each(|c| c.is_pk = false);
         objects.push(v);
     }
     objects.push(plain(ObjectKind::MaterializedView, "revenue_by_month"));
@@ -198,13 +201,13 @@ fn table(name: String, r: u64) -> DbObject {
         });
         indexes.push(Index { name: format!("{name}_owner_id_idx"), columns: vec!["owner_id".into()], unique: false });
     }
-    DbObject { kind: ObjectKind::Table, name, columns, keys, indexes }
+    DbObject { kind: ObjectKind::Table, name, columns, keys, indexes, row_estimate: Some(mix(r) % 3_000_000) }
 }
 
 // ---------------------------------------------------------------- result sets
 
 fn meta(cols: &[(&str, &str)]) -> Vec<ColumnMeta> {
-    cols.iter().map(|(n, t)| ColumnMeta { name: (*n).into(), data_type: (*t).into() }).collect()
+    cols.iter().map(|(n, t)| ColumnMeta { name: (*n).into(), data_type: (*t).into(), is_pk: *n == "id" }).collect()
 }
 
 pub fn big_events_columns() -> Vec<ColumnMeta> {
@@ -248,7 +251,7 @@ pub fn big_events_row(ix: usize) -> Row {
 /// `wide_table`: 300 columns for column-virtualization tests.
 pub fn wide_table(rows: usize) -> ResultSet {
     let columns = (0..WIDE_TABLE_COLS)
-        .map(|c| ColumnMeta { name: format!("col_{c:03}").into(), data_type: "integer".into() })
+        .map(|c| ColumnMeta { name: format!("col_{c:03}").into(), data_type: "integer".into(), is_pk: false })
         .collect();
     let rows = (0..rows)
         .map(|row| (0..WIDE_TABLE_COLS).map(|col| Value::Int((cell_rand(row, col) % 100_000) as i64)).collect())
@@ -393,6 +396,38 @@ mod tests {
 
         assert_eq!(wide_table(1).columns.len(), 300);
         assert!(edge_cases().rows.iter().any(|r| r[1] == Value::Null));
+    }
+
+    fn all_objects() -> Vec<DbObject> {
+        workspaces()
+            .into_iter()
+            .flat_map(|w| w.connections)
+            .flat_map(|c| c.databases)
+            .flat_map(|d| d.schemas)
+            .flat_map(|s| s.objects)
+            .collect()
+    }
+
+    #[test]
+    fn tables_have_row_estimates_and_nothing_else_does() {
+        for o in all_objects() {
+            let want = o.kind == ObjectKind::Table;
+            assert_eq!(o.row_estimate.is_some(), want, "{:?} {}: estimate presence", o.kind, o.name);
+        }
+    }
+
+    #[test]
+    fn only_id_columns_are_primary_keys() {
+        for o in all_objects() {
+            for c in &o.columns {
+                let want = o.kind == ObjectKind::Table && c.name == "id";
+                assert_eq!(c.is_pk, want, "{}.{}: is_pk", o.name, c.name);
+            }
+        }
+        let result_sets = [big_events_columns(), wide_table(0).columns, edge_cases().columns];
+        for c in result_sets.iter().flatten() {
+            assert_eq!(c.is_pk, &*c.name == "id", "result column {}: is_pk", c.name);
+        }
     }
 
     #[test]

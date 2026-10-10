@@ -5,7 +5,8 @@ use std::cmp::Ordering;
 use std::ops::Range;
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, h_flex, menu::ContextMenuExt as _, v_flex};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, menu::ContextMenuExt as _, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -52,7 +53,6 @@ impl GridSource for BigEvents {
     }
 }
 
-const GUTTER: Pixels = px(64.);
 const DEFAULT_WIDTH: Pixels = px(160.);
 const MIN_WIDTH: Pixels = px(40.);
 /// Opening width cap: one long JSON column shouldn't push the rest off screen.
@@ -71,6 +71,11 @@ fn prefix_sums(widths: &[Pixels]) -> Vec<Pixels> {
     })).collect()
 }
 
+/// Widths in display order from per-source `widths` and `hidden`; hidden columns are zero wide.
+fn display_widths(order: &[usize], widths: &[Pixels], hidden: &[bool]) -> Vec<Pixels> {
+    order.iter().map(|&s| if hidden[s] { Pixels::ZERO } else { widths[s] }).collect()
+}
+
 /// Columns intersecting `[scroll_x, scroll_x + viewport)`, widened by `overscan` each side.
 fn visible_cols(offsets: &[Pixels], scroll_x: Pixels, viewport: Pixels, overscan: usize) -> Range<usize> {
     let n = offsets.len() - 1;
@@ -83,7 +88,38 @@ fn visible_cols(offsets: &[Pixels], scroll_x: Pixels, viewport: Pixels, overscan
 enum CellKind {
     Null,
     Number,
+    Bool(bool),
     Text,
+}
+
+/// Column types whose values align right, so a NULL in them lines up with the numbers.
+fn is_numeric_type(ty: &str) -> bool {
+    let ty = ty.to_lowercase();
+    if ty.ends_with("[]") || ty.ends_with("range") {
+        return false;
+    }
+    const PREFIXES: [&str; 8] = ["bigint", "smallint", "numeric", "decimal", "double", "float", "real", "money"];
+    (ty.starts_with("int") && !ty.starts_with("interval")) || PREFIXES.iter().any(|p| ty.starts_with(p))
+}
+
+/// Whether a cell is right-aligned: numbers always, NULLs only in numeric columns.
+fn aligns_right(kind: &CellKind, data_type: &str) -> bool {
+    *kind == CellKind::Number || (*kind == CellKind::Null && is_numeric_type(data_type))
+}
+
+/// Grid row height for a pane's mono font size: GRID_ROW at MONO, in proportion otherwise.
+fn row_height(mono: Pixels) -> Pixels {
+    theme::GRID_ROW * (mono / theme::MONO)
+}
+
+/// Width of the row-number gutter: monospace digits plus padding.
+fn gutter_width(rows: usize, mono: Pixels) -> Pixels {
+    mono * 0.6 * gutter_digits(rows) as f32 + theme::space_12()
+}
+
+/// Digits the row-number gutter must fit: the row count's, but never fewer than 3.
+fn gutter_digits(rows: usize) -> usize {
+    (rows.max(1).ilog10() as usize + 1).max(3)
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -105,7 +141,7 @@ fn human_size(n: usize) -> String {
 fn format_cell(value: &Value) -> (String, CellKind) {
     match value {
         Value::Null => ("NULL".into(), CellKind::Null),
-        Value::Bool(b) => ((if *b { "✓" } else { "✗" }).into(), CellKind::Text),
+        Value::Bool(b) => ((if *b { "true" } else { "false" }).into(), CellKind::Bool(*b)),
         Value::Int(_) | Value::Float(_) => (value.to_string(), CellKind::Number),
         Value::Bytes(b) => {
             let head: String = b.iter().take(4).map(|byte| format!("{byte:02X}")).collect();
@@ -125,10 +161,10 @@ fn format_cell(value: &Value) -> (String, CellKind) {
 
 /// Spreadsheet-pasteable TSV. NULL copies as an empty field; fields with tabs, newlines or
 /// quotes are quoted with doubled quotes, which Sheets/Excel/LibreOffice all read back.
-fn tsv(rows: impl Iterator<Item = Row>, cols: Range<usize>) -> String {
+fn tsv(_: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
     let mut out = String::new();
     for row in rows {
-        let fields: Vec<String> = row[cols.clone()]
+        let fields: Vec<String> = row
             .iter()
             .map(|v| match v {
                 Value::Null => String::new(),
@@ -142,6 +178,105 @@ fn tsv(rows: impl Iterator<Item = Row>, cols: Range<usize>) -> String {
         out.push('\n');
     }
     out
+}
+
+/// Header drag: moves display position `from` to just before display position `before`
+/// (`before == order.len()` is the end). Returns whether the order changed.
+fn move_col(order: &mut Vec<usize>, from: usize, before: usize) -> bool {
+    if before == from || before == from + 1 {
+        return false;
+    }
+    let col = order.remove(from);
+    order.insert(if before > from { before - 1 } else { before }, col);
+    true
+}
+
+/// Source columns a copy of display positions `display` emits, in display order, hidden ones skipped.
+fn copy_cols(order: &[usize], hidden: &[bool], display: Range<usize>) -> Vec<usize> {
+    order[display].iter().copied().filter(|&s| !hidden[s]).collect()
+}
+
+/// `items` at the indices `ix`, in that order.
+fn pick<T: Clone>(items: &[T], ix: &[usize]) -> Vec<T> {
+    ix.iter().map(|&i| items[i].clone()).collect()
+}
+
+/// Head cell after a navigation key, or `None` for other keys. `hidden` is in display order;
+/// every horizontal move skips hidden columns.
+fn nav(key: &str, secondary: bool, shift: bool, (r, c): (usize, usize), rows: usize, hidden: &[bool], page: usize) -> Option<(usize, usize)> {
+    let cols = hidden.len();
+    // Nearest visible column left or right of `c`, or `c` at the edge.
+    let step = |c: usize, right: bool| {
+        let visible = |&i: &usize| !hidden[i];
+        if right { (c + 1..cols).find(visible) } else { (0..c).rev().find(visible) }.unwrap_or(c)
+    };
+    let first = if hidden[0] { step(0, true) } else { 0 };
+    let last = if hidden[cols - 1] { step(cols - 1, false) } else { cols - 1 };
+    Some(match key {
+        "up" => (r.saturating_sub(1), c),
+        "down" => ((r + 1).min(rows - 1), c),
+        "left" => (r, step(c, false)),
+        "right" => (r, step(c, true)),
+        "pageup" => (r.saturating_sub(page.max(1)), c),
+        "pagedown" => ((r + page.max(1)).min(rows - 1), c),
+        "home" if secondary => (0, first),
+        "end" if secondary => (rows - 1, last),
+        "home" => (r, first),
+        "end" => (r, last),
+        "tab" => (r, step(c, !shift)),
+        _ => return None,
+    })
+}
+
+/// Display columns (anchor, head) of a band: the clicked column, or for a whole row the first and last visible.
+fn band_cols(col: Option<usize>, hidden: &[bool]) -> (usize, usize) {
+    let edge = |key| nav(key, false, false, (0, 0), 1, hidden, 0).map_or(0, |(_, c)| c);
+    col.map_or_else(|| (edge("home"), edge("end")), |c| (c, c))
+}
+
+/// Anchor, head and extra ranges, in display positions.
+type Selection = ((usize, usize), (usize, usize), Vec<(Range<usize>, Range<usize>)>);
+
+/// Selection after a header drop: a real move (`Some(first visible display column)`) resets it
+/// to row 0 of that column, a no-op drop (`None`) keeps it.
+fn selection_after_drop(reset_col: Option<usize>, selection: Selection) -> Selection {
+    reset_col.map_or(selection, |c| ((0, c), (0, c), Vec::new()))
+}
+
+/// A selected block: row range, display column range.
+type Block = (Range<usize>, Range<usize>);
+
+/// Columns and rows of one selected block, hidden columns skipped, in display order.
+fn block_data<R: AsRef<[Value]>>(block: &Block, order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: &impl Fn(usize) -> R) -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
+    let ix = copy_cols(order, hidden, block.1.clone());
+    (pick(columns, &ix), block.0.clone().map(|r| pick(row(r).as_ref(), &ix)).collect())
+}
+
+/// Every range in the order it was added: the extras, then the active one.
+fn ranges_in_order(extra: &[Block], active: Block) -> Vec<Block> {
+    extra.iter().cloned().chain(std::iter::once(active)).collect()
+}
+
+/// One `format` block per range, separated by a blank line.
+fn copy_ranges<R: AsRef<[Value]>>(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> R) -> String {
+    let blocks: Vec<String> = ranges
+        .iter()
+        .map(|r| {
+            let (cols, rows) = block_data(r, order, hidden, columns, &row);
+            format(&cols, &rows)
+        })
+        .collect();
+    blocks.join("\n")
+}
+
+/// Values of every range's first column as one list.
+fn copy_in_list<R: AsRef<[Value]>>(ranges: &[Block], order: &[usize], hidden: &[bool], columns: &[ColumnMeta], row: impl Fn(usize) -> R) -> String {
+    let firsts: Vec<Vec<Value>> = ranges
+        .iter()
+        .flat_map(|r| block_data(r, order, hidden, columns, &row).1)
+        .filter_map(|mut values| (!values.is_empty()).then(|| vec![values.swap_remove(0)]))
+        .collect();
+    sql_in_list(&[], &firsts)
 }
 
 actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
@@ -324,6 +459,62 @@ fn cmp_values(a: &Value, b: &Value) -> Ordering {
 /// Above this the sort belongs to the query (QX-011 passes it to ORDER BY), not the client.
 const CLIENT_SORT_MAX: usize = 100_000;
 
+/// What a header cell shows for one source column.
+#[derive(Debug, PartialEq)]
+struct HeaderModel {
+    name: String,
+    data_type: String,
+    pk: bool,
+}
+
+fn header_model(c: &ColumnMeta) -> HeaderModel {
+    HeaderModel { name: c.name.to_string(), data_type: c.data_type.to_string(), pk: c.is_pk }
+}
+
+/// Header height: two lines (name, type) plus vertical padding.
+fn header_height(line: Pixels, pad: Pixels) -> Pixels {
+    line * 2. + pad
+}
+
+/// Whether the header sort control works for a source of this size.
+#[derive(Debug, PartialEq)]
+enum SortAvail {
+    Enabled,
+    Disabled(&'static str),
+}
+
+fn sort_availability(rows: usize) -> SortAvail {
+    if rows <= CLIENT_SORT_MAX {
+        SortAvail::Enabled
+    } else {
+        SortAvail::Disabled("Too many rows to sort here; use ORDER BY")
+    }
+}
+
+/// A header cell being dragged to a new display position.
+#[derive(Clone)]
+struct DragColumn {
+    grid: EntityId,
+    from: usize,
+    name: SharedString,
+}
+
+impl Render for DragColumn {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .px(theme::space_8())
+            .py(theme::space_4())
+            .rounded(theme::radius_sm())
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.table_head)
+            .text_size(theme::ui_sm())
+            .text_color(theme.foreground)
+            .child(self.name.clone())
+    }
+}
+
 pub struct Grid {
     source: Rc<dyn GridSource>,
     widths: Vec<Pixels>,
@@ -344,9 +535,16 @@ pub struct Grid {
     /// Transposed one-row view of the head row (Ctrl+Shift+R).
     record: bool,
     hidden: Vec<bool>,
+    /// Display position to source column. Widths, hidden and sort are keyed by source column,
+    /// so they travel with it; selection and navigation work in display positions.
+    col_order: Vec<usize>,
     /// Column the header context menu was opened on.
     menu_col: usize,
+    /// This pane's mono font size, before UI scale (Ctrl+= / Ctrl+- / Ctrl+0).
+    mono: Pixels,
 }
+
+pub type SelectionKey = (Range<usize>, Vec<usize>, Option<(usize, bool)>);
 
 impl Grid {
     pub fn new(source: Rc<dyn GridSource>, cx: &mut Context<Self>) -> Self {
@@ -365,7 +563,9 @@ impl Grid {
             inspecting: false,
             record: false,
             hidden: vec![false; n],
+            col_order: (0..n).collect(),
             menu_col: 0,
+            mono: theme::MONO,
         };
         // Open fitted to the first rows, so timestamps and UUIDs don't arrive clipped.
         for c in 0..n {
@@ -406,12 +606,42 @@ impl Grid {
         (a.0.min(h.0)..a.0.max(h.0) + 1, a.1.min(h.1)..a.1.max(h.1) + 1)
     }
 
+    /// Active range as display rows and visible source columns, plus the sort that maps those rows.
+    pub fn selection_key(&self) -> SelectionKey {
+        let (rows, cols) = self.selection();
+        let cols = cols.filter_map(|c| self.col_order.get(c).copied()).filter(|&s| !self.hidden[s]).collect();
+        (rows, cols, self.sort)
+    }
+
+    /// Status-bar aggregate of the active range, hidden columns skipped.
+    // shortcut: Ctrl+click ranges are left out (one shape can't describe them); add them if users ask.
+    pub fn selection_summary(&self) -> Option<String> {
+        if self.source.row_count() == 0 {
+            return None;
+        }
+        let (rows, cols, _) = self.selection_key();
+        let values = rows.clone().flat_map(|r| {
+            let row = self.row(r);
+            cols.iter().map(|&c| row[c].clone()).collect::<Vec<_>>()
+        });
+        crate::statusbar::aggregate(rows.len(), cols.len(), values)
+    }
+
     fn select(&mut self, cell: (usize, usize), extend: bool, cx: &mut Context<Self>) {
         self.head = cell;
         if !extend {
             self.anchor = cell;
             self.extra.clear();
         }
+        cx.notify();
+    }
+
+    /// Header drop: display column `from` moves before `before`. A real move clears the selection.
+    fn drop_col(&mut self, from: usize, before: usize, cx: &mut Context<Self>) {
+        let moved = move_col(&mut self.col_order, from, before);
+        let reset_col = moved.then(|| band_cols(None, &self.display_hidden()).0);
+        let selection = (self.anchor, self.head, std::mem::take(&mut self.extra));
+        (self.anchor, self.head, self.extra) = selection_after_drop(reset_col, selection);
         cx.notify();
     }
 
@@ -431,10 +661,10 @@ impl Grid {
 
     /// Whole row (gutter click) or whole column (header click); shift extends from the anchor.
     fn select_band(&mut self, row: Option<usize>, col: Option<usize>, extend: bool, cx: &mut Context<Self>) {
-        let last = (self.source.row_count().saturating_sub(1), self.widths.len().saturating_sub(1));
-        let head = (row.unwrap_or(last.0), col.unwrap_or(last.1));
+        let (first_col, last_col) = band_cols(col, &self.display_hidden());
+        let head = (row.unwrap_or(self.source.row_count().saturating_sub(1)), last_col);
         if !extend {
-            self.anchor = (row.unwrap_or(0), col.unwrap_or(0));
+            self.anchor = (row.unwrap_or(0), first_col);
             self.extra.clear();
         }
         self.head = head;
@@ -443,7 +673,7 @@ impl Grid {
 
     /// Width that fits the header and the rows currently in view.
     fn autofit(&mut self, c: usize) {
-        let top = (-self.scroll.0.borrow().base_handle.offset().y / theme::GRID_ROW) as usize;
+        let top = (-self.scroll.0.borrow().base_handle.offset().y / self.row_h()) as usize;
         let rows = top..(top + AUTOFIT_SAMPLE).min(self.source.row_count());
         let meta = &self.source.columns()[c];
         let chars = rows
@@ -452,7 +682,11 @@ impl Grid {
             .max()
             .unwrap_or(0);
         // ponytail: advance estimated as 0.6em (mono); Inter headers can be under-sized, measure with the text system if that shows
-        self.widths[c] = (theme::MONO * 0.6 * chars as f32 + theme::SPACE_16 + theme::SPACE_4).max(MIN_WIDTH);
+        self.widths[c] = (self.mono_px() * 0.6 * chars as f32 + theme::space_16() + theme::space_4()).max(MIN_WIDTH);
+    }
+
+    fn gutter(&self) -> Pixels {
+        gutter_width(self.source.row_count(), self.mono_px())
     }
 
     /// Scroll so the head cell is in view, both axes.
@@ -461,7 +695,7 @@ impl Grid {
         let base = self.scroll.0.borrow().base_handle.clone();
         let offsets = self.offsets();
         let (left, right) = (offsets[self.head.1], offsets[self.head.1 + 1]);
-        let view = base.bounds().size.width - GUTTER;
+        let view = base.bounds().size.width - self.gutter();
         let mut offset = base.offset();
         if left < -offset.x {
             offset.x = -left;
@@ -471,41 +705,36 @@ impl Grid {
         base.set_offset(offset);
     }
 
-    /// Nearest visible column left or right of `c`, or `c` at the edge.
-    fn step_col(&self, c: usize, right: bool) -> usize {
-        let visible = |&i: &usize| !self.hidden[i];
-        if right { (c + 1..self.widths.len()).find(visible) } else { (0..c).rev().find(visible) }.unwrap_or(c)
+    fn display_hidden(&self) -> Vec<bool> {
+        self.col_order.iter().map(|&s| self.hidden[s]).collect()
     }
 
-    /// Prefix-summed widths with hidden columns at zero width.
+    /// Display-order left edges, hidden columns at zero width.
     fn offsets(&self) -> Vec<Pixels> {
-        let widths: Vec<Pixels> =
-            self.widths.iter().zip(&self.hidden).map(|(w, h)| if *h { Pixels::ZERO } else { *w }).collect();
-        prefix_sums(&widths)
+        prefix_sums(&display_widths(&self.col_order, &self.widths, &self.hidden))
     }
 
     fn copy_as(&self, format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, cx: &mut Context<Self>) {
-        let (rows, cols) = self.selection();
-        let rows: Vec<Vec<Value>> = rows.map(|r| self.row(r)[cols.clone()].to_vec()).collect();
-        let text = format(&self.source.columns()[cols], &rows);
+        let ranges = ranges_in_order(&self.extra, self.selection());
+        let text = copy_ranges(format, &ranges, &self.col_order, &self.hidden, self.source.columns(), |r| self.row(r));
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+    }
+
+    fn copy_in_list(&self, cx: &mut Context<Self>) {
+        let ranges = ranges_in_order(&self.extra, self.selection());
+        let text = copy_in_list(&ranges, &self.col_order, &self.hidden, self.source.columns(), |r| self.row(r));
         cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
 
     fn on_key(&mut self, ev: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let rows = self.source.row_count();
-        let cols = self.widths.len();
-        if rows == 0 || cols == 0 {
+        if rows == 0 || self.widths.is_empty() {
             return;
         }
         let m = ev.keystroke.modifiers;
-        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / theme::GRID_ROW) as usize;
-        let (r, c) = self.head;
-        let next = match ev.keystroke.key.as_str() {
-            "c" if m.secondary() => {
-                let (rows, cols) = self.selection();
-                cx.write_to_clipboard(ClipboardItem::new_string(tsv(rows.map(|r| self.row(r)), cols)));
-                return;
-            }
+        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / self.row_h()) as usize;
+        match ev.keystroke.key.as_str() {
+            "c" if m.secondary() => return self.copy_as(tsv, cx),
             "r" if m.secondary() && m.shift => {
                 self.record = !self.record;
                 return cx.notify();
@@ -518,19 +747,9 @@ impl Grid {
                 self.inspecting = false;
                 return cx.notify();
             }
-            "up" => (r.saturating_sub(1), c),
-            "down" => ((r + 1).min(rows - 1), c),
-            "left" => (r, self.step_col(c, false)),
-            "right" => (r, self.step_col(c, true)),
-            "pageup" => (r.saturating_sub(page.max(1)), c),
-            "pagedown" => ((r + page.max(1)).min(rows - 1), c),
-            "home" if m.secondary() => (0, 0),
-            "end" if m.secondary() => (rows - 1, cols - 1),
-            "home" => (r, if self.hidden[0] { self.step_col(0, true) } else { 0 }),
-            "end" => (r, if self.hidden[cols - 1] { self.step_col(cols - 1, false) } else { cols - 1 }),
-            "tab" => (r, self.step_col(c, !m.shift)),
-            _ => return,
-        };
+            _ => {}
+        }
+        let Some(next) = nav(&ev.keystroke.key, m.secondary(), m.shift, self.head, rows, &self.display_hidden(), page) else { return };
         self.select(next, m.shift && ev.keystroke.key != "tab", cx);
         self.reveal_head();
         cx.stop_propagation();
@@ -542,7 +761,7 @@ impl Grid {
         let width = base.bounds().size.width;
         // Bounds are zero before the first layout; the window width over-covers, which is fine.
         let width = if width > Pixels::ZERO { width } else { window.viewport_size().width };
-        (-base.offset().x, width - GUTTER)
+        (-base.offset().x, width - self.gutter())
     }
 
     fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Div> {
@@ -561,22 +780,22 @@ impl Grid {
         range
             .map(|r| {
                 let row = self.row(r);
-                let cells = cols.clone().filter(|&c| !self.hidden[c]).map(|c| {
-                    let (text, kind) = format_cell(&row[c]);
+                let cells = cols.clone().map(|c| (c, self.col_order[c])).filter(|&(_, s)| !self.hidden[s]).map(|(c, s)| {
+                    let (text, kind) = format_cell(&row[s]);
                     let selected = self.is_selected(r, c);
                     div()
                         .absolute()
-                        .left(GUTTER + offsets[c])
-                        .w(self.widths[c])
+                        .left(self.gutter() + offsets[c])
+                        .w(self.widths[s])
                         .h_full()
-                        .px(theme::SPACE_8)
+                        .px(theme::space_8())
                         .flex()
                         .items_center()
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .border_r_1()
                         .border_color(theme.table_row_border)
-                        .when(kind == CellKind::Number, |d| d.justify_end())
+                        .when(aligns_right(&kind, &self.source.columns()[s].data_type), |d| d.justify_end())
                         .when(selected, |d| d.bg(fill))
                         .when_some(cursor.filter(|_| self.head == (r, c)), |d, color| d.border_1().border_color(color))
                         .on_mouse_down(
@@ -595,22 +814,23 @@ impl Grid {
                         )
                         .child(if kind == CellKind::Null {
                             div()
-                                .px(theme::SPACE_4)
-                                .rounded(theme::RADIUS_SM)
+                                .px(theme::space_4())
+                                .rounded(theme::radius_sm())
                                 .bg(theme.muted)
-                                .italic()
                                 .text_color(theme::grid_null(theme))
                                 .child(text)
+                        } else if kind == CellKind::Bool(false) {
+                            div().text_color(theme.muted_foreground).child(text)
                         } else {
                             div().child(text)
                         })
                 });
                 div()
                     .relative()
-                    .w(GUTTER + total)
-                    .h(theme::GRID_ROW)
+                    .w(self.gutter() + total)
+                    .h(self.row_h())
                     .font_family(theme.mono_font_family.clone())
-                    .text_size(theme::MONO)
+                    .text_size(self.mono_px())
                     .bg(if r % 2 == 1 { theme.table_even } else { theme.table })
                     .hover(|d| d.bg(theme.table_hover))
                     .border_b_1()
@@ -621,9 +841,9 @@ impl Grid {
                         div()
                             .absolute()
                             .left(scroll_x)
-                            .w(GUTTER)
+                            .w(self.gutter())
                             .h_full()
-                            .px(theme::SPACE_8)
+                            .pr(theme::space_8())
                             .flex()
                             .items_center()
                             .justify_end()
@@ -649,30 +869,31 @@ impl Grid {
         let theme = cx.theme();
         let r = self.head.0;
         let row = self.row(r);
-        let name_w = theme::SPACE_24 * 8.;
+        let name_w = theme::space_24() * 8.;
         div()
             .id("grid-record")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .font_family(theme.mono_font_family.clone())
-            .text_size(theme::MONO)
+            .text_size(self.mono_px())
             .child(
                 div()
-                    .px(theme::SPACE_8)
-                    .h(theme::GRID_ROW)
+                    .debug_selector(|| "record-header".into())
+                    .px(theme::space_8())
+                    .h(self.row_h())
                     .flex()
                     .items_center()
-                    .text_size(theme::UI_SM)
+                    .text_size(theme::ui_sm())
                     .text_color(theme.muted_foreground)
                     .child(format!("Row {} of {}   (Ctrl+Shift+R back to grid, ↑↓ change row)", r + 1, self.source.row_count())),
             )
             .children(self.source.columns().iter().zip(row.iter()).enumerate().map(|(c, (meta, value))| {
                 let (text, kind) = format_cell(value);
                 h_flex()
-                    .min_h(theme::GRID_ROW)
-                    .px(theme::SPACE_8)
-                    .gap(theme::SPACE_8)
+                    .min_h(self.row_h())
+                    .px(theme::space_8())
+                    .gap(theme::space_8())
                     .border_b_1()
                     .border_color(theme.table_row_border)
                     .when(c % 2 == 1, |d| d.bg(theme.table_even))
@@ -690,7 +911,7 @@ impl Grid {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .when(kind == CellKind::Null, |d| d.italic().text_color(theme::grid_null(theme)))
+                            .when(kind == CellKind::Null, |d| d.text_color(theme::grid_null(theme)))
                             .child(if kind == CellKind::Null { text } else { inspect_text(value) }),
                     )
             }))
@@ -705,21 +926,33 @@ impl Grid {
         div()
             .relative()
             .flex_none()
-            .h(theme::GRID_ROW + theme::SPACE_12)
+            .h(header_height(theme::badge_line(), theme::space_8()))
             .w_full()
             .overflow_hidden()
             .bg(theme.table_head)
             .border_b_1()
             .border_color(theme.border)
             .text_color(theme.table_head_foreground)
-            .children(cols.filter(|&c| !self.hidden[c]).map(|c| {
+            .children(cols.map(|c| (c, self.col_order[c])).filter(|&(_, s)| !self.hidden[s]).map(|(c, s)| {
                 h_flex()
+                    .id(("col", s))
                     .absolute()
-                    .left(GUTTER + offsets[c] - scroll_x)
-                    .w(self.widths[c])
+                    .left(self.gutter() + offsets[c] - scroll_x)
+                    .w(self.widths[s])
                     .h_full()
                     .border_r_1()
                     .border_color(theme.table_row_border)
+                    // Drag a header and drop it on another: the column moves before that one.
+                    .on_drag(DragColumn { grid: cx.entity_id(), from: c, name: columns[s].name.clone().into() }, |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    })
+                    .drag_over::<DragColumn>(|d, _, _, cx| d.border_l_2().border_color(cx.theme().drag_border))
+                    .on_drop(cx.listener(move |this, drag: &DragColumn, _, cx| {
+                        if drag.grid == cx.entity_id() {
+                            this.drop_col(drag.from, c, cx);
+                        }
+                    }))
                     .child(
                         v_flex()
                             .flex_1()
@@ -733,12 +966,36 @@ impl Grid {
                                     this.select_band(None, Some(c), ev.modifiers.shift, cx);
                                 }),
                             )
-                            .on_mouse_down(MouseButton::Right, cx.listener(move |this, _, _, _| this.menu_col = c))
-                            .px(theme::SPACE_8)
+                            .on_mouse_down(MouseButton::Right, cx.listener(move |this, _, _, _| this.menu_col = s))
+                            .px(theme::space_8())
                             .overflow_hidden()
                             .whitespace_nowrap()
-                            .child(div().text_size(theme::UI_SM).text_color(theme.foreground).child(columns[c].name.to_string()))
-                            .child(div().text_size(theme::UI_SM).child(columns[c].data_type.to_string()))
+                            .child({
+                                let m = header_model(&columns[s]);
+                                h_flex()
+                                    .gap(theme::space_4())
+                                    .h(theme::badge_line())
+                                    .text_size(theme::ui_sm())
+                                    .text_color(theme.foreground)
+                                    .when(m.pk, |d| d.child(Icon::new(IconName::KeyRound).size_3().text_color(theme.muted_foreground)))
+                                    .child({
+                                        let name = SharedString::from(m.name);
+                                        div().debug_selector(|| format!("header-name-{s}")).min_w_0().truncate().child(theme::truncating(("header-name", s), StyledText::new(name.clone()), name))
+                                    })
+                            })
+                            .child(
+                                div()
+                                    .debug_selector(|| format!("header-type-{s}"))
+                                    .h(theme::badge_line())
+                                    .font_family(theme.mono_font_family.clone())
+                                    .text_size(theme::ui_sm())
+                                    .text_color(theme.muted_foreground)
+                                    .truncate()
+                                    .child({
+                                        let data_type = SharedString::from(header_model(&columns[s]).data_type);
+                                        theme::truncating(("header-type", s), StyledText::new(data_type.clone()), data_type)
+                                    }),
+                            )
                             .context_menu({
                                 let focus = self.focus.clone();
                                 move |menu, _, _| {
@@ -748,28 +1005,35 @@ impl Grid {
                                 }
                             }),
                     )
-                    .when(self.source.row_count() <= CLIENT_SORT_MAX, |d| {
+                    .child({
+                        let avail = sort_availability(self.source.row_count());
                         let glyph = match self.sort {
-                            Some((sc, true)) if sc == c => "↑",
-                            Some((sc, false)) if sc == c => "↓",
+                            Some((sc, true)) if sc == s => "↑",
+                            Some((sc, false)) if sc == s => "↓",
                             _ => "↕",
                         };
-                        d.child(
-                            div()
-                                .id(("sort", c))
-                                .px(theme::SPACE_4)
-                                .text_size(theme::UI_SM)
-                                .when(glyph == "↕", |d| d.text_color(theme::text_disabled(theme)))
-                                .hover(|d| d.text_color(theme.foreground))
-                                .on_click(cx.listener(move |this, _, _, cx| this.cycle_sort(c, cx)))
-                                .child(glyph),
-                        )
+                        div()
+                            .id(("sort", s))
+                            .px(theme::space_4())
+                            .text_size(theme::ui_sm())
+                            // Drag must not start from the sort control.
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .map(|d| match avail {
+                                SortAvail::Enabled => d
+                                    .when(glyph == "↕", |d| d.text_color(theme::text_disabled(theme)))
+                                    .hover(|d| d.text_color(theme.foreground))
+                                    .on_click(cx.listener(move |this, _, _, cx| this.cycle_sort(s, cx))),
+                                SortAvail::Disabled(why) => {
+                                    d.text_color(theme::text_disabled(theme)).tooltip(move |window, cx| Tooltip::new(why).build(window, cx))
+                                }
+                            })
+                            .child(glyph)
                     })
                     // Resize grip on the right edge.
                     .child(
                         div()
-                            .id(("resize", c))
-                            .w(theme::SPACE_4)
+                            .id(("resize", s))
+                            .w(theme::space_4())
                             .h_full()
                             .cursor_col_resize()
                             .hover(|d| d.bg(theme.primary))
@@ -777,9 +1041,9 @@ impl Grid {
                                 MouseButton::Left,
                                 cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
                                     if ev.click_count == 2 {
-                                        this.autofit(c);
+                                        this.autofit(s);
                                     } else {
-                                        this.resizing = Some((c, ev.position.x, this.widths[c]));
+                                        this.resizing = Some((s, ev.position.x, this.widths[s]));
                                     }
                                     cx.notify();
                                     cx.stop_propagation();
@@ -787,7 +1051,28 @@ impl Grid {
                             ),
                     )
             }))
-            .child(div().absolute().left_0().w(GUTTER).h_full().bg(theme.table_head).border_r_1().border_color(theme.border))
+            .child(div().absolute().left_0().w(self.gutter()).h_full().bg(theme.table_head).border_r_1().border_color(theme.border))
+    }
+}
+
+impl Grid {
+    #[cfg(test)]
+    pub fn mono(&self) -> Pixels {
+        self.mono
+    }
+
+    /// The pane's mono font size at the current UI scale.
+    fn mono_px(&self) -> Pixels {
+        theme::scaled(self.mono)
+    }
+
+    fn row_h(&self) -> Pixels {
+        theme::scaled(row_height(self.mono))
+    }
+
+    fn zoom(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
+        self.mono = theme::zoom(self.mono, step);
+        cx.notify();
     }
 }
 
@@ -803,6 +1088,9 @@ impl Render for Grid {
             .size_full()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .on_action(cx.listener(|this, _: &theme::ZoomIn, _, cx| this.zoom(theme::Zoom::In, cx)))
+            .on_action(cx.listener(|this, _: &theme::ZoomOut, _, cx| this.zoom(theme::Zoom::Out, cx)))
+            .on_action(cx.listener(|this, _: &theme::ZoomReset, _, cx| this.zoom(theme::Zoom::Reset, cx)))
             .on_action(cx.listener(|this, _: &CopyCsv, _, cx| this.copy_as(csv, cx)))
             .on_action(cx.listener(|this, _: &HideColumn, _, cx| {
                 // Keep at least one column visible.
@@ -818,7 +1106,7 @@ impl Render for Grid {
             .on_action(cx.listener(|this, _: &CopyJson, _, cx| this.copy_as(json, cx)))
             .on_action(cx.listener(|this, _: &CopyMarkdown, _, cx| this.copy_as(markdown, cx)))
             .on_action(cx.listener(|this, _: &CopySqlInsert, _, cx| this.copy_as(sql_insert, cx)))
-            .on_action(cx.listener(|this, _: &CopySqlInList, _, cx| this.copy_as(sql_in_list, cx)))
+            .on_action(cx.listener(|this, _: &CopySqlInList, _, cx| this.copy_in_list(cx)))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
                 if let Some((c, start_x, start_w)) = this.resizing {
                     this.widths[c] = (start_w + ev.position.x - start_x).max(MIN_WIDTH);
@@ -852,7 +1140,7 @@ impl Render for Grid {
             ))
             .when(self.inspecting && self.source.row_count() > 0, |d| {
                 let theme = cx.theme();
-                let (r, c) = self.head;
+                let (r, c) = (self.head.0, self.col_order[self.head.1]);
                 let meta = &self.source.columns()[c];
                 d.child(
                     v_flex()
@@ -863,9 +1151,9 @@ impl Render for Grid {
                         .bg(theme.background)
                         .child(
                             div()
-                                .px(theme::SPACE_8)
-                                .py(theme::SPACE_4)
-                                .text_size(theme::UI_SM)
+                                .px(theme::space_8())
+                                .py(theme::space_4())
+                                .text_size(theme::ui_sm())
                                 .text_color(theme.muted_foreground)
                                 .child(format!("{} · {} · row {}   (Esc closes)", meta.name, meta.data_type, r + 1)),
                         )
@@ -874,9 +1162,9 @@ impl Render for Grid {
                                 .id("grid-inspector")
                                 .flex_1()
                                 .overflow_y_scroll()
-                                .px(theme::SPACE_8)
+                                .px(theme::space_8())
                                 .font_family(theme.mono_font_family.clone())
-                                .text_size(theme::MONO)
+                                .text_size(self.mono_px())
                                 .child(inspect_text(&self.row(r)[c])),
                         ),
                 )
@@ -886,7 +1174,7 @@ impl Render for Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmp_values, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+    use super::{aligns_right, gutter_digits, gutter_width, row_height, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
 
     #[test]
     fn visible_cols_follow_scroll_offset() {
@@ -900,10 +1188,255 @@ mod tests {
     }
 
     #[test]
+    fn move_col_drops_before_target() {
+        // a=0, b=1, c=2, d=3
+        let cases: [(&[usize], usize, usize, &[usize]); 5] = [
+            (&[0, 1, 2, 3], 0, 3, &[1, 2, 0, 3]), // drag a before d
+            (&[0, 1, 2], 2, 0, &[2, 0, 1]),       // drag c to start
+            (&[0, 1, 2], 0, 3, &[1, 2, 0]),       // drag a past the last column
+            (&[0, 1, 2, 3], 3, 1, &[0, 3, 1, 2]), // drag d left into the middle
+            (&[2, 0, 1], 0, 2, &[0, 2, 1]),       // already permuted order
+        ];
+        for (start, from, before, expected) in cases {
+            let mut order = start.to_vec();
+            move_col(&mut order, from, before);
+            assert_eq!(order, expected, "{start:?} move {from} before {before}");
+        }
+    }
+
+    #[test]
+    fn widths_hidden_and_sort_travel_with_the_column() {
+        // Per source column a..d: widths 10..40, c hidden, sorted on b.
+        let (widths, hidden, sorted) = ([px(10.), px(20.), px(30.), px(40.)], [false, false, true, false], 1);
+        // (from, before) -> (order, display widths, display position of the sorted column, selection cleared)
+        let cases: [((usize, usize), [usize; 4], [f32; 4], usize, bool); 3] = [
+            ((0, 3), [1, 2, 0, 3], [20., 0., 10., 40.], 0, true),
+            ((1, 0), [1, 0, 2, 3], [20., 10., 0., 40.], 0, true),
+            ((3, 0), [3, 0, 1, 2], [40., 10., 20., 0.], 2, true),
+        ];
+        for ((from, before), order, expected, sort_at, cleared) in cases {
+            let mut o = vec![0, 1, 2, 3];
+            let changed = move_col(&mut o, from, before);
+            assert_eq!(o, order, "move {from} before {before}");
+            assert_eq!(display_widths(&o, &widths, &hidden), expected.map(px), "widths after move {from} before {before}");
+            assert_eq!(o.iter().position(|&s| s == sorted), Some(sort_at), "sort still on b after move {from} before {before}");
+            assert_eq!(changed, cleared, "selection cleared after move {from} before {before}");
+        }
+    }
+
+    #[test]
+    fn drop_on_own_position_keeps_order_and_selection() {
+        // (from, before): before itself, before its right neighbour, and the last column at the end.
+        for (from, before) in [(0, 0), (0, 1), (2, 2), (2, 3), (3, 3), (3, 4)] {
+            let mut order = vec![0, 1, 2, 3];
+            let changed = move_col(&mut order, from, before);
+            assert_eq!(order, [0, 1, 2, 3], "order after move {from} before {before}");
+            assert!(!changed, "selection kept after move {from} before {before}");
+        }
+    }
+
+    fn abc() -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        (cols, vec![["a0", "b0", "c0"].map(|v| Value::Text(v.into())).to_vec()])
+    }
+
+    /// What `Grid::copy_as` emits for display positions `display` of row 0.
+    fn copy(format: fn(&[ColumnMeta], &[Vec<Value>]) -> String, order: &[usize], hidden: &[bool], display: std::ops::Range<usize>) -> String {
+        let (cols, rows) = abc();
+        let ix = copy_cols(order, hidden, display);
+        format(&pick(&cols, &ix), &rows.iter().map(|r| pick(r, &ix)).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn copy_skips_hidden_columns() {
+        // (hidden, selected display positions, TSV)
+        let cases: [([bool; 3], std::ops::Range<usize>, &str); 5] = [
+            ([false, true, false], 0..3, "a0\tc0\n"), // select row 0 with b hidden
+            ([false, false, false], 0..3, "a0\tb0\tc0\n"),
+            ([true, false, true], 0..3, "b0\n"),
+            ([false, true, false], 1..3, "c0\n"),
+            ([false, true, false], 1..2, "\n"), // only the hidden column selected
+        ];
+        for (hidden, display, expected) in cases {
+            assert_eq!(copy(tsv, &[0, 1, 2], &hidden, display.clone()), expected, "hidden {hidden:?}, selected {display:?}");
+        }
+        assert_eq!(copy(csv, &[0, 1, 2], &[false, true, false], 0..3), "a,c\na0,c0\n", "every format skips hidden");
+    }
+
+    #[test]
+    fn copy_follows_display_order() {
+        // (display order over a, b, c, hidden per source, selected display positions, CSV)
+        let cases: [([usize; 3], [bool; 3], std::ops::Range<usize>, &str); 4] = [
+            ([2, 0, 1], [false, true, false], 0..3, "c,a\nc0,a0\n"), // display order [c,a]
+            ([2, 0, 1], [false, false, false], 0..2, "c,a\nc0,a0\n"),
+            ([2, 1, 0], [false, false, false], 0..3, "c,b,a\nc0,b0,a0\n"),
+            ([1, 2, 0], [true, false, false], 1..3, "c\nc0\n"), // hidden looked up by source, not position
+        ];
+        for (order, hidden, display, expected) in cases {
+            assert_eq!(copy(csv, &order, &hidden, display.clone()), expected, "order {order:?}, hidden {hidden:?}, selected {display:?}");
+        }
+    }
+
+    #[test]
+    fn ctrl_home_end_skip_hidden_columns() {
+        // (key, hidden in display order, from, expected head) over 10 rows
+        let cases: [(&str, [bool; 3], (usize, usize), (usize, usize)); 6] = [
+            ("end", [false, true, false], (0, 0), (9, 2)), // b hidden -> last row, column c
+            ("end", [false, false, true], (0, 0), (9, 1)),
+            ("end", [false, false, false], (3, 1), (9, 2)),
+            ("home", [true, false, false], (5, 2), (0, 1)),
+            ("home", [true, true, false], (5, 2), (0, 2)),
+            ("home", [false, false, false], (5, 2), (0, 0)),
+        ];
+        for (key, hidden, from, expected) in cases {
+            assert_eq!(nav(key, true, false, from, 10, &hidden, 5), Some(expected), "Ctrl+{key} from {from:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[test]
+    fn horizontal_keys_skip_hidden_columns() {
+        // (key, shift, hidden in display order, from, expected head) over 10 rows
+        let cases: [(&str, bool, [bool; 4], (usize, usize), (usize, usize)); 9] = [
+            ("right", false, [false, true, false, false], (3, 0), (3, 2)),
+            ("right", false, [false, false, true, true], (3, 1), (3, 1)), // nothing visible to the right
+            ("left", false, [false, true, false, false], (3, 2), (3, 0)),
+            ("left", false, [true, true, false, false], (3, 2), (3, 2)), // nothing visible to the left
+            ("tab", false, [false, false, true, false], (3, 1), (3, 3)),
+            ("tab", true, [false, false, true, false], (3, 3), (3, 1)),
+            ("home", false, [true, false, false, false], (3, 3), (3, 1)),
+            ("end", false, [false, false, false, true], (3, 0), (3, 2)),
+            ("end", false, [false, true, true, true], (3, 0), (3, 0)),
+        ];
+        for (key, shift, hidden, from, expected) in cases {
+            assert_eq!(nav(key, false, shift, from, 10, &hidden, 5), Some(expected), "{key} shift={shift} from {from:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[test]
+    fn real_move_resets_selection_and_own_position_keeps_it() {
+        let selection = || ((2, 1), (4, 3), vec![(0..2, 0..1)]);
+        // c hidden after the move [c, a, b] -> first visible display column is 1
+        let first_visible = band_cols(None, &[true, false, false]).0;
+        assert_eq!(selection_after_drop(Some(first_visible), selection()), ((0, 1), (0, 1), vec![]), "real move");
+        assert_eq!(selection_after_drop(None, selection()), selection(), "own-position drop");
+    }
+
+    #[test]
+    fn select_row_skips_hidden_columns() {
+        // (clicked column, hidden in display order, expected (anchor, head) columns)
+        let cases: [(Option<usize>, [bool; 3], (usize, usize)); 5] = [
+            (None, [false, false, true], (0, 1)), // c hidden -> head on b
+            (None, [true, false, false], (1, 2)), // a hidden -> anchor on b
+            (None, [true, false, true], (1, 1)),
+            (None, [false, false, false], (0, 2)),
+            (Some(1), [false, true, false], (1, 1)), // a header click selects that column as is
+        ];
+        for (col, hidden, expected) in cases {
+            assert_eq!(band_cols(col, &hidden), expected, "band {col:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[test]
+    fn bools_format_as_words() {
+        let cases = [(true, "true", CellKind::Bool(true)), (false, "false", CellKind::Bool(false))];
+        for (b, text, kind) in cases {
+            assert_eq!(format_cell(&Value::Bool(b)), (text.into(), kind));
+        }
+    }
+
+    #[test]
+    fn null_aligns_with_its_column() {
+        let cases = [
+            ("bigint", true),
+            ("integer", true),
+            ("int4", true),
+            ("smallint", true),
+            ("numeric(12,2)", true),
+            ("double precision", true),
+            ("real", true),
+            ("text", false),
+            ("timestamptz", false),
+            ("boolean", false),
+            ("", false),
+            ("interval", false),
+            ("point", false),
+            ("INTEGER", true),
+            ("integer[]", false),
+            ("numeric[]", false),
+            ("int4range", false),
+        ];
+        for (ty, right) in cases {
+            assert_eq!(is_numeric_type(ty), right, "type {ty:?}");
+        }
+    }
+
+    #[test]
+    fn gutter_fits_the_row_count() {
+        let cases = [(0, 3), (9, 3), (999, 3), (1000, 4), (99_999, 5), (100_000, 6), (999_999, 6), (1_000_000, 7)];
+        for (rows, digits) in cases {
+            assert_eq!(gutter_digits(rows), digits, "{rows} rows");
+        }
+    }
+
+    #[test]
+    fn aligns_right_by_kind_and_type() {
+        let cases = [
+            (CellKind::Null, "integer", true),
+            (CellKind::Null, "INTEGER", true),
+            (CellKind::Null, "text", false),
+            (CellKind::Null, "integer[]", false),
+            (CellKind::Number, "integer", true),
+            (CellKind::Number, "text", true),
+            (CellKind::Text, "integer", false),
+            (CellKind::Bool(true), "integer", false),
+        ];
+        for (kind, ty, right) in cases {
+            assert_eq!(aligns_right(&kind, ty), right, "{kind:?} in {ty:?}");
+        }
+    }
+
+    #[test]
+    fn row_height_scales_with_the_zoomed_font() {
+        let cases = [(12.5, 26.), (13.5, 28.08), (11.5, 23.92), (9., 18.72), (24., 49.92)];
+        for (mono, want) in cases {
+            let got: f32 = row_height(px(mono)).into();
+            assert!((got - want).abs() < 0.01, "mono {mono}: row {got}, want {want}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn record_header_row_follows_the_zoom(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| gpui_kit::init(cx));
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(super::BigEvents::new()), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        grid.update(&mut cx, |grid, cx| {
+            grid.record = true;
+            grid.zoom(crate::theme::Zoom::In, cx);
+        });
+        cx.run_until_parked();
+        let header: f32 = cx.debug_bounds("record-header").expect("record view renders its header").size.height.into();
+        let row: f32 = grid.read_with(&cx, |grid, _| grid.row_h()).into();
+        // Layout snaps to whole pixels.
+        assert!((header - row).abs() < 0.5, "header row {header}px, field rows {row}px at mono 13.5");
+    }
+
+    #[test]
+    fn gutter_width_is_digits_plus_padding() {
+        // Spec rule: digits * one mono digit width (0.6 em) + SPACE_12.
+        let cases = [(9, 3.0 * 7.5 + 12.0), (1_000_000, 7.0 * 7.5 + 12.0)];
+        for (rows, px_width) in cases {
+            let got: f32 = gutter_width(rows, crate::theme::MONO).into();
+            assert!((got - px_width).abs() < 0.01, "{rows} rows: {got}");
+        }
+    }
+
+    #[test]
     fn cells_format_by_type() {
         assert_eq!(format_cell(&Value::Null), ("NULL".into(), CellKind::Null));
         assert_eq!(format_cell(&Value::Int(-5)), ("-5".into(), CellKind::Number));
-        assert_eq!(format_cell(&Value::Bool(true)).0, "✓");
         assert_eq!(format_cell(&Value::Text("a\nb".into())).0, "a ↵");
         assert_eq!(format_cell(&Value::Bytes(std::sync::Arc::from(&[0u8; 5][..]))).0, "0x00000000… (5 B)");
         let long = format_cell(&Value::Text("é".repeat(500).into())).0;
@@ -926,7 +1459,7 @@ mod tests {
 
     #[test]
     fn copy_formats_escape_their_syntax() {
-        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into() }, ColumnMeta { name: "b".into(), data_type: "int".into() }];
+        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into(), is_pk: false }, ColumnMeta { name: "b".into(), data_type: "int".into(), is_pk: false }];
         let rows = vec![vec![Value::Text("it's, \"x\"|".into()), Value::Null], vec![Value::Text("y".into()), Value::Int(2)]];
         assert_eq!(csv(&cols, &rows), "a,b\n\"it's, \"\"x\"\"|\",\ny,2\n");
         assert_eq!(json(&cols, &rows), "[\n  {\"a\": \"it's, \\\"x\\\"|\", \"b\": null},\n  {\"a\": \"y\", \"b\": 2}\n]\n");
@@ -939,7 +1472,164 @@ mod tests {
     fn tsv_quotes_and_blanks_nulls() {
         let rs = mock::edge_cases();
         // Rows 0 (null) and 3 (multiline), both columns.
-        assert_eq!(tsv(rs.rows[0..1].iter().cloned(), 0..2), "null\t\n");
-        assert_eq!(tsv(rs.rows[3..4].iter().cloned(), 0..2), "multiline\t\"first line\nsecond line\n\tindented third\"\n");
+        let rows = |r: std::ops::Range<usize>| rs.rows[r].iter().map(|row| row[0..2].to_vec()).collect::<Vec<_>>();
+        assert_eq!(tsv(&rs.columns, &rows(0..1)), "null\t\n");
+        assert_eq!(tsv(&rs.columns, &rows(3..4)), "multiline\t\"first line\nsecond line\n\tindented third\"\n");
+    }
+
+    fn col(name: &str, ty: &str, pk: bool) -> ColumnMeta {
+        ColumnMeta { name: name.into(), data_type: ty.into(), is_pk: pk }
+    }
+
+    #[test]
+    fn header_model_shows_name_type_and_pk_icon() {
+        let m = |n: &str, t: &str, pk| HeaderModel { name: n.into(), data_type: t.into(), pk };
+        let cases = [
+            (col("id", "bigint", true), m("id", "bigint", true)),
+            (col("email", "text", false), m("email", "text", false)),
+            (col("", "", false), m("", "", false)),
+        ];
+        for (c, want) in cases {
+            assert_eq!(header_model(&c), want);
+        }
+        // The icon belongs to the column: a reordered PK keeps it, and so does a hidden one (the model ignores both).
+        let cols = [col("a", "text", false), col("id", "bigint", true), col("b", "int", false)];
+        let shown: Vec<bool> = [1usize, 0, 2].iter().map(|&s| header_model(&cols[s]).pk).collect();
+        assert_eq!(shown, [true, false, false]);
+    }
+
+    #[test]
+    fn header_height_fits_two_lines() {
+        use crate::theme::{badge_line, space_4, space_8};
+        assert_eq!(header_height(badge_line(), space_8()), px(40.));
+        assert_eq!(header_height(px(16.), px(0.)), px(32.));
+        assert_eq!(header_height(px(14.), space_4()), px(32.));
+        assert!(header_height(badge_line(), space_8()) >= badge_line() * 2.);
+    }
+
+    #[test]
+    fn sort_is_available_up_to_client_sort_max() {
+        const WHY: &str = "Too many rows to sort here; use ORDER BY";
+        let cases = [
+            (0, SortAvail::Enabled),
+            (1, SortAvail::Enabled),
+            (99_999, SortAvail::Enabled),
+            (100_000, SortAvail::Enabled),
+            (100_001, SortAvail::Disabled(WHY)),
+            (1_000_000, SortAvail::Disabled(WHY)),
+        ];
+        for (rows, want) in cases {
+            assert_eq!(sort_availability(rows), want, "{rows} rows");
+        }
+        assert_eq!(sort_availability(super::BigEvents::new().row_count()), SortAvail::Disabled(WHY), "big_events");
+    }
+
+    /// Row r, column c holds "v{r}{c}"; columns a, b, c.
+    fn vgrid() -> (Vec<ColumnMeta>, impl Fn(usize) -> Vec<Value>) {
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        (cols, |r| (0..3).map(|c| Value::Text(format!("v{r}{c}").into())).collect())
+    }
+
+    #[test]
+    fn multi_range_blocks_are_separated_by_a_blank_line() {
+        let (cols, row) = vgrid();
+        // (ranges as (rows, display cols), TSV)
+        let cases: [(Vec<Block>, &str); 4] = [
+            (vec![(0..1, 0..1), (2..3, 1..2)], "v00\n\nv21\n"),
+            (vec![(0..1, 0..1)], "v00\n"),
+            (vec![(0..2, 0..2), (2..3, 2..3)], "v00\tv01\nv10\tv11\n\nv22\n"), // different widths
+            (vec![(0..1, 0..2), (0..1, 1..3)], "v00\tv01\n\nv01\tv02\n"),      // overlapping
+        ];
+        for (ranges, expected) in cases {
+            assert_eq!(copy_ranges(tsv, &ranges, &[0, 1, 2], &[false; 3], &cols, &row), expected, "ranges {ranges:?}");
+        }
+    }
+
+    #[test]
+    fn ranges_are_emitted_in_the_order_added() {
+        let (cols, row) = vgrid();
+        let (r1, r2): (Block, Block) = ((0..1, 0..1), (2..3, 1..2));
+        // Ctrl+click adds: R2 first (kept in `extra`), then R1 is active.
+        let ranges = ranges_in_order(&[r2.clone()], r1.clone());
+        assert_eq!(ranges, [r2.clone(), r1.clone()]);
+        assert_eq!(copy_ranges(tsv, &ranges, &[0, 1, 2], &[false; 3], &cols, &row), "v21\n\nv00\n", "R2 block first");
+        // three ranges keep insertion order, not position order
+        let r3: Block = (1..2, 2..3);
+        assert_eq!(ranges_in_order(&[r2.clone(), r3.clone()], r1.clone()), [r2, r3, r1]);
+        assert_eq!(ranges_in_order(&[], (4..5, 0..1)), [(4..5, 0..1)], "no extras: just the active range");
+    }
+
+    #[test]
+    fn one_range_matches_the_single_range_copy_in_every_format() {
+        let (cols, row) = vgrid();
+        // display order [c, a, b] with b hidden, rows 0..2: literal output of each format
+        let expected = [
+            (tsv as fn(&[ColumnMeta], &[Vec<Value>]) -> String, "v02\tv00\nv12\tv10\n"),
+            (csv, "c,a\nv02,v00\nv12,v10\n"),
+            (markdown, "| c | a |\n| --- | --- |\n| v02 | v00 |\n| v12 | v10 |\n"),
+            (json, "[\n  {\"c\": \"v02\", \"a\": \"v00\"},\n  {\"c\": \"v12\", \"a\": \"v10\"}\n]\n"),
+            (sql_insert, "INSERT INTO table_name (c, a) VALUES ('v02', 'v00');\nINSERT INTO table_name (c, a) VALUES ('v12', 'v10');\n"),
+            (sql_in_list, "('v02', 'v12')"),
+        ];
+        for (format, want) in expected {
+            let got = copy_ranges(format, &[(0..2, 0..3)], &[2, 0, 1], &[false, true, false], &cols, &row);
+            assert_eq!(got, want);
+        }
+    }
+
+    #[test]
+    fn in_list_merges_every_range_into_one_list() {
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        let rows: Vec<Vec<Value>> = vec![
+            vec![Value::Int(1), Value::Text("x".into()), Value::Null],
+            vec![Value::Int(2), Value::Text("it's".into()), Value::Text("z".into())],
+            vec![Value::Int(1), Value::Null, Value::Int(7)],
+            vec![Value::Int(5), Value::Text("y".into()), Value::Int(8)],
+        ];
+        let row = |r: usize| rows[r].clone();
+        let id = [0, 1, 2];
+        // (ranges, order, hidden, expected); duplicates are kept: the list mirrors the selection, and IN ignores repeats
+        let cases: [(Vec<Block>, [usize; 3], [bool; 3], &str); 7] = [
+            (vec![(0..2, 0..1), (3..4, 0..1)], id, [false; 3], "(1, 2, 5)"),
+            (vec![(0..1, 0..1)], id, [false; 3], "(1)"),
+            (vec![(0..1, 1..2), (1..2, 1..2)], id, [false; 3], "('x', 'it''s')"), // strings quoted, quote doubled
+            (vec![(0..3, 2..3), (2..3, 1..2)], id, [false; 3], "(NULL, 'z', 7, NULL)"), // NULLs, mixed types
+            (vec![(0..1, 0..1), (2..3, 0..1)], id, [false; 3], "(1, 1)"),          // duplicates across ranges kept
+            (vec![(0..2, 0..2), (0..1, 1..3)], id, [false; 3], "(1, 2, 'x')"),      // first column of each range only; overlap
+            (vec![(0..2, 0..2), (3..4, 0..2)], [1, 0, 2], [true, false, false], "('x', 'it''s', 'y')"), // permuted, a hidden: b leads
+        ];
+        for (ranges, order, hidden, expected) in cases {
+            assert_eq!(copy_in_list(&ranges, &order, &hidden, &cols, row), expected, "ranges {ranges:?}, order {order:?}, hidden {hidden:?}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn truncated_header_names_and_types_show_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use crate::model::ResultSet;
+        use crate::theme::tests::hover_shows_truncation_tip;
+        cx.update(gpui_kit::init);
+        let long = "shipment_line_item_carrier_tracking_events_archive_partitioned_by_month_2026_q3x";
+        let col = |name: &str, data_type: &str| ColumnMeta { name: name.into(), data_type: data_type.into(), is_pk: false };
+        let source = ResultSet {
+            columns: vec![col("id", "bigint"), col(long, "text"), col("created_at", "timestamp with time zone")],
+            rows: vec![vec![Value::Int(1), Value::Text("a".into()), Value::Text("2026-10-10".into())].into()],
+        };
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(source), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        // As if dragged by the user: wide enough for id/bigint, narrow for created_at.
+        grid.update(&mut cx, |grid, cx| {
+            grid.widths[0] = px(200.);
+            grid.widths[2] = px(60.);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        // (selector, tooltip shown); ones that fit first, so no earlier tooltip lingers.
+        let cases = [("header-name-0", false), ("header-type-0", false), ("header-type-1", false), ("header-name-1", true), ("header-type-2", true)];
+        for (selector, tip) in cases {
+            assert_eq!(hover_shows_truncation_tip(&mut cx, selector.into()), tip, "{selector}");
+        }
     }
 }
