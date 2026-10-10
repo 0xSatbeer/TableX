@@ -180,6 +180,8 @@ struct Shell {
     /// Overflow list: open state and its search field (shown above `tabs::SEARCH_MIN_TABS` tabs).
     overflow_open: bool,
     overflow_search: Entity<InputState>,
+    /// The console editor's mono font size, before UI scale (Ctrl+= / Ctrl+- / Ctrl+0).
+    console_mono: Pixels,
     _appearance: Subscription,
 }
 
@@ -258,6 +260,7 @@ impl Shell {
             theme: theme::ThemeChoice::default(),
             user_themes: Vec::new(),
             user_theme_errors: Vec::new(),
+            console_mono: theme::MONO,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| this.theme.apply(&this.user_themes, window, cx)),
         };
         this.tab_changed(cx);
@@ -877,6 +880,10 @@ fn bind_overflow_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("space", NoAction, Some(OVERFLOW_CONTEXT))]);
 }
 
+/// Zoom the focused grid's or editor's mono font; with neither focused nothing handles them.
+fn bind_zoom_keys(_cx: &mut App) {
+}
+
 fn bind_panel_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", RestorePanel, Some(PANEL_MAXIMIZED_CONTEXT))]);
 }
@@ -909,6 +916,7 @@ fn main() {
             theme::init(cx);
             bind_overflow_keys(cx);
             bind_panel_keys(cx);
+            bind_zoom_keys(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.bind_keys([
                 KeyBinding::new("ctrl-q", Quit, None),
@@ -1136,6 +1144,48 @@ mod tests {
         });
         cx.simulate_click(bottom_middle, Default::default());
         assert!(cx.update(|window, _| editor.is_focused(window)), "a click on non-focusable chrome must not steal focus");
+    }
+
+    #[gpui_kit::test]
+    fn zoom_keys_change_only_the_focused_grid_or_editor(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Focusable as _, px};
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            super::bind_zoom_keys(cx);
+        });
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let grid = shell.read_with(&cx, |this, _| match this.tabs.active().map(|t| &t.content) {
+            Some(super::TabContent::Grid(grid)) => grid.clone(),
+            _ => panic!("launch opens on a grid"),
+        });
+        let sizes = |cx: &gpui_kit::VisualTestContext| shell.read_with(cx, |this, cx| (grid.read(cx).mono(), this.console_mono));
+        let steps: [(&str, &str, (f32, f32)); 7] = [
+            ("grid", "ctrl-=", (13.5, 12.5)),
+            ("grid", "ctrl-0", (12.5, 12.5)),
+            ("grid", "ctrl--", (11.5, 12.5)),
+            ("editor", "ctrl-=", (11.5, 13.5)),
+            ("editor", "ctrl-0", (11.5, 12.5)),
+            ("explorer", "ctrl-=", (11.5, 12.5)),
+            ("nothing", "ctrl-=", (11.5, 12.5)),
+        ];
+        for (focus, keys, (grid_mono, console_mono)) in steps {
+            let handle = shell.read_with(&cx, |this, cx| match focus {
+                "grid" => Some(grid.focus_handle(cx)),
+                "editor" => Some(this.editor.focus_handle(cx)),
+                "explorer" => Some(this.explorer.focus_handle(cx)),
+                _ => None,
+            });
+            cx.update(|window, cx| match &handle {
+                Some(handle) => window.focus(handle, cx),
+                None => window.blur(cx),
+            });
+            cx.simulate_keystrokes(keys);
+            assert_eq!(sizes(&cx), (px(grid_mono), px(console_mono)), "{keys} with {focus} focused");
+        }
     }
 
     /// Edits to the active user theme's file apply without a restart; the theme dir is only read.

@@ -535,6 +535,8 @@ pub struct Grid {
     col_order: Vec<usize>,
     /// Column the header context menu was opened on.
     menu_col: usize,
+    /// This pane's mono font size, before UI scale (Ctrl+= / Ctrl+- / Ctrl+0).
+    mono: Pixels,
 }
 
 pub type SelectionKey = (Range<usize>, Vec<usize>, Option<(usize, bool)>);
@@ -558,6 +560,7 @@ impl Grid {
             hidden: vec![false; n],
             col_order: (0..n).collect(),
             menu_col: 0,
+            mono: theme::MONO,
         };
         // Open fitted to the first rows, so timestamps and UUIDs don't arrive clipped.
         for c in 0..n {
@@ -1035,6 +1038,12 @@ impl Grid {
                     )
             }))
             .child(div().absolute().left_0().w(self.gutter()).h_full().bg(theme.table_head).border_r_1().border_color(theme.border))
+    }
+}
+
+impl Grid {
+    pub fn mono(&self) -> Pixels {
+        self.mono
     }
 }
 

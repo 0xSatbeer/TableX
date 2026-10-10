@@ -53,6 +53,8 @@ pub const STRIPE: Pixels = px(2.);
 pub const TITLEBAR: Pixels = px(38.);
 pub const STATUS_BAR: Pixels = px(24.);
 
+gpui_kit::actions!(theme, [ZoomIn, ZoomOut, ZoomReset]);
+
 /// A Ctrl+= / Ctrl+- / Ctrl+0 step on a pane's mono font.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Zoom {
