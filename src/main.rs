@@ -1407,4 +1407,51 @@ mod tests {
             assert!(!this.overflow_open, "open flag cleared once the list has no search field");
         });
     }
+
+    #[gpui_kit::test]
+    fn focus_ring_follows_the_focused_pane(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{AppContext as _, Focusable as _};
+        cx.update(gpui_kit::init);
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let grid = shell.read_with(&cx, |this, _| match this.tabs.active().map(|t| &t.content) {
+            Some(super::TabContent::Grid(grid)) => grid.clone(),
+            _ => panic!("launch opens on a grid"),
+        });
+        // Tree, then Tab over to the grid, the console and the panel list; then nothing.
+        for (focus, pane) in [("explorer", Some("pane-explorer")), ("grid", Some("pane-content")), ("console", Some("pane-content")), ("panel", Some("pane-panel")), ("nothing", None)] {
+            if focus == "console" {
+                shell.update(&mut cx, |this, cx| {
+                    let console = this.tabs.tabs.iter().position(|t| matches!(t.content, super::TabContent::Console)).expect("launch opens a console");
+                    this.tabs.activate(console);
+                    this.tab_changed(cx);
+                });
+                cx.run_until_parked();
+            }
+            let handle = shell.read_with(&cx, |this, cx| match focus {
+                "explorer" => Some(this.explorer.focus_handle(cx)),
+                "grid" => Some(grid.focus_handle(cx)),
+                "console" => Some(this.editor.focus_handle(cx)),
+                "panel" => Some(this.bottom_panel.focus_handle(cx)),
+                _ => None,
+            });
+            cx.update(|window, cx| match &handle {
+                Some(handle) => window.focus(handle, cx),
+                None => window.blur(cx),
+            });
+            cx.run_until_parked();
+            let ring = cx.debug_bounds("focus-ring");
+            match pane {
+                Some(pane) => {
+                    let bounds = cx.debug_bounds(pane);
+                    assert!(ring.is_some(), "{focus} focused: no focus ring drawn");
+                    assert_eq!(ring, bounds, "{focus} focused: the ring outlines {pane}");
+                }
+                None => assert_eq!(ring, None, "nothing focused: no ring"),
+            }
+        }
+    }
 }

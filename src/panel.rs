@@ -37,6 +37,7 @@ pub struct BottomPanel {
     expanded: BTreeSet<usize>,
     /// Connection id to (name, color index, production).
     connections: BTreeMap<u32, (String, u8, bool)>,
+    focus: FocusHandle,
 }
 
 impl BottomPanel {
@@ -63,6 +64,7 @@ impl BottomPanel {
             rows,
             expanded: BTreeSet::new(),
             connections: workspace.connections.iter().map(|c| (c.id.0, (c.name.clone(), c.color, c.is_production))).collect(),
+            focus: cx.focus_handle(),
         }
     }
 
@@ -404,6 +406,12 @@ fn filter_toggle(
         this.refilter(cx);
         cx.notify();
     }))
+}
+
+impl Focusable for BottomPanel {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
 }
 
 impl Render for BottomPanel {
