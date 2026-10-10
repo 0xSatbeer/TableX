@@ -400,6 +400,15 @@ pub fn prod_badge(theme: &Theme) -> gpui_kit::Div {
         .child("PROD")
 }
 
+/// Outlines `pane` with the 1px `ring` while it holds keyboard focus. The ring is an overlay drawn
+/// after the content, so it neither shifts the layout nor hides under a child's background.
+pub fn focus_ring(name: &'static str, pane: gpui_kit::Div, focused: bool, theme: &Theme) -> gpui_kit::Div {
+    use gpui_kit::{InteractiveElement as _, ParentElement as _, Styled as _, prelude::FluentBuilder as _};
+    pane.relative().debug_selector(|| name.into()).when(focused, |d| {
+        d.child(gpui_kit::div().debug_selector(|| "focus-ring".into()).absolute().inset_0().border_1().border_color(theme.ring))
+    })
+}
+
 pub fn grid_null(theme: &Theme) -> Hsla {
     theme.muted_foreground
 }

@@ -523,7 +523,7 @@ impl Render for BottomPanel {
             0 => empty("Console results will show here").into_any_element(),
             _ => empty("No messages").into_any_element(),
         };
-        v_flex().size_full().child(header).child(div().flex_1().min_h_0().child(body))
+        v_flex().size_full().track_focus(&self.focus).child(header).child(div().flex_1().min_h_0().child(body))
     }
 }
 

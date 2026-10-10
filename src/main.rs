@@ -631,6 +631,15 @@ impl Render for TabDrag {
 }
 
 impl Shell {
+    /// Focus handle of the active tab's content: its grid or the console editor.
+    fn content_focus(&self, cx: &App) -> Option<FocusHandle> {
+        match self.tabs.active().map(|t| &t.content) {
+            Some(TabContent::Grid(grid)) => Some(grid.focus_handle(cx)),
+            Some(TabContent::Console) => Some(self.editor.focus_handle(cx)),
+            None => None,
+        }
+    }
+
     /// Our own handle over the panel's edge, drawn after the panels so its band sits on top.
     /// `size` is the panel's drawn size; the 1px line covers the panel's own edge pixel.
     fn splitter(&self, edge: Edge, size: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
@@ -674,15 +683,14 @@ impl Render for Shell {
         if self.layout.panel_maximized {
             self.focus_content = true;
         } else if std::mem::take(&mut self.focus_content) {
-            let handle = match self.tabs.active().map(|t| &t.content) {
-                Some(TabContent::Grid(grid)) => Some(grid.focus_handle(cx)),
-                Some(TabContent::Console) => Some(self.editor.focus_handle(cx)),
-                None => None,
-            };
-            if let Some(handle) = handle {
+            if let Some(handle) = self.content_focus(cx) {
                 window.focus(&handle, cx);
             }
         }
+        let focused = |handle: Option<FocusHandle>, cx: &App| handle.is_some_and(|h| h.contains_focused(window, cx));
+        let content_focused = focused(self.content_focus(cx), cx);
+        let explorer_focused = focused(Some(self.explorer.focus_handle(cx)), cx);
+        let panel_focused = focused(Some(self.bottom_panel.focus_handle(cx)), cx);
         let theme = cx.theme();
         let content = match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Grid(grid)) => grid.clone().into_any_element(),
@@ -851,7 +859,8 @@ impl Render for Shell {
                         .relative()
                         .size_full()
                         .when(self.layout.explorer_visible, |d| {
-                            d.child(div().flex_none().h_full().w(explorer_w).overflow_hidden().child(self.explorer.clone()))
+                            let pane = div().flex_none().h_full().w(explorer_w).overflow_hidden().child(self.explorer.clone());
+                            d.child(theme::focus_ring("pane-explorer", pane, explorer_focused, cx.theme()))
                         })
                         .child(
                             v_flex()
@@ -859,9 +868,10 @@ impl Render for Shell {
                                 .flex_1()
                                 .min_w_0()
                                 .h_full()
-                                .when(!maximized, |d| d.child(div().flex_1().min_h_0().overflow_hidden().child(v_flex().size_full().child(tabs).child(content))))
+                                .when(!maximized, |d| d.child(div().flex_1().min_h_0().overflow_hidden().child(v_flex().size_full().child(tabs).child(theme::focus_ring("pane-content", div().flex_1().min_h_0().child(content), content_focused, cx.theme())))))
                                 .when(self.layout.bottom_visible, |d| {
                                     let panel = div().w_full().overflow_hidden().child(self.bottom_panel.clone());
+                                    let panel = theme::focus_ring("pane-panel", panel, panel_focused, cx.theme());
                                     if maximized {
                                         d.child(panel.flex_1().min_h_0())
                                     } else {
