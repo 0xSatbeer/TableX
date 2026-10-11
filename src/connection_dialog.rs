@@ -21,6 +21,9 @@ use crate::explorer::validate_rename;
 use crate::model::*;
 use crate::{mock, theme};
 
+/// The text fields, by the name the errors and tests use.
+const TEXT_FIELDS: [&str; 6] = ["name", "host", "port", "user", "database", "path"];
+
 /// SSL choices in the order the select lists them.
 const SSL_MODES: [(SslMode, &str); 3] = [(SslMode::Disable, "Disable"), (SslMode::Prefer, "Prefer"), (SslMode::Require, "Require")];
 
@@ -53,11 +56,12 @@ impl ConnectionDialog {
         let body = view.clone();
         window.open_dialog(cx, move |dialog, _, cx| {
             let save_enabled = body.read(cx).save_enabled(cx);
-            dialog.title("Add connection").child(body.clone()).footer(
+            let on_enter = body.clone();
+            dialog.title("Add connection").child(body.clone()).on_ok(move |_, _, cx| on_enter.update(cx, |d, cx| d.save(cx))).footer(
                 h_flex()
                     .justify_end()
                     .gap(theme::space_8())
-                    .child(Button::new("dialog-cancel").small().label("Cancel"))
+                    .child(Button::new("dialog-cancel").debug_selector(|| "dialog-cancel".into()).small().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
                     .child(
                         Button::new("dialog-save")
                             .debug_selector(|| "dialog-save".into())
@@ -91,7 +95,7 @@ impl ConnectionDialog {
         let (user, database, path) = (input(&form.user, "postgres"), input(&form.database, ""), input(&form.path, "/path/to/file.db"));
         let selected = SSL_MODES.iter().position(|(mode, _)| *mode == form.ssl);
         let ssl = cx.new(|cx| SelectState::new(SSL_MODES.iter().map(|(_, label)| *label).collect(), selected.map(IndexPath::new), window, cx));
-        for (id, input) in [("name", &name), ("host", &host), ("port", &port), ("user", &user), ("database", &database), ("path", &path)] {
+        for (id, input) in TEXT_FIELDS.into_iter().zip([&name, &host, &port, &user, &database, &path]) {
             cx.subscribe(input, move |this, _, ev: &InputEvent, cx| {
                 if let InputEvent::Change = ev {
                     this.touched.insert(id);
@@ -121,9 +125,14 @@ impl ConnectionDialog {
         }
     }
 
-    /// Adds the connection to the workspace if the form is valid. Returns whether it did.
+    /// Adds the connection to the workspace if the form is valid. Returns whether it did;
+    /// if not, every field shows its error.
     pub fn save(&mut self, cx: &mut Context<Self>) -> bool {
-        let (Ok(name), Ok(params)) = self.validate(cx) else { return false };
+        let (Ok(name), Ok(params)) = self.validate(cx) else {
+            self.touched.extend(TEXT_FIELDS);
+            cx.notify();
+            return false;
+        };
         let (color, is_production) = (self.color, self.is_production);
         let id = self.workspace.update(cx, |ws, cx| {
             cx.notify();
