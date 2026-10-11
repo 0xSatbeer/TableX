@@ -2,13 +2,14 @@
 //! classification, delete confirmation and the Test connection outcome.
 #![allow(dead_code)] // shortcut: wired up by the dialog view tickets (T03-T06), drop then
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use gpui_kit::component::{
     ActiveTheme as _, IndexPath, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonGroup},
     h_flex,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     select::{Select, SelectState},
     switch::Switch,
     v_flex,
@@ -16,6 +17,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, ParentElement as _, Render, Styled as _, Window, div};
 
+use crate::explorer::validate_rename;
 use crate::model::*;
 use crate::{mock, theme};
 
@@ -35,6 +37,8 @@ pub struct ConnectionDialog {
     pub database: Entity<InputState>,
     pub path: Entity<InputState>,
     ssl: Entity<SelectState<Vec<&'static str>>>,
+    /// Fields the user has edited; only these show their error until a save is attempted.
+    touched: HashSet<&'static str>,
 }
 
 impl ConnectionDialog {
@@ -58,7 +62,16 @@ impl ConnectionDialog {
         let (user, database, path) = (input(&form.user, "postgres"), input(&form.database, ""), input(&form.path, "/path/to/file.db"));
         let selected = SSL_MODES.iter().position(|(mode, _)| *mode == form.ssl);
         let ssl = cx.new(|cx| SelectState::new(SSL_MODES.iter().map(|(_, label)| *label).collect(), selected.map(IndexPath::new), window, cx));
-        Self { workspace, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl }
+        for (id, input) in [("name", &name), ("host", &host), ("port", &port), ("user", &user), ("database", &database), ("path", &path)] {
+            cx.subscribe(input, move |this, _, ev: &InputEvent, cx| {
+                if let InputEvent::Change = ev {
+                    this.touched.insert(id);
+                    cx.notify();
+                }
+            })
+            .detach();
+        }
+        Self { workspace, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl, touched: HashSet::new() }
     }
 
     /// The fields as the dialog shows them.
@@ -79,19 +92,34 @@ impl ConnectionDialog {
         }
     }
 
+    /// The trimmed name (unique among the workspace's connections) and the trimmed params.
+    fn validate(&self, cx: &App) -> (Result<String, String>, Result<ConnectionParams, FieldErrors>) {
+        let form = self.form(cx);
+        let others: Vec<&str> = self.workspace.read(cx).connections.iter().map(|c| c.name.as_str()).collect();
+        (validate_rename(&form.name, &others), form.params())
+    }
+
     /// The inline errors on screen, as (field, message).
-    pub fn errors(&self, _: &App) -> Vec<(&'static str, String)> {
-        Vec::new()
+    pub fn errors(&self, cx: &App) -> Vec<(&'static str, String)> {
+        let (name, params) = self.validate(cx);
+        let fields = params.err().unwrap_or_default();
+        [("name", name.err()), ("host", fields.host), ("port", fields.port), ("user", fields.user), ("database", fields.database), ("path", fields.path)]
+            .into_iter()
+            .filter(|(id, _)| self.touched.contains(id))
+            .filter_map(|(id, error)| Some((id, error?)))
+            .collect()
     }
 
     /// Whether the Add connection button is enabled.
-    pub fn save_enabled(&self, _: &App) -> bool {
-        true
+    pub fn save_enabled(&self, cx: &App) -> bool {
+        let (name, params) = self.validate(cx);
+        button_state(name.is_ok(), params.is_ok()).0
     }
 }
 
-/// A labeled control. `id` names it for tests (`field-<id>`).
-fn field(id: &'static str, label: &'static str, control: impl IntoElement, cx: &App) -> gpui_kit::Stateful<gpui_kit::Div> {
+/// A labeled control with its entry in `errors` under it. `id` names it for tests (`field-<id>`).
+fn field(id: &'static str, label: &'static str, control: impl IntoElement, errors: &[(&str, String)], cx: &App) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let error = errors.iter().find(|(field, _)| *field == id).map(|(_, msg)| msg.clone());
     v_flex()
         .id(id)
         .debug_selector(move || format!("field-{id}"))
@@ -99,10 +127,14 @@ fn field(id: &'static str, label: &'static str, control: impl IntoElement, cx: &
         .gap(theme::space_4())
         .child(div().text_size(theme::ui_sm()).text_color(theme::text_secondary(cx.theme())).child(label))
         .child(control)
+        .when_some(error, |d, msg| {
+            d.child(div().debug_selector(move || format!("error-{id}")).text_size(theme::ui_sm()).text_color(cx.theme().danger).child(msg))
+        })
 }
 
 impl Render for ConnectionDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let errors = self.errors(cx);
         let theme = cx.theme();
         let swatches = (0..theme::CONNECTION_COLORS.len() as u8).map(|ix| {
             let picked = ix == self.color;
@@ -132,23 +164,23 @@ impl Render for ConnectionDialog {
             DbKind::Postgres => vec![
                 h_flex()
                     .gap(theme::space_8())
-                    .child(field("host", "Host", Input::new(&self.host).small(), cx))
-                    .child(field("port", "Port", Input::new(&self.port).small(), cx))
+                    .child(field("host", "Host", Input::new(&self.host).small(), &errors, cx))
+                    .child(field("port", "Port", Input::new(&self.port).small(), &errors, cx))
                     .into_any_element(),
                 h_flex()
                     .gap(theme::space_8())
-                    .child(field("user", "User", Input::new(&self.user).small(), cx))
-                    .child(field("database", "Database", Input::new(&self.database).small(), cx))
+                    .child(field("user", "User", Input::new(&self.user).small(), &errors, cx))
+                    .child(field("database", "Database", Input::new(&self.database).small(), &errors, cx))
                     .into_any_element(),
-                field("ssl", "SSL", Select::new(&self.ssl).small(), cx).into_any_element(),
+                field("ssl", "SSL", Select::new(&self.ssl).small(), &errors, cx).into_any_element(),
             ],
-            DbKind::Sqlite => vec![field("path", "File path", Input::new(&self.path).small(), cx).into_any_element()],
+            DbKind::Sqlite => vec![field("path", "File path", Input::new(&self.path).small(), &errors, cx).into_any_element()],
         };
         v_flex()
             .gap(theme::space_12())
-            .child(field("kind", "Type", kinds, cx))
-            .child(field("name", "Name", Input::new(&self.name).small(), cx))
-            .child(field("color", "Color", h_flex().gap(theme::space_6()).children(swatches), cx))
+            .child(field("kind", "Type", kinds, &errors, cx))
+            .child(field("name", "Name", Input::new(&self.name).small(), &errors, cx))
+            .child(field("color", "Color", h_flex().gap(theme::space_6()).children(swatches), &errors, cx))
             .child(
                 Switch::new("production")
                     .small()

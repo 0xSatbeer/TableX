@@ -47,7 +47,7 @@ enum Part {
 
 /// The trimmed name to commit, or the message to show inline. `others` are the other connections'
 /// names; uniqueness is case-sensitive.
-fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
+pub(crate) fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
     let name = input.trim();
     if name.is_empty() {
         Err("Name can't be empty".into())
