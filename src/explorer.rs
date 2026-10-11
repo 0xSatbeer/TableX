@@ -1,7 +1,7 @@
 //! Explorer tree: the visible nodes flattened into a `Vec<FlatNode>` and rendered with
 //! `uniform_list`. The flat list is rebuilt only on expand or collapse.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 use gpui_kit::assets::IconName as Lucide;
@@ -476,6 +476,8 @@ pub struct Explorer {
     /// Schema keys whose objects have "arrived", and those still waiting on mock latency.
     loaded: HashSet<String>,
     loading: HashSet<String>,
+    /// The latest connect started on each connection; only that one may land.
+    connects: HashMap<ConnectionId, usize>,
     /// Mirror of the field's text; non-empty shows only matches and their ancestors.
     filter: String,
     field: Entity<InputState>,
@@ -507,7 +509,7 @@ impl Explorer {
             }
         })
         .detach();
-        Self { field, workspace, expanded, loaded, loading: HashSet::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { field, workspace, expanded, loaded, loading: HashSet::new(), connects: HashMap::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -550,17 +552,23 @@ impl Explorer {
             }
             conn.status = ConnectionStatus::Connecting;
             cx.notify();
-            Some((conn.id, conn.params.clone()))
+            Some(conn.id)
         });
-        let Some((id, params)) = started else { return };
+        let Some(id) = started else { return };
+        let token = self.connects.entry(id).or_default();
+        *token += 1;
+        let token = *token;
         self.expanded.insert(format!("{ci}"));
         // ponytail: every mock connect succeeds, including retries; drivers report real failures (QX-023)
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(mock::latency()).await;
             this.update(cx, |this, cx| {
+                if this.connects.get(&id) != Some(&token) {
+                    return; // a later connect owns the result
+                }
                 this.workspace.update(cx, |ws, cx| {
-                    // Discarded if an edit changed the params (and disconnected it) meanwhile.
-                    let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id && c.params == params) else { return };
+                    // A params edit disconnects it, so Connecting means none happened since this connect began.
+                    let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) else { return };
                     if conn.status == ConnectionStatus::Connecting {
                         conn.status = ConnectionStatus::Connected;
                         cx.notify();
