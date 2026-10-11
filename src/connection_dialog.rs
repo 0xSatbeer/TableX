@@ -4,35 +4,148 @@
 
 use std::path::PathBuf;
 
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::{App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Window, div};
+use gpui_kit::component::{
+    ActiveTheme as _, IndexPath, Selectable as _, Sizable as _, WindowExt as _,
+    button::{Button, ButtonGroup},
+    h_flex,
+    input::{Input, InputState},
+    select::{Select, SelectState},
+    switch::Switch,
+    v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, ParentElement as _, Render, Styled as _, Window, div};
 
-use crate::mock;
 use crate::model::*;
+use crate::{mock, theme};
+
+/// SSL choices in the order the select lists them.
+const SSL_MODES: [(SslMode, &str); 3] = [(SslMode::Disable, "Disable"), (SslMode::Prefer, "Prefer"), (SslMode::Require, "Require")];
 
 /// The Add connection dialog's body. The dialog itself lives in the window's dialog layer.
 pub struct ConnectionDialog {
     workspace: Entity<Workspace>,
+    color: u8,
+    is_production: bool,
+    kind: DbKind,
+    pub name: Entity<InputState>,
+    pub host: Entity<InputState>,
+    pub port: Entity<InputState>,
+    pub user: Entity<InputState>,
+    pub database: Entity<InputState>,
+    pub path: Entity<InputState>,
+    ssl: Entity<SelectState<Vec<&'static str>>>,
 }
 
 impl ConnectionDialog {
-    /// Opens the Add connection dialog over `window`.
+    /// Opens the Add connection dialog over `window`, with the name field focused.
     pub fn open(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) -> Entity<Self> {
-        let view = cx.new(|_| Self { workspace });
+        let view = cx.new(|cx| Self::new(workspace, window, cx));
         let body = view.clone();
         window.open_dialog(cx, move |dialog, _, _| dialog.title("Add connection").child(body.clone()));
+        view.read(cx).name.clone().update(cx, |name, cx| name.focus(window, cx));
         view
     }
 
+    fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let used: Vec<u8> = workspace.read(cx).connections.iter().map(|c| c.color).collect();
+        let form = Form::new(&used);
+        let mut input = |value: &str, placeholder: &str| {
+            let (value, placeholder) = (value.to_string(), placeholder.to_string());
+            cx.new(|cx| InputState::new(window, cx).default_value(value).placeholder(placeholder))
+        };
+        let (name, host, port) = (input(&form.name, "e.g. prod-pg"), input(&form.host, "localhost"), input(&form.port, ""));
+        let (user, database, path) = (input(&form.user, "postgres"), input(&form.database, ""), input(&form.path, "/path/to/file.db"));
+        let selected = SSL_MODES.iter().position(|(mode, _)| *mode == form.ssl);
+        let ssl = cx.new(|cx| SelectState::new(SSL_MODES.iter().map(|(_, label)| *label).collect(), selected.map(IndexPath::new), window, cx));
+        Self { workspace, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl }
+    }
+
     /// The fields as the dialog shows them.
-    pub fn form(&self, _: &App) -> Form {
-        Form::new(&[])
+    pub fn form(&self, cx: &App) -> Form {
+        let text = |input: &Entity<InputState>| input.read(cx).value().to_string();
+        let ssl = self.ssl.read(cx).selected_value().and_then(|v| SSL_MODES.iter().find(|(_, label)| label == v)).map_or(SslMode::Prefer, |(mode, _)| *mode);
+        Form {
+            name: text(&self.name),
+            color: self.color,
+            is_production: self.is_production,
+            kind: self.kind,
+            host: text(&self.host),
+            port: text(&self.port),
+            user: text(&self.user),
+            database: text(&self.database),
+            ssl,
+            path: text(&self.path),
+        }
     }
 }
 
+/// A labeled control. `id` names it for tests (`field-<id>`).
+fn field(id: &'static str, label: &'static str, control: impl IntoElement, cx: &App) -> gpui_kit::Stateful<gpui_kit::Div> {
+    v_flex()
+        .id(id)
+        .debug_selector(move || format!("field-{id}"))
+        .flex_1()
+        .gap(theme::space_4())
+        .child(div().text_size(theme::ui_sm()).text_color(theme::text_secondary(cx.theme())).child(label))
+        .child(control)
+}
+
 impl Render for ConnectionDialog {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let swatches = (0..theme::CONNECTION_COLORS.len() as u8).map(|ix| {
+            let picked = ix == self.color;
+            div()
+                .id(("swatch", ix as usize))
+                .size(theme::space_16())
+                .rounded_full()
+                .bg(theme::connection_color(ix, theme))
+                .when(picked, |d| d.border_2().border_color(theme.foreground))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.color = ix;
+                    cx.notify();
+                }))
+                .into_any_element()
+        });
+        let kinds = ButtonGroup::new("kind")
+            .small()
+            .outline()
+            .child(Button::new("kind-postgres").label("Postgres").selected(self.kind == DbKind::Postgres))
+            .child(Button::new("kind-sqlite").label("SQLite").selected(self.kind == DbKind::Sqlite));
+        let fields: Vec<AnyElement> = match self.kind {
+            DbKind::Postgres => vec![
+                h_flex()
+                    .gap(theme::space_8())
+                    .child(field("host", "Host", Input::new(&self.host).small(), cx))
+                    .child(field("port", "Port", Input::new(&self.port).small(), cx))
+                    .into_any_element(),
+                h_flex()
+                    .gap(theme::space_8())
+                    .child(field("user", "User", Input::new(&self.user).small(), cx))
+                    .child(field("database", "Database", Input::new(&self.database).small(), cx))
+                    .into_any_element(),
+                field("ssl", "SSL", Select::new(&self.ssl).small(), cx).into_any_element(),
+            ],
+            DbKind::Sqlite => vec![field("path", "File path", Input::new(&self.path).small(), cx).into_any_element()],
+        };
+        v_flex()
+            .gap(theme::space_12())
+            .child(field("kind", "Type", kinds, cx))
+            .child(field("name", "Name", Input::new(&self.name).small(), cx))
+            .child(field("color", "Color", h_flex().gap(theme::space_6()).children(swatches), cx))
+            .child(
+                Switch::new("production")
+                    .small()
+                    .label("Production")
+                    .checked(self.is_production)
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        this.is_production = *checked;
+                        cx.notify();
+                    })),
+            )
+            .children(fields)
     }
 }
 
