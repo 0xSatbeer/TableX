@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use gpui_kit::component::{
-    ActiveTheme as _, IndexPath, Selectable as _, Sizable as _, WindowExt as _,
-    button::{Button, ButtonGroup},
+    ActiveTheme as _, Disableable as _, IndexPath, Selectable as _, Sizable as _, WindowExt as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     select::{Select, SelectState},
@@ -46,7 +46,16 @@ impl ConnectionDialog {
     pub fn open(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let view = cx.new(|cx| Self::new(workspace, window, cx));
         let body = view.clone();
-        window.open_dialog(cx, move |dialog, _, _| dialog.title("Add connection").child(body.clone()));
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let save_enabled = body.read(cx).save_enabled(cx);
+            dialog.title("Add connection").child(body.clone()).footer(
+                h_flex()
+                    .justify_end()
+                    .gap(theme::space_8())
+                    .child(Button::new("dialog-cancel").small().label("Cancel"))
+                    .child(Button::new("dialog-save").debug_selector(|| "dialog-save".into()).primary().small().label("Add connection").disabled(!save_enabled)),
+            )
+        });
         view.read(cx).name.clone().update(cx, |name, cx| name.focus(window, cx));
         view
     }
@@ -140,6 +149,7 @@ impl Render for ConnectionDialog {
             let picked = ix == self.color;
             div()
                 .id(("swatch", ix as usize))
+                .debug_selector(move || format!("swatch-{ix}"))
                 .size(theme::space_16())
                 .rounded_full()
                 .bg(theme::connection_color(ix, theme))

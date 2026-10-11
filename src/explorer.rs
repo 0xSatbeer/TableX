@@ -689,6 +689,11 @@ impl Explorer {
         self.nodes.iter().map(|n| n.label.clone()).collect()
     }
 
+    #[cfg(test)]
+    pub fn selected_label(&self) -> Option<SharedString> {
+        self.nodes.get(self.selected).map(|n| n.label.clone())
+    }
+
     fn select(&mut self, ix: usize, cx: &mut Context<Self>) {
         (self.selected, self.picked) = (ix, true);
         self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
