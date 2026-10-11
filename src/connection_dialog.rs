@@ -1,11 +1,35 @@
-//! Pure rules behind the add/edit connection dialog: validation, defaults, change
-//! classification, delete confirmation and the Test connection outcome. No UI here.
+//! The add/edit connection dialog, and the pure rules behind it: validation, defaults, change
+//! classification, delete confirmation and the Test connection outcome.
 #![allow(dead_code)] // shortcut: wired up by the dialog view tickets (T03-T06), drop then
 
 use std::path::PathBuf;
 
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::{App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Window, div};
+
 use crate::mock;
 use crate::model::*;
+
+/// The Add connection dialog's body. The dialog itself lives in the window's dialog layer.
+pub struct ConnectionDialog {
+    workspace: Entity<Workspace>,
+}
+
+impl ConnectionDialog {
+    /// Opens the Add connection dialog over `window`.
+    pub fn open(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        let view = cx.new(|_| Self { workspace });
+        let body = view.clone();
+        window.open_dialog(cx, move |dialog, _, _| dialog.title("Add connection").child(body.clone()));
+        view
+    }
+}
+
+impl Render for ConnectionDialog {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
 
 const PORT_ERROR: &str = "Port must be a number from 1 to 65535";
 

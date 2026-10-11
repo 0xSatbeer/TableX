@@ -17,6 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
+use crate::connection_dialog::ConnectionDialog;
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
 
@@ -599,6 +600,11 @@ impl Explorer {
         self.refresh(cx);
     }
 
+    /// Opens the Add connection dialog ("+" in the header, `AddConnection`).
+    pub fn add_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        ConnectionDialog::open(self.workspace.clone(), window, cx);
+    }
+
     /// Focuses the filter field (Ctrl+Alt+F).
     pub fn focus_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.field.focus_handle(cx), cx);
@@ -938,13 +944,28 @@ impl Render for Explorer {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
             .child(
-                div()
+                h_flex()
                     .flex_none()
+                    .gap(theme::space_4())
                     .p(theme::space_6())
                     .border_b_1()
                     .border_color(theme.border)
-                    .capture_key_down(cx.listener(Self::on_field_key))
-                    .child(Input::new(&self.field).small().prefix(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))),
+                    .child(
+                        div()
+                            .flex_1()
+                            .capture_key_down(cx.listener(Self::on_field_key))
+                            .child(Input::new(&self.field).small().prefix(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))),
+                    )
+                    .child(
+                        div().debug_selector(|| "add-connection".into()).child(
+                            Button::new("add-connection")
+                                .ghost()
+                                .small()
+                                .icon(Lucide::Plus)
+                                .tooltip("Add connection")
+                                .on_click(cx.listener(|this, _, window, cx| this.add_connection(window, cx))),
+                        ),
+                    ),
             )
             .when_some(self.rename.as_ref().and_then(|rn| rn.error.clone()), |d, msg| {
                 d.child(

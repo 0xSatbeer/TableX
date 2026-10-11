@@ -828,6 +828,9 @@ impl Render for Shell {
                     this.tab_changed(cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &AddConnection, window, cx| {
+                this.explorer.update(cx, |explorer, cx| explorer.add_connection(window, cx));
+            }))
             .on_action(cx.listener(|this, _: &FocusExplorer, window, cx| {
                 this.layout.show_explorer();
                 this.explorer.update(cx, |explorer, cx| explorer.focus_field(window, cx));
