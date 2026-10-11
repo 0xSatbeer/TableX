@@ -53,10 +53,14 @@ impl BottomPanel {
         cx.observe(&workspace, |this, workspace, cx| {
             // A deleted connection takes its log rows with it.
             let ids: Vec<ConnectionId> = workspace.read(cx).connections.iter().map(|c| c.id).collect();
-            if this.log.iter().any(|e| !ids.contains(&e.connection_id)) {
+            let filtered = this.filter.connections.len();
+            this.filter.connections.retain(|id| ids.contains(&ConnectionId(*id)));
+            let stale_log = this.log.iter().any(|e| !ids.contains(&e.connection_id));
+            if stale_log {
                 this.log.retain(|e| ids.contains(&e.connection_id));
-                this.filter.connections.retain(|id| ids.contains(&ConnectionId(*id)));
                 this.expanded.clear();
+            }
+            if stale_log || this.filter.connections.len() != filtered {
                 this.refilter(cx);
             }
             cx.notify();
