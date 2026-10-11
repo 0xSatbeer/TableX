@@ -2034,6 +2034,38 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_connect_in_flight_is_discarded_when_an_edit_changes_the_params(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{ConnectionParams, ConnectionStatus};
+        use std::path::PathBuf;
+        // (new name, new path, status once the connect finishes)
+        let cases = [
+            ("local.db", "~/acme/other.db", ConnectionStatus::Disconnected),
+            ("renamed.db", "~/acme/other.db", ConnectionStatus::Disconnected),
+            ("renamed.db", "~/acme/local.db", ConnectionStatus::Connected),
+            ("local.db", "~/acme/local.db", ConnectionStatus::Connected),
+        ];
+        for (name, path, want) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("2", window, cx));
+            cx.run_until_parked();
+            // Enter on the disconnected local.db starts a connect; nothing runs it until parked.
+            cx.dispatch_keystroke(window, gpui_kit::Keystroke::parse("enter").unwrap());
+            let (id, status) = workspace.read_with(&cx, |ws, _| (ws.connections[2].id, ws.connections[2].status.clone()));
+            assert_eq!(status, ConnectionStatus::Connecting, "{name} {path}: connecting");
+            workspace.update(&mut cx, |ws, cx| {
+                ws.edit(id, name.into(), 4, false, ConnectionParams::Sqlite { path: PathBuf::from(path) });
+                cx.notify();
+            });
+            cx.run_until_parked();
+            let conn = workspace.read_with(&cx, |ws, _| ws.connections[2].clone());
+            assert_eq!((conn.name.as_str(), conn.status), (name, want), "{name} {path}: after the connect finished");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels().iter().filter(|l| l.as_ref() == name).count()), 1, "{name} {path}: one tree row");
+        }
+    }
+
+    #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};
         let (window, shell) = open_with_connection_tabs(cx);
