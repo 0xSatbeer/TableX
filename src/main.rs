@@ -2754,6 +2754,41 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn deleting_a_connection_during_an_f2_rename_leaves_no_rename_to_land_on_another_connection(cx: &mut gpui_kit::TestAppContext) {
+        // (row being renamed, row deleted, how). DeleteConnection acts on the selected row, the one being renamed.
+        let cases: [(&str, &str, &str); 4] = [
+            ("local.db", "local.db", "action"),
+            ("staging-pg", "staging-pg", "action"),
+            ("local.db", "prod-pg", "menu"),
+            ("local.db", "staging-pg", "menu"),
+        ];
+        for (renamed, deleted, how) in cases {
+            let label = format!("rename {renamed}, delete {deleted} by {how}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+            let mut want: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
+            let at = want.iter().position(|n| n == renamed).unwrap();
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&at.to_string(), window, cx));
+            cx.simulate_keystrokes("f2 x");
+            if how == "action" {
+                cx.dispatch_action(super::DeleteConnection);
+                cx.run_until_parked();
+                click(&mut cx, "delete-confirm");
+            } else {
+                delete_row(&mut cx, &shell, deleted);
+            }
+            want.retain(|n| n != deleted);
+            // Back in the tree, Enter would commit a rename still open.
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+            cx.simulate_keystrokes("enter");
+            cx.run_until_parked();
+            let names: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
+            assert_eq!(names, want, "{label}: no connection renamed");
+        }
+    }
+
+    #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
         for filter in ["", "zzz"] {
