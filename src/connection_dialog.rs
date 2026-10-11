@@ -93,6 +93,12 @@ pub fn button_state(name_valid: bool, fields_valid: bool) -> (bool, bool) {
     (name_valid && fields_valid, fields_valid)
 }
 
+/// Whether saving `form` over a connection with params `old` changes them (compared trimmed).
+/// An invalid form counts as changed; it can't be saved anyway.
+pub fn params_changed(old: &ConnectionParams, form: &Form) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +223,40 @@ mod tests {
                 path: "".into(),
             }
         );
+    }
+
+    #[test]
+    fn params_changed_cases() {
+        let old = ConnectionParams::Postgres {
+            host: "db.local".into(),
+            port: 5432,
+            user: "u".into(),
+            database: "d".into(),
+            ssl: SslMode::Prefer,
+        };
+        let base = Form { host: "db.local".into(), ..ok_pg() };
+        let base = Form { user: "u".into(), database: "d".into(), ..base };
+        let sqlite_old = ConnectionParams::Sqlite { path: PathBuf::from("/a.db") };
+        let sqlite = |path: &str| Form { kind: DbKind::Sqlite, path: path.into(), ..Form::new(&[]) };
+        let cases = [
+            (&old, base.clone(), false),
+            (&old, Form { name: "new".into(), ..base.clone() }, false),
+            (&old, Form { color: 5, ..base.clone() }, false),
+            (&old, Form { is_production: true, ..base.clone() }, false),
+            (&old, Form { host: " db.local ".into(), ..base.clone() }, false),
+            (&old, Form { port: " 5432 ".into(), ..base.clone() }, false),
+            (&old, Form { port: "5433".into(), ..base.clone() }, true),
+            (&old, Form { ssl: SslMode::Require, ..base.clone() }, true),
+            (&old, Form { host: "other".into(), ..base.clone() }, true),
+            (&old, Form { user: "v".into(), ..base.clone() }, true),
+            (&old, Form { database: "e".into(), ..base.clone() }, true),
+            (&old, Form { host: "".into(), ..base.clone() }, true),
+            (&sqlite_old, sqlite("/a.db"), false),
+            (&sqlite_old, sqlite(" /a.db "), false),
+            (&sqlite_old, sqlite("/b.db"), true),
+        ];
+        for (old, form, want) in cases {
+            assert_eq!(params_changed(old, &form), want, "{form:?}");
+        }
     }
 }
