@@ -1886,6 +1886,33 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn edit_name_validation_excludes_the_connection_being_edited(cx: &mut gpui_kit::TestAppContext) {
+        // (row, name typed or None to leave it, error shown, Save enabled)
+        let cases: [(&str, Option<&str>, Option<&str>, bool); 8] = [
+            ("prod-pg", None, None, true),
+            ("prod-pg", Some("prod-pg"), None, true),
+            ("prod-pg", Some(" prod-pg "), None, true),
+            ("prod-pg", Some("staging-pg"), Some("Another connection is already named staging-pg"), false),
+            ("prod-pg", Some(" local.db "), Some("Another connection is already named local.db"), false),
+            ("prod-pg", Some("Staging-pg"), None, true),
+            ("prod-pg", Some("  "), Some("Name can't be empty"), false),
+            ("local.db", Some("local.db"), None, true),
+        ];
+        for (row, name, error, save) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            if let Some(name) = name {
+                fill(&mut cx, &dialog, &[("name", name)]);
+            }
+            let errors = dialog.read_with(&cx, |d, cx| d.errors(cx));
+            let want: Vec<(&str, String)> = error.map(|e| ("name", e.to_string())).into_iter().collect();
+            assert_eq!(errors, want, "{row} {name:?}");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.save_enabled(cx)), save, "{row} {name:?}: Save enabled");
+        }
+    }
+
+    #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};
         let (window, shell) = open_with_connection_tabs(cx);
