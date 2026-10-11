@@ -1085,7 +1085,26 @@ impl Render for Explorer {
                         .child(msg),
                 )
             })
-            .map(|d| if self.nodes.is_empty() && !self.filter.is_empty() {
+            .map(|d| if self.workspace.read(cx).connections.is_empty() {
+                d.child(
+                    v_flex()
+                        .debug_selector(|| "explorer-empty".into())
+                        .flex_1()
+                        .items_center()
+                        .justify_center()
+                        .gap(theme::space_8())
+                        .child(div().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child("No connections yet"))
+                        .child(
+                            div().debug_selector(|| "empty-add-connection".into()).child(
+                                Button::new("empty-add-connection")
+                                    .primary()
+                                    .small()
+                                    .label("Add connection")
+                                    .on_click(cx.listener(|this, _, window, cx| this.add_connection(window, cx))),
+                            ),
+                        ),
+                )
+            } else if self.nodes.is_empty() && !self.filter.is_empty() {
                 d.child(
                     div()
                         .flex_none()
