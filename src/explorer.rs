@@ -544,25 +544,27 @@ impl Explorer {
     /// not connected and Retry on a failed one both come here.
     fn connect(&mut self, ci: usize, cx: &mut Context<Self>) {
         let started = self.workspace.update(cx, |ws, cx| {
-            let status = &mut ws.connections[ci].status;
-            if matches!(status, ConnectionStatus::Connected | ConnectionStatus::Connecting) {
-                return false;
+            let conn = &mut ws.connections[ci];
+            if matches!(conn.status, ConnectionStatus::Connected | ConnectionStatus::Connecting) {
+                return None;
             }
-            *status = ConnectionStatus::Connecting;
+            conn.status = ConnectionStatus::Connecting;
             cx.notify();
-            true
+            Some((conn.id, conn.params.clone()))
         });
-        if !started {
-            return;
-        }
+        let Some((id, params)) = started else { return };
         self.expanded.insert(format!("{ci}"));
         // ponytail: every mock connect succeeds, including retries; drivers report real failures (QX-023)
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(mock::latency()).await;
             this.update(cx, |this, cx| {
                 this.workspace.update(cx, |ws, cx| {
-                    ws.connections[ci].status = ConnectionStatus::Connected;
-                    cx.notify();
+                    // Discarded if an edit changed the params (and disconnected it) meanwhile.
+                    let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id && c.params == params) else { return };
+                    if conn.status == ConnectionStatus::Connecting {
+                        conn.status = ConnectionStatus::Connected;
+                        cx.notify();
+                    }
                 });
                 this.refresh(cx);
             })
