@@ -2811,6 +2811,36 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn deleting_a_connection_leaves_no_ctrl_clicked_row_marked_on_the_connection_that_moves_into_its_key(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+        workspace.update(&mut cx, |w, cx| {
+            cx.notify();
+            w.add("new.db".into(), 0, false, crate::model::ConnectionParams::Sqlite { path: "new.db".into() })
+        });
+        cx.run_until_parked();
+        let at = |cx: &mut gpui_kit::VisualTestContext, name: &str| {
+            let row = explorer.read_with(cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap();
+            cx.debug_bounds(format!("tree-label-{row}").leak()).unwrap_or_else(|| panic!("{name} row drawn")).center()
+        };
+        // Select staging-pg, Ctrl+click local.db below it, delete staging-pg: new.db takes local.db's old key.
+        let staging = at(&mut cx, "staging-pg");
+        cx.simulate_click(staging, Default::default());
+        let local = at(&mut cx, "local.db");
+        cx.simulate_click(local, gpui_kit::Modifiers::secondary_key());
+        cx.run_until_parked();
+        cx.dispatch_action(super::DeleteConnection);
+        cx.run_until_parked();
+        click(&mut cx, "delete-confirm");
+        assert!(!explorer.read_with(&cx, |e, _| e.row_labels()).iter().any(|l| l == "staging-pg"), "staging-pg deleted");
+        explorer.update_in(&mut cx, |e, window, cx| window.focus(&gpui_kit::Focusable::focus_handle(e, cx), cx));
+        cx.simulate_keystrokes("ctrl-c");
+        let copied = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
+        assert_eq!(copied, "local.db", "only the selected row is copied, not new.db");
+    }
+
+    #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
         for filter in ["", "zzz"] {
