@@ -51,7 +51,35 @@ impl Form {
 
     /// The trimmed params, or the error under each invalid field.
     pub fn params(&self) -> Result<ConnectionParams, FieldErrors> {
-        Err(FieldErrors::default())
+        let required = |value: &str, error: &str| {
+            let value = value.trim();
+            if value.is_empty() { Err(error.to_string()) } else { Ok(value.to_string()) }
+        };
+        if self.kind == DbKind::Sqlite {
+            return match required(&self.path, "Path can't be empty") {
+                Ok(path) => Ok(ConnectionParams::Sqlite { path: PathBuf::from(path) }),
+                Err(path) => Err(FieldErrors { path: Some(path), ..Default::default() }),
+            };
+        }
+        let host = required(&self.host, "Host can't be empty");
+        let port = match self.port.trim().parse::<u16>() {
+            Ok(port @ 1..) if self.port.trim().bytes().all(|b| b.is_ascii_digit()) => Ok(port),
+            _ => Err(PORT_ERROR.to_string()),
+        };
+        let user = required(&self.user, "User can't be empty");
+        let database = required(&self.database, "Database can't be empty");
+        match (host, port, user, database) {
+            (Ok(host), Ok(port), Ok(user), Ok(database)) => {
+                Ok(ConnectionParams::Postgres { host, port, user, database, ssl: self.ssl })
+            }
+            (host, port, user, database) => Err(FieldErrors {
+                host: host.err(),
+                port: port.err(),
+                user: user.err(),
+                database: database.err(),
+                path: None,
+            }),
+        }
     }
 }
 
@@ -62,7 +90,7 @@ pub fn default_color(used: &[u8]) -> u8 {
 
 /// (Save enabled, Test connection enabled). Test ignores the name.
 pub fn button_state(name_valid: bool, fields_valid: bool) -> (bool, bool) {
-    (false, false)
+    (name_valid && fields_valid, fields_valid)
 }
 
 #[cfg(test)]
