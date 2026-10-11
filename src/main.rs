@@ -2495,7 +2495,7 @@ mod tests {
     #[gpui_kit::test]
     fn delete_connection_is_enabled_at_once_for_non_production_and_only_on_the_exact_name_for_production(cx: &mut gpui_kit::TestAppContext) {
         // (row, typed into the name field, then press, enabled)
-        let cases: [(&str, &str, &str, bool); 10] = [
+        let cases: [(&str, &str, &str, bool); 13] = [
             ("local.db", "", "click delete-confirm", true),
             ("staging-pg", "", "click delete-confirm", true),
             ("local.db", "", "enter", true),
@@ -2505,6 +2505,9 @@ mod tests {
             ("prod-pg", " prod-pg", "click delete-confirm", false),
             ("prod-pg", "prod-pg ", "click delete-confirm", false),
             ("prod-pg", "prod-pg", "click delete-confirm", true),
+            ("prod-pg", "", "enter", false),
+            ("prod-pg", "prod-p", "enter", false),
+            ("prod-pg", "Prod-pg", "enter", false),
             ("prod-pg", "prod-pg", "enter", true),
         ];
         for (row, typed, press, enabled) in cases {
