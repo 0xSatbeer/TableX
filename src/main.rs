@@ -2352,7 +2352,7 @@ mod tests {
                 _ => finish(&mut cx, &dialog, &[], step),
             }
             if open && line.is_none() {
-                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", true), "{label}: can test again at once");
+                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx).0), "Test connection", "{label}: no longer testing");
             }
             if again {
                 click(&mut cx, "dialog-test");

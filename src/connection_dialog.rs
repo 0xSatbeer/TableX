@@ -159,6 +159,7 @@ impl ConnectionDialog {
             cx.notify();
             return false;
         };
+        self.test = None;
         let (color, is_production, editing) = (self.color, self.is_production, self.editing);
         let id = self.workspace.update(cx, |ws, cx| {
             cx.notify();
@@ -215,8 +216,9 @@ impl ConnectionDialog {
         })
     }
 
-    /// A connection field changed, so the last test no longer applies.
+    /// A connection field changed, so the last test, or the one running, no longer applies.
     fn connection_changed(&mut self) {
+        self.test = None;
         self.test_result = None;
     }
 
