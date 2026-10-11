@@ -15,7 +15,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, ParentElement as _, Render, Styled as _, Window, div};
+use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, ParentElement as _, Render, Styled as _, Task, Window, div};
 
 use crate::explorer::validate_rename;
 use crate::model::*;
@@ -44,6 +44,10 @@ pub struct ConnectionDialog {
     pub ssl: Entity<SelectState<Vec<&'static str>>>,
     /// Fields the user has edited; only these show their error until a save is attempted.
     touched: HashSet<&'static str>,
+    /// The running Test connection; dropping it discards its result.
+    test: Option<Task<()>>,
+    /// The last test's outcome, shown above the footer.
+    test_result: Option<Result<(), String>>,
 }
 
 /// Emitted after Save added or edited connection `.0`.
@@ -65,7 +69,12 @@ impl ConnectionDialog {
             dialog.title(title).child(body.clone()).on_ok(move |_, _, cx| on_enter.update(cx, |d, cx| d.save(cx))).footer(
                 h_flex()
                     .gap(theme::space_8())
-                    .child(Button::new("dialog-test").debug_selector(|| "dialog-test".into()).small().label(test_label).disabled(!test_enabled))
+                    .child(
+                        Button::new("dialog-test").debug_selector(|| "dialog-test".into()).small().label(test_label).disabled(!test_enabled).on_click({
+                            let body = body.clone();
+                            move |_, _, cx| body.update(cx, |d, cx| d.run_test(cx))
+                        }),
+                    )
                     .child(div().flex_1())
                     .child(Button::new("dialog-cancel").debug_selector(|| "dialog-cancel".into()).small().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
                     .child(
@@ -113,7 +122,7 @@ impl ConnectionDialog {
             })
             .detach();
         }
-        Self { workspace, editing, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl, touched: HashSet::new() }
+        Self { workspace, editing, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl, touched: HashSet::new(), test: None, test_result: None }
     }
 
     /// The fields as the dialog shows them.
@@ -183,13 +192,35 @@ impl ConnectionDialog {
 
     /// The Test connection button: (label, enabled).
     pub fn test_button(&self, cx: &App) -> (&'static str, bool) {
+        if self.test.is_some() {
+            return ("Testing…", false);
+        }
         let (name, params) = self.validate(cx);
         ("Test connection", button_state(name.is_ok(), params.is_ok()).1)
     }
 
     /// The test result line above the footer: (text, color).
-    pub fn test_line(&self, _: &App) -> Option<(String, gpui_kit::Hsla)> {
-        None
+    pub fn test_line(&self, cx: &App) -> Option<(String, Hsla)> {
+        Some(match self.test_result.as_ref()? {
+            Ok(()) => ("Connection OK".into(), cx.theme().success),
+            Err(reason) => (format!("Could not connect: {reason}"), cx.theme().danger),
+        })
+    }
+
+    /// Starts Test connection on the current fields; its outcome lands after `mock::latency()`.
+    fn run_test(&mut self, cx: &mut Context<Self>) {
+        let Ok(params) = self.form(cx).params() else { return };
+        self.test_result = None;
+        self.test = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(mock::latency()).await;
+            this.update(cx, |this, cx| {
+                this.test = None;
+                this.test_result = Some(test_outcome(&params));
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
     }
 }
 
@@ -278,6 +309,9 @@ impl Render for ConnectionDialog {
                 ),
             )
             .children(fields)
+            .when_some(self.test_line(cx), |d, (line, color)| {
+                d.child(div().debug_selector(|| "test-result".into()).text_size(theme::ui_sm()).text_color(color).child(line))
+            })
     }
 }
 
@@ -387,7 +421,6 @@ pub fn delete_enabled(name: &str, is_production: bool, typed: &str) -> bool {
 }
 
 /// The Test connection result for valid params: `Ok` or the failure reason.
-#[allow(dead_code)] // shortcut: wired up by Test connection (T04), drop then
 pub fn test_outcome(params: &ConnectionParams) -> Result<(), String> {
     match params {
         ConnectionParams::Postgres { host, .. } => mock::test_connection(host),
