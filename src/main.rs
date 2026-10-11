@@ -2372,4 +2372,30 @@ mod tests {
         }
         crate::mock::set_latency(0);
     }
+
+    #[gpui_kit::test]
+    fn save_works_with_no_test_run_in_the_add_and_edit_dialogs(cx: &mut gpui_kit::TestAppContext) {
+        // (edit this row, or None to add; edits; press; the name saved)
+        let cases: [(Option<&str>, &[(&str, &str)], &str, &str); 4] = [
+            (None, &[("name", "c"), ("host", "db.invalid"), ("user", "u")], "click dialog-save", "c"),
+            (None, &[("name", "c"), ("kind-sqlite", ""), ("path", "/nope/x.db")], "enter", "c"),
+            (Some("prod-pg"), &[("name", "live")], "click dialog-save", "live"),
+            (Some("local.db"), &[("path", "/nope/x.db")], "enter", "local.db"),
+        ];
+        for (row, edits, press, name) in cases {
+            let label = format!("{row:?} {edits:?} {press}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let dialog = match row {
+                Some(row) => open_edit_dialog(&mut cx, &shell, row),
+                None => open_add_dialog(&mut cx),
+            };
+            assert!(cx.debug_bounds("dialog-test").is_some(), "{label}: Test connection offered");
+            finish(&mut cx, &dialog, edits, press);
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{label}: dialog closed");
+            assert!(workspace.read_with(&cx, |ws, _| ws.connections.iter().any(|c| c.name == name)), "{label}: saved");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), None, "{label}: no test line");
+        }
+    }
 }
