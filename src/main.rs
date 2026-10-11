@@ -2471,6 +2471,28 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn deleting_a_connection_with_no_log_rows_the_logs_are_filtered_to_clears_that_filter(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, panel) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.bottom_panel.clone()));
+        let all = panel.read_with(&cx, |p, _| p.logged_connections());
+        let fresh = workspace.update(&mut cx, |w, cx| {
+            cx.notify();
+            w.add("new.db".into(), 0, false, crate::model::ConnectionParams::Sqlite { path: "new.db".into() })
+        });
+        cx.run_until_parked();
+        panel.update(&mut cx, |p, cx| {
+            p.show_logs();
+            p.set_connection_filter(&[fresh], cx);
+        });
+        assert!(panel.read_with(&cx, |p, _| p.shown_connections()).is_empty(), "new.db has no log rows");
+        delete_row(&mut cx, &shell, "new.db");
+        cx.run_until_parked();
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection_filter_label(cx)), "All connections", "the filter no longer counts new.db");
+        assert_eq!(panel.read_with(&cx, |p, _| p.shown_connections()), all, "every remaining row is shown");
+    }
+
+    #[gpui_kit::test]
     fn confirming_the_delete_of_b_removes_it_from_the_tree_and_the_panel_and_closes_only_its_tabs(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::ConnectionId;
         let (window, shell) = open_with_connection_tabs(cx);
