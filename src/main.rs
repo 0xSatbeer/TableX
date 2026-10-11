@@ -1672,6 +1672,89 @@ mod tests {
         }
     }
 
+    /// Replaces a dialog field's text by typing into it.
+    fn type_into(cx: &mut gpui_kit::VisualTestContext, input: gpui_kit::Entity<gpui_kit::component::input::InputState>, text: &str) {
+        cx.update(|window, cx| input.update(cx, |input, cx| input.focus(window, cx)));
+        cx.simulate_keystrokes("ctrl-a backspace");
+        if !text.is_empty() {
+            cx.simulate_input(text);
+        }
+        cx.run_until_parked();
+    }
+
+    /// Types `edits` (field, text) into the open dialog; field "kind-sqlite" clicks that button instead.
+    fn fill(cx: &mut gpui_kit::VisualTestContext, dialog: &gpui_kit::Entity<crate::connection_dialog::ConnectionDialog>, edits: &[(&str, &str)]) {
+        for (field, text) in edits {
+            let input = dialog.read_with(cx, |d, _| match *field {
+                "name" => Some(d.name.clone()),
+                "host" => Some(d.host.clone()),
+                "port" => Some(d.port.clone()),
+                "user" => Some(d.user.clone()),
+                "database" => Some(d.database.clone()),
+                "path" => Some(d.path.clone()),
+                _ => None,
+            });
+            match input {
+                Some(input) => type_into(cx, input, text),
+                None => click(cx, "kind-sqlite"),
+            }
+        }
+    }
+
+    #[gpui_kit::test]
+    fn invalid_fields_show_their_error_and_keep_save_disabled(cx: &mut gpui_kit::TestAppContext) {
+        let valid = [("name", "new"), ("host", "h"), ("user", "u")];
+        let port = "Port must be a number from 1 to 65535";
+        // (edits after `valid`, errors shown, Save enabled)
+        let cases: Vec<(Vec<(&str, &str)>, Vec<(&str, &str)>, bool)> = vec![
+            (vec![], vec![], true),
+            (vec![("name", "prod-pg")], vec![("name", "Another connection is already named prod-pg")], false),
+            (vec![("name", " prod-pg ")], vec![("name", "Another connection is already named prod-pg")], false),
+            (vec![("name", "Prod-pg")], vec![], true),
+            (vec![("name", "   ")], vec![("name", "Name can't be empty")], false),
+            (vec![("name", "")], vec![("name", "Name can't be empty")], false),
+            (vec![("host", "  ")], vec![("host", "Host can't be empty")], false),
+            (vec![("user", "")], vec![("user", "User can't be empty")], false),
+            (vec![("database", "")], vec![("database", "Database can't be empty")], false),
+            (vec![("port", "0")], vec![("port", port)], false),
+            (vec![("port", "65536")], vec![("port", port)], false),
+            (vec![("port", "54a")], vec![("port", port)], false),
+            (vec![("port", "")], vec![("port", port)], false),
+            (vec![("port", " 65535 ")], vec![], true),
+            (vec![("name", "prod-pg"), ("port", "x")], vec![("name", "Another connection is already named prod-pg"), ("port", port)], false),
+            (vec![("kind-sqlite", ""), ("path", " ")], vec![("path", "Path can't be empty")], false),
+            (vec![("kind-sqlite", ""), ("path", "/nope/x.db")], vec![], true),
+            // Junk in a Postgres field doesn't block a SQLite save.
+            (vec![("port", "x"), ("kind-sqlite", ""), ("path", "/nope/x.db")], vec![], true),
+        ];
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        for (edits, want_errors, want_save) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &valid);
+            fill(&mut cx, &dialog, &edits);
+            let errors = dialog.read_with(&cx, |d, cx| d.errors(cx));
+            let want: Vec<(&str, String)> = want_errors.iter().map(|(f, m)| (*f, m.to_string())).collect();
+            assert_eq!(errors, want, "{edits:?}");
+            for (field, _) in &want_errors {
+                assert!(cx.debug_bounds(format!("error-{field}").leak()).is_some(), "{edits:?}: {field} error drawn");
+            }
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.save_enabled(cx)), want_save, "{edits:?}: Save enabled");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn untouched_fields_show_no_error_yet(cx: &mut gpui_kit::TestAppContext) {
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        fill(&mut cx, &dialog, &[("host", "h"), ("host", "")]);
+        let errors = dialog.read_with(&cx, |d, cx| d.errors(cx));
+        assert_eq!(errors, vec![("host", "Host can't be empty".to_string())], "only the field the user touched");
+        assert!(!dialog.read_with(&cx, |d, cx| d.save_enabled(cx)), "Save disabled: name, host and user are empty");
+    }
+
     #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};

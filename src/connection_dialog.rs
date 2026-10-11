@@ -78,6 +78,16 @@ impl ConnectionDialog {
             path: text(&self.path),
         }
     }
+
+    /// The inline errors on screen, as (field, message).
+    pub fn errors(&self, _: &App) -> Vec<(&'static str, String)> {
+        Vec::new()
+    }
+
+    /// Whether the Add connection button is enabled.
+    pub fn save_enabled(&self, _: &App) -> bool {
+        true
+    }
 }
 
 /// A labeled control. `id` names it for tests (`field-<id>`).
