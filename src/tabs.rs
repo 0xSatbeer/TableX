@@ -628,4 +628,32 @@ mod tests {
             assert_eq!(tabs.tabs[1].origin, expected, "{case}: closed tab, once reopened");
         }
     }
+
+    #[test]
+    fn dropping_a_connection_keeps_a_full_reopen_history_of_other_connections() {
+        use crate::model::ConnectionId;
+        let on = |key: String, conn: u32| {
+            let origin = Origin { connection: ConnectionId(conn), color: 0, production: false, path: "".into(), tail: "".into() };
+            EditorTab { key: key.clone().into(), title: key.into(), origin: Some(origin), tooltip: None, preview: false, pinned: false, content: () }
+        };
+        let others: Vec<String> = (0..super::CLOSED_HISTORY).map(|i| format!("other-{i}")).collect();
+        let mut t = Tabs::new(vec![on("gone-a".into(), 2), on("keep".into(), 1), on("gone-b".into(), 2)]);
+        for key in &others {
+            t.open(on(key.clone(), 1));
+            t.close(t.tabs.iter().position(|x| x.key == key.as_str()).unwrap());
+        }
+        t.drop_connection(ConnectionId(2));
+        assert_eq!(keys(&t), ["keep"]);
+        let mut reopened = Vec::new();
+        while t.tabs.len() < 1 + super::CLOSED_HISTORY + 1 {
+            let before = t.tabs.len();
+            t.reopen();
+            if t.tabs.len() == before {
+                break;
+            }
+            reopened.push(t.tabs[t.active].key.to_string());
+        }
+        reopened.reverse();
+        assert_eq!(reopened, others, "every other connection's closed tab is still reopenable");
+    }
 }
