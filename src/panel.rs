@@ -50,6 +50,7 @@ impl BottomPanel {
             }
         })
         .detach();
+        cx.observe(&workspace, |_, _, cx| cx.notify()).detach();
         let mut log = Vec::new();
         mock::mock_query_log(LOG_CAP).into_iter().for_each(|entry| push_log(&mut log, entry));
         let filter = LogFilter::default();

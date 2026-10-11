@@ -493,6 +493,8 @@ impl Explorer {
         let expanded = HashSet::new();
         let nodes = flatten(workspace.read(cx), &expanded, &HashSet::new(), false);
         let loaded = HashSet::new();
+        // Edits made elsewhere (rename, recolor, connect) rebuild the rows.
+        cx.observe(&workspace, |this, _, cx| this.refresh(cx)).detach();
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("Filter objects…"));
         cx.subscribe(&field, |this, field, ev: &InputEvent, cx| {
             if let InputEvent::Change = ev {
