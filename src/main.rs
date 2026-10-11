@@ -2546,4 +2546,40 @@ mod tests {
             assert_eq!((workspace.read_with(&cx, |ws, _| ws.clone()), tab_origins(&shell, &cx)), before, "{label}: workspace and tabs");
         }
     }
+
+    #[gpui_kit::test]
+    fn after_a_delete_the_selection_moves_to_the_row_that_took_its_place_or_the_previous_one(cx: &mut gpui_kit::TestAppContext) {
+        // (rows expanded first, row deleted, row selected after). staging-pg always shows its error row.
+        let cases: [(&[&str], &str, &str); 5] = [
+            (&[], "staging-pg", "local.db"),
+            (&[], "local.db", "staging-pg"),
+            (&[], "prod-pg", "staging-pg"),
+            // Its open subtree goes with it, so the next connection takes its place.
+            (&["0/0/0/table"], "prod-pg", "staging-pg"),
+            // The previous connection's row, not the last row above (prod-pg's open tables).
+            (&["0/0/0/table"], "staging-pg", "local.db"),
+        ];
+        for (open, row, want) in cases {
+            let label = format!("{open:?} delete {row}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+            for key in open {
+                explorer.update_in(&mut cx, |e, window, cx| e.reveal(key, window, cx));
+            }
+            cx.run_until_parked();
+            open_delete(&mut cx, &shell, row);
+            click(&mut cx, "delete-confirm");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(want.into()), "{label}");
+        }
+        // Deleting the last of several: the previous row.
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+        for (row, want) in [("local.db", "staging-pg"), ("staging-pg", "prod-pg")] {
+            open_delete(&mut cx, &shell, row);
+            click(&mut cx, "delete-confirm");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(want.into()), "delete {row} in turn");
+        }
+    }
 }
