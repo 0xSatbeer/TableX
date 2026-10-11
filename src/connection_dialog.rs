@@ -90,8 +90,8 @@ impl ConnectionDialog {
             let (value, placeholder) = (value.to_string(), placeholder.to_string());
             cx.new(|cx| InputState::new(window, cx).default_value(value).placeholder(placeholder))
         };
-        let (name, host, port) = (input(&form.name, "e.g. prod-pg"), input(&form.host, "localhost"), input(&form.port, ""));
-        let (user, database, path) = (input(&form.user, "postgres"), input(&form.database, ""), input(&form.path, "/path/to/file.db"));
+        let (name, host, port) = (input(&form.name, "e.g. prod-pg"), input(&form.host, "e.g. localhost"), input(&form.port, ""));
+        let (user, database, path) = (input(&form.user, "e.g. postgres"), input(&form.database, ""), input(&form.path, "e.g. /home/me/app.db"));
         let selected = SSL_MODES.iter().position(|(mode, _)| *mode == form.ssl);
         let ssl = cx.new(|cx| SelectState::new(SSL_MODES.iter().map(|(_, label)| *label).collect(), selected.map(IndexPath::new), window, cx));
         for (id, input) in TEXT_FIELDS.into_iter().zip([&name, &host, &port, &user, &database, &path]) {
@@ -213,11 +213,13 @@ impl Render for ConnectionDialog {
         let fields: Vec<AnyElement> = match self.kind {
             DbKind::Postgres => vec![
                 h_flex()
+                    .items_start()
                     .gap(theme::space_8())
                     .child(field("host", "Host", Input::new(&self.host).small(), &errors, cx))
                     .child(field("port", "Port", Input::new(&self.port).small(), &errors, cx))
                     .into_any_element(),
                 h_flex()
+                    .items_start()
                     .gap(theme::space_8())
                     .child(field("user", "User", Input::new(&self.user).small(), &errors, cx))
                     .child(field("database", "Database", Input::new(&self.database).small(), &errors, cx))
