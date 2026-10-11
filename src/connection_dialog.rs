@@ -148,10 +148,10 @@ impl ConnectionDialog {
         true
     }
 
-    /// The trimmed name (unique among the workspace's connections) and the trimmed params.
+    /// The trimmed name (unique among the other connections) and the trimmed params.
     fn validate(&self, cx: &App) -> (Result<String, String>, Result<ConnectionParams, FieldErrors>) {
         let form = self.form(cx);
-        let others: Vec<&str> = self.workspace.read(cx).connections.iter().map(|c| c.name.as_str()).collect();
+        let others: Vec<&str> = self.workspace.read(cx).connections.iter().filter(|c| Some(c.id) != self.editing).map(|c| c.name.as_str()).collect();
         (validate_rename(&form.name, &others), form.params())
     }
 
