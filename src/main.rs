@@ -2423,4 +2423,56 @@ mod tests {
             }
         }
     }
+
+    /// A console tab on `conn`, pinned or not.
+    fn console_on(conn: &crate::model::Connection, key: &str, pinned: bool) -> super::tabs::EditorTab<super::TabContent> {
+        super::tabs::EditorTab { key: key.to_string().into(), title: key.to_string().into(), origin: Some(super::tabs::Origin::of(conn)), tooltip: None, preview: false, pinned, content: super::TabContent::Console }
+    }
+
+    /// Right-clicks the row labeled `name` and picks Delete from its menu.
+    fn open_delete(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) {
+        right_click_row(cx, shell, name);
+        click(cx, "menu-delete");
+    }
+
+    #[gpui_kit::test]
+    fn confirming_the_delete_of_b_removes_it_from_the_tree_and_the_panel_and_closes_only_its_tabs(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionId;
+        let (window, shell) = open_with_connection_tabs(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer, panel) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone(), this.bottom_panel.clone()));
+        // Two tabs from staging-pg, one pinned, and one of them closed into the reopen history.
+        shell.update(&mut cx, |this, cx| {
+            let staging = this.workspace.read(cx).connections[1].clone();
+            for (key, pinned) in [("staging-1", false), ("staging-2", true), ("staging-3", false)] {
+                this.tabs.open(console_on(&staging, key, pinned));
+            }
+            let closed = this.tabs.tabs.iter().position(|t| t.key == "staging-3").unwrap();
+            this.tabs.close(closed);
+            this.tab_changed(cx);
+        });
+        cx.run_until_parked();
+        let staging = ConnectionId(2);
+        let from = |id: ConnectionId, cx: &gpui_kit::VisualTestContext| shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter(|t| t.origin.as_ref().is_some_and(|o| o.connection == id)).map(|t| t.key.clone()).collect::<Vec<_>>());
+        assert_eq!(from(staging, &cx).len(), 2, "two tabs from staging-pg open");
+        assert!(panel.read_with(&cx, |p, _| p.logged_connections().contains(&staging)), "the log has staging-pg rows");
+        let others: Vec<_> = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().map(|t| t.key.clone()).filter(|k| !k.starts_with("staging")).collect());
+        let prod_tabs = from(ConnectionId(1), &cx);
+
+        open_delete(&mut cx, &shell, "staging-pg");
+        click(&mut cx, "delete-confirm");
+
+        assert!(cx.debug_bounds("dialog-layer").is_none(), "confirmation closed");
+        let names: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
+        assert_eq!(names, ["prod-pg", "local.db"], "workspace [a, c]");
+        assert!(!explorer.read_with(&cx, |e, _| e.row_labels()).iter().any(|l| l == "staging-pg"), "no tree row");
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection(staging, cx)), Default::default(), "the panel no longer knows it");
+        assert!(!panel.read_with(&cx, |p, _| p.logged_connections().contains(&staging)), "its log rows are gone");
+        assert!(from(staging, &cx).is_empty(), "both its tabs closed, the pinned one too");
+        let keys: Vec<_> = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().map(|t| t.key.clone()).collect());
+        assert_eq!(keys, others, "every other tab stays open, in order");
+        assert_eq!(from(ConnectionId(1), &cx), prod_tabs, "prod-pg's tabs stay");
+        shell.update(&mut cx, |this, _| this.tabs.reopen());
+        assert!(from(staging, &cx).is_empty(), "reopen never brings back a deleted connection's tab");
+    }
 }

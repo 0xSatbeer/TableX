@@ -75,6 +75,12 @@ impl BottomPanel {
         conn.map(|c| (c.name.clone(), c.color, c.is_production)).unwrap_or_default()
     }
 
+    /// The connections the query log has rows for.
+    #[cfg(test)]
+    pub fn logged_connections(&self) -> std::collections::HashSet<ConnectionId> {
+        self.log.iter().map(|e| e.connection_id).collect()
+    }
+
     #[cfg(test)]
     pub fn show_logs(&mut self) {
         self.tab = LOGS;
