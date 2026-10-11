@@ -543,9 +543,14 @@ impl Explorer {
             return self.connect(ci, cx);
         }
         if open && node.kind == NodeKind::Schema && !self.loaded.contains(&key) && self.loading.insert(key.clone()) {
+            // A delete can move the connection while this runs, so the key is rebuilt from its id at the end.
+            let id = self.workspace.read(cx).connections[node.conn].id;
+            let path = key[key.find('/').unwrap_or(key.len())..].to_string();
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(mock::latency()).await;
                 this.update(cx, |this, cx| {
+                    let Some(ci) = this.workspace.read(cx).connections.iter().position(|c| c.id == id) else { return };
+                    let key = format!("{ci}{path}");
                     this.loading.remove(&key);
                     this.loaded.insert(key);
                     this.refresh(cx);
