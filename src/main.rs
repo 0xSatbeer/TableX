@@ -2315,4 +2315,61 @@ mod tests {
             assert_eq!(cx.debug_bounds("test-result").is_some(), kept, "{change:?}: line drawn");
         }
     }
+
+    #[gpui_kit::test]
+    fn a_running_test_never_shows_its_result_after_a_field_change_save_or_close(cx: &mut gpui_kit::TestAppContext) {
+        use std::time::Duration;
+        let form = [("name", "c"), ("host", "h"), ("user", "u")];
+        // (what happens mid-test, then test again, line shown at the end, dialog open, connections added)
+        let cases: [(&str, bool, Option<&str>, bool, usize); 10] = [
+            ("host", false, None, true, 0),
+            ("port", false, None, true, 0),
+            ("click kind-sqlite", false, None, true, 0),
+            ("host", true, Some("Could not connect: Could not resolve host db.invalid"), true, 0),
+            ("name", false, Some("Connection OK"), true, 0),
+            ("click production", false, Some("Connection OK"), true, 0),
+            ("click dialog-save", false, None, false, 1),
+            ("enter", false, None, false, 1),
+            ("escape", false, None, false, 0),
+            ("click dialog-cancel", false, None, false, 0),
+        ];
+        let latency = Duration::from_millis(1000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        for (step, again, line, open, added) in cases {
+            let label = format!("{step} again {again}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let before = workspace.read_with(&cx, |ws, _| ws.connections.len());
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &form);
+            click(&mut cx, "dialog-test");
+            cx.executor().advance_clock(latency / 2);
+            match step {
+                "host" => fill(&mut cx, &dialog, &[("host", "db.invalid")]),
+                "port" => fill(&mut cx, &dialog, &[("port", "5433")]),
+                "name" => fill(&mut cx, &dialog, &[("name", "d")]),
+                _ => finish(&mut cx, &dialog, &[], step),
+            }
+            if open && line.is_none() {
+                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", true), "{label}: can test again at once");
+            }
+            if again {
+                click(&mut cx, "dialog-test");
+            }
+            // A closed dialog's body is dropped with it, unless something else holds it.
+            let held = if open || added > 0 { Some(dialog.clone()) } else { None };
+            let weak = dialog.downgrade();
+            drop(dialog);
+            cx.executor().advance_clock(latency);
+            cx.run_until_parked();
+            let shown = weak.upgrade().and_then(|d| d.read_with(&cx, |d, cx| d.test_line(cx).map(|(text, _)| text)));
+            assert_eq!(shown.as_deref(), line, "{label}: line");
+            assert_eq!(cx.debug_bounds("test-result").is_some(), line.is_some(), "{label}: line drawn");
+            assert_eq!(cx.debug_bounds("dialog-layer").is_some(), open, "{label}: dialog open");
+            assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections.len()), before + added, "{label}: connections added");
+            drop(held);
+        }
+        crate::mock::set_latency(0);
+    }
 }
