@@ -2480,4 +2480,40 @@ mod tests {
         shell.update(&mut cx, |this, _| this.tabs.reopen());
         assert!(from(staging, &cx).is_empty(), "reopen never brings back a deleted connection's tab");
     }
+
+    #[gpui_kit::test]
+    fn delete_connection_is_enabled_at_once_for_non_production_and_only_on_the_exact_name_for_production(cx: &mut gpui_kit::TestAppContext) {
+        // (row, typed into the name field, then press, enabled)
+        let cases: [(&str, &str, &str, bool); 10] = [
+            ("local.db", "", "click delete-confirm", true),
+            ("staging-pg", "", "click delete-confirm", true),
+            ("local.db", "", "enter", true),
+            ("prod-pg", "", "click delete-confirm", false),
+            ("prod-pg", "prod-p", "click delete-confirm", false),
+            ("prod-pg", "Prod-pg", "click delete-confirm", false),
+            ("prod-pg", " prod-pg", "click delete-confirm", false),
+            ("prod-pg", "prod-pg ", "click delete-confirm", false),
+            ("prod-pg", "prod-pg", "click delete-confirm", true),
+            ("prod-pg", "prod-pg", "enter", true),
+        ];
+        for (row, typed, press, enabled) in cases {
+            let label = format!("{row} {typed:?} {press}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            open_delete(&mut cx, &shell, row);
+            assert_eq!(cx.debug_bounds("delete-name").is_some(), row == "prod-pg", "{label}: name field only for Production");
+            if !typed.is_empty() {
+                cx.simulate_input(typed);
+            }
+            match press.strip_prefix("click ") {
+                Some(selector) => click(&mut cx, selector),
+                None => cx.simulate_keystrokes(press),
+            }
+            cx.run_until_parked();
+            let kept = workspace.read_with(&cx, |ws, _| ws.connections.iter().any(|c| c.name == row));
+            assert_eq!(!kept, enabled, "{label}: deleted");
+            assert_eq!(cx.debug_bounds("dialog-layer").is_none(), enabled, "{label}: confirmation closed");
+        }
+    }
 }
