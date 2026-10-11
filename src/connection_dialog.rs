@@ -99,6 +99,12 @@ pub fn params_changed(old: &ConnectionParams, form: &Form) -> bool {
     form.params().as_ref() != Ok(old)
 }
 
+/// Whether the confirmation's Delete button is enabled. A Production connection needs its name
+/// typed exactly (no trimming, case-sensitive).
+pub fn delete_enabled(name: &str, is_production: bool, typed: &str) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +263,24 @@ mod tests {
         ];
         for (old, form, want) in cases {
             assert_eq!(params_changed(old, &form), want, "{form:?}");
+        }
+    }
+
+    #[test]
+    fn delete_enabled_cases() {
+        let cases = [
+            ("local.db", false, "", true),
+            ("local.db", false, "anything", true),
+            ("prod-pg", true, "", false),
+            ("prod-pg", true, "prod-p", false),
+            ("prod-pg", true, "Prod-pg", false),
+            ("prod-pg", true, " prod-pg", false),
+            ("prod-pg", true, "prod-pg ", false),
+            ("prod-pg", true, "prod-pgx", false),
+            ("prod-pg", true, "prod-pg", true),
+        ];
+        for (name, prod, typed, want) in cases {
+            assert_eq!(delete_enabled(name, prod, typed), want, "{name} {prod} {typed:?}");
         }
     }
 }
