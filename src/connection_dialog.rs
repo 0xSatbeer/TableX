@@ -181,4 +181,41 @@ mod tests {
             assert_eq!(button_state(name_valid, fields_valid), want);
         }
     }
+
+    #[test]
+    fn default_color_cases() {
+        let cases: [(&[u8], u8); 8] = [
+            (&[], 0),
+            (&[1], 0),
+            (&[0, 1], 2),
+            (&[0, 2], 1),
+            (&[0, 1, 2, 3, 4, 5, 6], 7),
+            (&[0, 1, 2, 3, 4, 5, 6, 7], 0),
+            (&[7, 6, 5, 4, 3, 2, 1], 0),
+            (&[0, 0, 1, 1], 2),
+        ];
+        for (used, want) in cases {
+            assert_eq!(default_color(used), want, "{used:?}");
+        }
+    }
+
+    #[test]
+    fn new_form_defaults() {
+        let form = Form::new(&[0, 1]);
+        assert_eq!(
+            form,
+            Form {
+                name: "".into(),
+                color: 2,
+                is_production: false,
+                kind: DbKind::Postgres,
+                host: "".into(),
+                port: "5432".into(),
+                user: "".into(),
+                database: "postgres".into(),
+                ssl: SslMode::Prefer,
+                path: "".into(),
+            }
+        );
+    }
 }
