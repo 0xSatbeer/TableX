@@ -60,11 +60,13 @@ impl ConnectionDialog {
         let (title, save_label) = if editing.is_some() { ("Edit connection", "Save changes") } else { ("Add connection", "Add connection") };
         window.open_dialog(cx, move |dialog, _, cx| {
             let save_enabled = body.read(cx).save_enabled(cx);
+            let (test_label, test_enabled) = body.read(cx).test_button(cx);
             let on_enter = body.clone();
             dialog.title(title).child(body.clone()).on_ok(move |_, _, cx| on_enter.update(cx, |d, cx| d.save(cx))).footer(
                 h_flex()
-                    .justify_end()
                     .gap(theme::space_8())
+                    .child(Button::new("dialog-test").debug_selector(|| "dialog-test".into()).small().label(test_label).disabled(!test_enabled))
+                    .child(div().flex_1())
                     .child(Button::new("dialog-cancel").debug_selector(|| "dialog-cancel".into()).small().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
                     .child(
                         Button::new("dialog-save")
@@ -180,8 +182,9 @@ impl ConnectionDialog {
     }
 
     /// The Test connection button: (label, enabled).
-    pub fn test_button(&self, _: &App) -> (&'static str, bool) {
-        ("Test connection", false)
+    pub fn test_button(&self, cx: &App) -> (&'static str, bool) {
+        let (name, params) = self.validate(cx);
+        ("Test connection", button_state(name.is_ok(), params.is_ok()).1)
     }
 
     /// The test result line above the footer: (text, color).
