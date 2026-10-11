@@ -1912,6 +1912,47 @@ mod tests {
         }
     }
 
+    /// Types `edits` into the open dialog, then presses a key or clicks `click <selector>`.
+    fn finish(cx: &mut gpui_kit::VisualTestContext, dialog: &gpui_kit::Entity<crate::connection_dialog::ConnectionDialog>, edits: &[(&str, &str)], press: &'static str) {
+        fill(cx, dialog, edits);
+        match press.strip_prefix("click ") {
+            Some(selector) => click(cx, selector),
+            None => cx.simulate_keystrokes(press),
+        }
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn edit_with_no_changes_or_cancelled_leaves_the_workspace_as_it_was(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus;
+        // (row, edits, press, the name it ends with)
+        let cases: [(&str, &[(&str, &str)], &str, &str); 7] = [
+            ("prod-pg", &[], "enter", "prod-pg"),
+            ("prod-pg", &[], "click dialog-save", "prod-pg"),
+            ("prod-pg", &[("name", " prod-pg ")], "enter", "prod-pg"),
+            ("prod-pg", &[("name", "live"), ("port", "5433")], "escape", "prod-pg"),
+            ("prod-pg", &[("name", "live"), ("port", "5433")], "click dialog-cancel", "prod-pg"),
+            ("local.db", &[], "enter", "local.db"),
+            ("staging-pg", &[("name", "staging-2")], "enter", "staging-2"),
+        ];
+        for (row, edits, press, name) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let mut want = workspace.read_with(&cx, |ws, _| ws.clone());
+            want.connections.iter_mut().find(|c| c.name == row).unwrap().name = name.into();
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            finish(&mut cx, &dialog, edits, press);
+            let label = format!("{row} {edits:?} {press}");
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{label}: dialog closed");
+            assert_eq!(workspace.read_with(&cx, |ws, _| ws.clone()), want, "{label}: workspace");
+            if row == "staging-pg" {
+                let status = workspace.read_with(&cx, |ws, _| ws.connections[1].status.clone());
+                assert!(matches!(status, ConnectionStatus::Error(_)), "{label}: still Error");
+            }
+        }
+    }
+
     #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};
