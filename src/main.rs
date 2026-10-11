@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use std::rc::Rc;
 
 mod assets;
+mod connection_dialog;
 mod explorer;
 mod gallery;
 mod grid;
