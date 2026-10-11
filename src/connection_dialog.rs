@@ -85,7 +85,7 @@ impl Form {
 
 /// Lowest swatch index (0-7) no connection uses, or 0 when all are used.
 pub fn default_color(used: &[u8]) -> u8 {
-    255
+    (0..8).find(|c| !used.contains(c)).unwrap_or(0)
 }
 
 /// (Save enabled, Test connection enabled). Test ignores the name.
