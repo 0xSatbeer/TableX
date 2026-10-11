@@ -2625,4 +2625,55 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(shell.read_with(&cx, |this, _| this.tabs.tabs.len()), open, "opening the table again activates its tab, no duplicate");
     }
+
+    #[gpui_kit::test]
+    fn a_connect_in_flight_finds_its_connection_deleted_and_is_discarded(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus::{self, *};
+        use std::time::Duration;
+        // (row connecting, key to press Enter on, then add a connection and connect it, the new one's status once the old connect finished)
+        let cases: [(&str, &str, Option<bool>, Option<ConnectionStatus>); 4] = [
+            ("local.db", "2", None, None),
+            ("staging-pg", "1/error", None, None),
+            // local.db has the highest id, so the new connection may get it again.
+            ("local.db", "2", Some(false), Some(Disconnected)),
+            ("local.db", "2", Some(true), Some(Connecting)),
+        ];
+        let latency = Duration::from_millis(1000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        for (row, key, add, want) in cases {
+            let label = format!("{row} add {add:?}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(key, window, cx));
+            cx.simulate_keystrokes("enter");
+            let status = workspace.read_with(&cx, |ws, _| ws.connections.iter().find(|c| c.name == row).unwrap().status.clone());
+            assert_eq!(status, Connecting, "{label}: connecting");
+            delete_row(&mut cx, &shell, row);
+            // Half way through the old connect, so a new one lands later than it.
+            cx.executor().advance_clock(latency / 2);
+            if let Some(connect) = add {
+                let dialog = open_add_dialog(&mut cx);
+                finish(&mut cx, &dialog, &[("kind-sqlite", ""), ("name", "new.db"), ("path", "/tmp/new.db")], "enter");
+                if connect {
+                    let at = explorer.read_with(&cx, |e, _| e.row_labels().iter().position(|l| l == "new.db").unwrap());
+                    explorer.update_in(&mut cx, |e, window, cx| e.reveal(&(at - 1).to_string(), window, cx));
+                    cx.simulate_keystrokes("enter");
+                }
+            }
+            let rows = explorer.read_with(&cx, |e, _| e.row_labels());
+            let others = workspace.read_with(&cx, |ws, _| ws.clone());
+            cx.executor().advance_clock(latency / 2);
+            cx.run_until_parked();
+            assert!(!workspace.read_with(&cx, |ws, _| ws.connections.iter().any(|c| c.name == row)), "{label}: stays deleted");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels()), rows, "{label}: no row comes back, no error row");
+            if let Some(want) = want {
+                let status = workspace.read_with(&cx, |ws, _| ws.connections.iter().find(|c| c.name == "new.db").unwrap().status.clone());
+                assert_eq!(status, want, "{label}: the new connection");
+            } else {
+                assert_eq!(workspace.read_with(&cx, |ws, _| ws.clone()), others, "{label}: the others unchanged");
+            }
+        }
+        crate::mock::set_latency(0);
+    }
 }
