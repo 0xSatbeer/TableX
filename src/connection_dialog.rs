@@ -112,8 +112,8 @@ impl Render for ConnectionDialog {
         let kinds = ButtonGroup::new("kind")
             .small()
             .outline()
-            .child(Button::new("kind-postgres").label("Postgres").selected(self.kind == DbKind::Postgres))
-            .child(Button::new("kind-sqlite").label("SQLite").selected(self.kind == DbKind::Sqlite));
+            .child(Button::new("kind-postgres").debug_selector(|| "kind-postgres".into()).label("Postgres").selected(self.kind == DbKind::Postgres))
+            .child(Button::new("kind-sqlite").debug_selector(|| "kind-sqlite".into()).label("SQLite").selected(self.kind == DbKind::Sqlite));
         let fields: Vec<AnyElement> = match self.kind {
             DbKind::Postgres => vec![
                 h_flex()

@@ -1637,6 +1637,37 @@ mod tests {
         assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx)), want);
     }
 
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} drawn"));
+        cx.simulate_click(bounds.center(), Default::default());
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn switching_to_sqlite_shows_only_an_empty_path_field(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::DbKind;
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        let postgres = ["field-host", "field-port", "field-user", "field-database", "field-ssl"];
+        // (click, kind, fields shown, fields hidden)
+        let cases: [(&str, DbKind, &[&str], &[&str]); 2] = [
+            ("kind-sqlite", DbKind::Sqlite, &["field-path"], &postgres),
+            ("kind-postgres", DbKind::Postgres, &postgres, &["field-path"]),
+        ];
+        for (button, kind, shown, hidden) in cases {
+            click(&mut cx, button);
+            let form = dialog.read_with(&cx, |d, cx| d.form(cx));
+            assert_eq!((form.kind, form.path.as_str()), (kind, ""), "{button}");
+            for field in shown {
+                assert!(cx.debug_bounds(field).is_some(), "{button}: {field} shown");
+            }
+            for field in hidden {
+                assert!(cx.debug_bounds(field).is_none(), "{button}: {field} hidden");
+            }
+        }
+    }
+
     #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};
