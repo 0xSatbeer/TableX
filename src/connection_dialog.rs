@@ -15,7 +15,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, ParentElement as _, Render, Styled as _, Window, div};
+use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, ParentElement as _, Render, Styled as _, Window, div};
 
 use crate::explorer::validate_rename;
 use crate::model::*;
@@ -41,6 +41,11 @@ pub struct ConnectionDialog {
     touched: HashSet<&'static str>,
 }
 
+/// Emitted after Save added connection `.0` to the workspace.
+pub struct Saved(pub ConnectionId);
+
+impl EventEmitter<Saved> for ConnectionDialog {}
+
 impl ConnectionDialog {
     /// Opens the Add connection dialog over `window`, with the name field focused.
     pub fn open(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) -> Entity<Self> {
@@ -53,7 +58,22 @@ impl ConnectionDialog {
                     .justify_end()
                     .gap(theme::space_8())
                     .child(Button::new("dialog-cancel").small().label("Cancel"))
-                    .child(Button::new("dialog-save").debug_selector(|| "dialog-save".into()).primary().small().label("Add connection").disabled(!save_enabled)),
+                    .child(
+                        Button::new("dialog-save")
+                            .debug_selector(|| "dialog-save".into())
+                            .primary()
+                            .small()
+                            .label("Add connection")
+                            .disabled(!save_enabled)
+                            .on_click({
+                                let body = body.clone();
+                                move |_, window, cx| {
+                                    if body.update(cx, |d, cx| d.save(cx)) {
+                                        window.close_dialog(cx);
+                                    }
+                                }
+                            }),
+                    ),
             )
         });
         view.read(cx).name.clone().update(cx, |name, cx| name.focus(window, cx));
@@ -99,6 +119,18 @@ impl ConnectionDialog {
             ssl,
             path: text(&self.path),
         }
+    }
+
+    /// Adds the connection to the workspace if the form is valid. Returns whether it did.
+    pub fn save(&mut self, cx: &mut Context<Self>) -> bool {
+        let (Ok(name), Ok(params)) = self.validate(cx) else { return false };
+        let (color, is_production) = (self.color, self.is_production);
+        let id = self.workspace.update(cx, |ws, cx| {
+            cx.notify();
+            ws.add(name, color, is_production, params)
+        });
+        cx.emit(Saved(id));
+        true
     }
 
     /// The trimmed name (unique among the workspace's connections) and the trimmed params.
@@ -192,14 +224,16 @@ impl Render for ConnectionDialog {
             .child(field("name", "Name", Input::new(&self.name).small(), &errors, cx))
             .child(field("color", "Color", h_flex().gap(theme::space_6()).children(swatches), &errors, cx))
             .child(
-                Switch::new("production")
-                    .small()
-                    .label("Production")
-                    .checked(self.is_production)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.is_production = *checked;
-                        cx.notify();
-                    })),
+                div().self_start().debug_selector(|| "production".into()).child(
+                    Switch::new("production")
+                        .small()
+                        .label("Production")
+                        .checked(self.is_production)
+                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                            this.is_production = *checked;
+                            cx.notify();
+                        })),
+                ),
             )
             .children(fields)
     }

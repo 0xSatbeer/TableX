@@ -17,7 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
-use crate::connection_dialog::ConnectionDialog;
+use crate::connection_dialog::{ConnectionDialog, Saved};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
 
@@ -602,7 +602,13 @@ impl Explorer {
 
     /// Opens the Add connection dialog ("+" in the header, `AddConnection`).
     pub fn add_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        ConnectionDialog::open(self.workspace.clone(), window, cx);
+        let dialog = ConnectionDialog::open(self.workspace.clone(), window, cx);
+        cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
+            if let Some(ix) = this.workspace.read(cx).connections.iter().position(|c| c.id == *id) {
+                this.reveal(&ix.to_string(), window, cx);
+            }
+        })
+        .detach();
     }
 
     /// Focuses the filter field (Ctrl+Alt+F).

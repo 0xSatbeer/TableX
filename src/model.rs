@@ -14,6 +14,15 @@ pub struct Workspace {
     pub connections: Vec<Connection>,
 }
 
+impl Workspace {
+    /// Appends a new, disconnected connection with an id no current connection has.
+    pub fn add(&mut self, name: String, color: u8, is_production: bool, params: ConnectionParams) -> ConnectionId {
+        let id = ConnectionId(self.connections.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+        self.connections.push(Connection { id, name, color, is_production, status: ConnectionStatus::Disconnected, params, databases: Vec::new() });
+        id
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ConnectionId(pub u32);
 
