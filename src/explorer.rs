@@ -644,8 +644,13 @@ impl Explorer {
             cx.notify();
             ws.delete(id)
         });
-        if removed.is_some() {
-            cx.emit(ConnectionDeleted(id));
+        let Some(ix) = removed else { return };
+        cx.emit(ConnectionDeleted(id));
+        self.refresh(cx);
+        // The connection that took its place, or the previous one when it was last.
+        let next = ix.min(self.workspace.read(cx).connections.len().saturating_sub(1)).to_string();
+        if let Some(row) = self.nodes.iter().position(|n| n.key == next) {
+            self.select(row, cx);
         }
     }
 

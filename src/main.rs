@@ -2440,6 +2440,15 @@ mod tests {
         click(cx, "menu-delete");
     }
 
+    /// Deletes the row labeled `name` through its menu, typing the name for Production.
+    fn delete_row(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) {
+        open_delete(cx, shell, name);
+        if cx.debug_bounds("delete-name").is_some() {
+            cx.simulate_input(name);
+        }
+        click(cx, "delete-confirm");
+    }
+
     #[gpui_kit::test]
     fn confirming_the_delete_of_b_removes_it_from_the_tree_and_the_panel_and_closes_only_its_tabs(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::ConnectionId;
@@ -2568,8 +2577,7 @@ mod tests {
                 explorer.update_in(&mut cx, |e, window, cx| e.reveal(key, window, cx));
             }
             cx.run_until_parked();
-            open_delete(&mut cx, &shell, row);
-            click(&mut cx, "delete-confirm");
+            delete_row(&mut cx, &shell, row);
             assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(want.into()), "{label}");
         }
         // Deleting the last of several: the previous row.
@@ -2577,8 +2585,7 @@ mod tests {
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
         let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
         for (row, want) in [("local.db", "staging-pg"), ("staging-pg", "prod-pg")] {
-            open_delete(&mut cx, &shell, row);
-            click(&mut cx, "delete-confirm");
+            delete_row(&mut cx, &shell, row);
             assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(want.into()), "delete {row} in turn");
         }
     }
