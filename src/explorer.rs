@@ -1109,7 +1109,29 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute, no_match_text};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute, no_match_text, shift_key};
+
+    #[test]
+    fn shift_key_cases() {
+        // (key, position deleted, key after)
+        let cases = [
+            ("1", 1, None),
+            ("1/0/0/table/2", 1, None),
+            ("0", 1, Some("0")),
+            ("0/0/0", 1, Some("0/0/0")),
+            ("2", 1, Some("1")),
+            ("2/0/0/table/0", 1, Some("1/0/0/table/0")),
+            ("10/3", 1, Some("9/3")),
+            ("1", 0, Some("0")),
+            ("0", 0, None),
+            ("console-1", 0, Some("console-1")),
+            ("big_events", 0, Some("big_events")),
+            ("", 0, Some("")),
+        ];
+        for (key, removed, want) in cases {
+            assert_eq!(shift_key(key, removed).as_deref(), want, "{key:?} after deleting {removed}");
+        }
+    }
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]

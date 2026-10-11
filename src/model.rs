@@ -305,6 +305,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn delete_and_edit_cases() {
+        let ws = crate::mock::workspaces().remove(0);
+        let ids: Vec<ConnectionId> = ws.connections.iter().map(|c| c.id).collect();
+        let names = |ws: &Workspace| ws.connections.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        // (id deleted, position returned, names left)
+        let cases = [
+            (ids[1], Some(1), vec!["prod-pg", "local.db"]),
+            (ids[0], Some(0), vec!["staging-pg", "local.db"]),
+            (ids[2], Some(2), vec!["prod-pg", "staging-pg"]),
+            (ConnectionId(99), None, vec!["prod-pg", "staging-pg", "local.db"]),
+        ];
+        for (id, at, left) in cases {
+            let mut after = ws.clone();
+            assert_eq!(after.delete(id), at, "{id:?}");
+            assert_eq!(names(&after), left, "{id:?}");
+        }
+        let mut last = Workspace { connections: ws.connections[..1].to_vec(), ..ws.clone() };
+        assert_eq!(last.delete(ids[0]), Some(0));
+        assert!(last.connections.is_empty(), "deleting the last leaves []");
+        let mut gone = ws.clone();
+        gone.edit(ConnectionId(99), "x".into(), 1, true, ConnectionParams::Sqlite { path: PathBuf::from("x") });
+        assert_eq!(gone, ws, "an edit of a deleted connection does nothing");
+    }
+
+    #[test]
     fn value_stays_compact() {
         assert_eq!(size_of::<Value>(), 24);
     }
