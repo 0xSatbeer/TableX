@@ -102,7 +102,7 @@ pub fn params_changed(old: &ConnectionParams, form: &Form) -> bool {
 /// Whether the confirmation's Delete button is enabled. A Production connection needs its name
 /// typed exactly (no trimming, case-sensitive).
 pub fn delete_enabled(name: &str, is_production: bool, typed: &str) -> bool {
-    true
+    !is_production || typed == name
 }
 
 #[cfg(test)]
