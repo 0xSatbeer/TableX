@@ -2265,4 +2265,51 @@ mod tests {
         }
         crate::mock::set_latency(0);
     }
+
+    #[gpui_kit::test]
+    fn changing_a_connection_field_clears_the_test_line_and_name_color_or_production_keep_it(cx: &mut gpui_kit::TestAppContext) {
+        let file = std::env::current_exe().unwrap().display().to_string().leak() as &str;
+        let pg: &[(&str, &str)] = &[("name", "x"), ("host", "h"), ("user", "u")];
+        let sqlite: &[(&str, &str)] = &[("name", "x"), ("kind-sqlite", ""), ("path", file)];
+        // (form tested, then the change, line kept). "click <selector>" clicks; "ssl" picks the next SSL mode.
+        let cases: Vec<(&[(&str, &str)], (&str, &str), bool)> = vec![
+            (pg, ("host", "h2"), false),
+            (pg, ("port", "5433"), false),
+            (pg, ("user", "u2"), false),
+            (pg, ("database", "d2"), false),
+            (pg, ("ssl", ""), false),
+            (pg, ("click", "kind-sqlite"), false),
+            (sqlite, ("path", "/nope/x.db"), false),
+            (sqlite, ("click", "kind-postgres"), false),
+            (pg, ("name", "y"), true),
+            (pg, ("name", "prod-pg"), true),
+            (pg, ("click", "swatch-6"), true),
+            (pg, ("click", "production"), true),
+            (pg, ("click", "kind-postgres"), true),
+            (sqlite, ("click", "kind-sqlite"), true),
+        ];
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        for (form, change, kept) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, form);
+            click(&mut cx, "dialog-test");
+            let line = dialog.read_with(&cx, |d, cx| d.test_line(cx));
+            assert!(line.is_some(), "{change:?}: line shown before the change");
+            match change {
+                ("click", selector) => click(&mut cx, selector),
+                ("ssl", _) => {
+                    click(&mut cx, "field-ssl");
+                    cx.simulate_keystrokes("down enter");
+                    cx.run_until_parked();
+                    assert_ne!(dialog.read_with(&cx, |d, cx| d.form(cx).ssl), crate::model::SslMode::Prefer, "SSL changed");
+                }
+                edit => fill(&mut cx, &dialog, &[edit]),
+            }
+            let want = if kept { line } else { None };
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), want, "{change:?}");
+            assert_eq!(cx.debug_bounds("test-result").is_some(), kept, "{change:?}: line drawn");
+        }
+    }
 }
