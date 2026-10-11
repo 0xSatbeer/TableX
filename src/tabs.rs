@@ -216,10 +216,13 @@ impl<C> Tabs<C> {
     /// Closes every tab from connection `id`, pinned ones too, and drops them from the reopen history.
     pub fn drop_connection(&mut self, id: crate::model::ConnectionId) {
         let from = |t: &EditorTab<C>| t.origin.as_ref().is_some_and(|o| o.connection == id);
+        // Set the history aside so these closes neither enter it nor evict other connections' tabs.
+        let mut kept = std::mem::take(&mut self.closed);
+        kept.retain(|t| !from(t));
         while let Some(ix) = self.tabs.iter().position(from) {
             self.close(ix);
         }
-        self.closed.retain(|t| !from(t));
+        self.closed = kept;
     }
 
     /// Replaces every open and recently closed tab's key with `f(key)`.
