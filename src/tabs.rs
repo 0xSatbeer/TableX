@@ -595,6 +595,7 @@ mod tests {
             ("production off", edit(|c| c.is_production = false), Some(prod.clone()), Some(with(0, false, &prod.path))),
             ("rename, recolor and production off", edit(|c| (c.name, c.color, c.is_production) = ("live".into(), 7, false)), Some(prod.clone()), Some(with(7, false, &format!("live{tail}")))),
             ("path is only the connection name", edit(|c| c.name = "live".into()), Some(with(0, true, "prod-pg")), Some(with(0, true, "live"))),
+            ("old name contains the separator", edit(|c| c.name = "c".into()), Some(Origin::of(&Connection { name: "a › b".into(), ..ws.connections[0].clone() })), Some(with(0, true, &format!("c{tail}")))),
             ("new name contains the old one", edit(|c| c.name = "prod-pg-2".into()), Some(prod.clone()), Some(with(0, true, &format!("prod-pg-2{tail}")))),
             ("another connection's tab", edit(|c| (c.name, c.color) = ("live".into(), 7)), Some(local.clone()), Some(local.clone())),
             ("sample tab without an origin", edit(|c| c.name = "live".into()), None, None),
