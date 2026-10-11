@@ -2516,4 +2516,34 @@ mod tests {
             assert_eq!(cx.debug_bounds("dialog-layer").is_none(), enabled, "{label}: confirmation closed");
         }
     }
+
+    #[gpui_kit::test]
+    fn cancel_or_esc_in_the_delete_confirmation_leaves_the_workspace_and_tabs_unchanged(cx: &mut gpui_kit::TestAppContext) {
+        // (row, typed first, press)
+        let cases: [(&str, &str, &str); 5] = [
+            ("local.db", "", "escape"),
+            ("local.db", "", "click delete-cancel"),
+            ("prod-pg", "", "escape"),
+            ("prod-pg", "prod-pg", "escape"),
+            ("prod-pg", "prod-pg", "click delete-cancel"),
+        ];
+        for (row, typed, press) in cases {
+            let label = format!("{row} {typed:?} {press}");
+            let (window, shell) = open_with_connection_tabs(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let before = (workspace.read_with(&cx, |ws, _| ws.clone()), tab_origins(&shell, &cx));
+            open_delete(&mut cx, &shell, row);
+            if !typed.is_empty() {
+                cx.simulate_input(typed);
+            }
+            match press.strip_prefix("click ") {
+                Some(selector) => click(&mut cx, selector),
+                None => cx.simulate_keystrokes(press),
+            }
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{label}: confirmation closed");
+            assert_eq!((workspace.read_with(&cx, |ws, _| ws.clone()), tab_origins(&shell, &cx)), before, "{label}: workspace and tabs");
+        }
+    }
 }
