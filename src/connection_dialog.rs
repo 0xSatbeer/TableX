@@ -1,6 +1,5 @@
 //! The add/edit connection dialog, and the pure rules behind it: validation, defaults, change
 //! classification, delete confirmation and the Test connection outcome.
-#![allow(dead_code)] // shortcut: wired up by the dialog view tickets (T03-T06), drop then
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -337,17 +336,20 @@ pub fn button_state(name_valid: bool, fields_valid: bool) -> (bool, bool) {
 
 /// Whether saving `form` over a connection with params `old` changes them (compared trimmed).
 /// An invalid form counts as changed; it can't be saved anyway.
+#[allow(dead_code)] // shortcut: wired up by edit (T05), drop then
 pub fn params_changed(old: &ConnectionParams, form: &Form) -> bool {
     form.params().as_ref() != Ok(old)
 }
 
 /// Whether the confirmation's Delete button is enabled. A Production connection needs its name
 /// typed exactly (no trimming, case-sensitive).
+#[allow(dead_code)] // shortcut: wired up by delete (T06), drop then
 pub fn delete_enabled(name: &str, is_production: bool, typed: &str) -> bool {
     !is_production || typed == name
 }
 
 /// The Test connection result for valid params: `Ok` or the failure reason.
+#[allow(dead_code)] // shortcut: wired up by Test connection (T04), drop then
 pub fn test_outcome(params: &ConnectionParams) -> Result<(), String> {
     match params {
         ConnectionParams::Postgres { host, .. } => mock::test_connection(host),
