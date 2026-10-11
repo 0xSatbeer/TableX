@@ -2589,4 +2589,38 @@ mod tests {
             assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(want.into()), "delete {row} in turn");
         }
     }
+
+    #[gpui_kit::test]
+    fn after_a_delete_the_connections_below_keep_their_open_rows_and_their_tabs_point_at_them(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+        // Connect local.db, open its first table in a tab, and open prod-pg's tables above it.
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("2", window, cx));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("2/0/0/table/0", window, cx));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("0/0/0/table", window, cx));
+        cx.run_until_parked();
+        let labels = |cx: &gpui_kit::VisualTestContext| explorer.read_with(cx, |e, _| e.row_labels());
+        let under_local = |rows: Vec<gpui_kit::SharedString>| rows.into_iter().skip_while(|l| l != "local.db").collect::<Vec<_>>();
+        let local_before = under_local(labels(&cx));
+        assert!(local_before.len() > 3, "local.db is open down to its tables: {local_before:?}");
+        let tab_keys = |cx: &gpui_kit::VisualTestContext| shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter(|t| t.tooltip.is_some()).map(|t| t.key.clone()).collect::<Vec<_>>());
+        assert_eq!(tab_keys(&cx), ["2/0/0/table/0"], "local.db's table tab");
+        let table = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().find(|t| t.key == "2/0/0/table/0").unwrap().title.clone());
+
+        delete_row(&mut cx, &shell, "prod-pg");
+
+        assert_eq!(under_local(labels(&cx)), local_before, "local.db stays open as it was");
+        assert_eq!(tab_keys(&cx), ["1/0/0/table/0"], "its tab follows it to its new position");
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("1/0/0/table/0", window, cx));
+        assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(table.clone()), "reveal in explorer finds the tab's table");
+        let open = shell.read_with(&cx, |this, _| this.tabs.tabs.len());
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(shell.read_with(&cx, |this, _| this.tabs.tabs.len()), open, "opening the table again activates its tab, no duplicate");
+    }
 }
