@@ -1525,4 +1525,74 @@ mod tests {
             assert_eq!(&text, expected, "{focus} focused");
         }
     }
+
+    /// The Shell with a table tab from prod-pg opened from the tree, the console on prod-pg it
+    /// starts with, and a console on local.db.
+    fn open_with_connection_tabs(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let explorer = shell.read_with(&vcx, |this, _| this.explorer.clone());
+        explorer.update_in(&mut vcx, |e, window, cx| e.reveal("0/0/0/table/0", window, cx));
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("enter");
+        vcx.run_until_parked();
+        shell.update(&mut vcx, |this, cx| {
+            let local = this.workspace.read(cx).connections[2].clone();
+            this.tabs.open(super::tabs::EditorTab {
+                key: "console-local".into(),
+                title: "console-local".into(),
+                origin: Some(super::tabs::Origin::of(&local)),
+                tooltip: None,
+                preview: false,
+                pinned: false,
+                content: super::TabContent::Console,
+            });
+            this.tab_changed(cx);
+        });
+        vcx.run_until_parked();
+        let prod_tabs = shell.read_with(&vcx, |this, _| this.tabs.tabs.iter().filter(|t| t.origin.as_ref().is_some_and(|o| o.connection == crate::model::ConnectionId(1))).count());
+        assert_eq!(prod_tabs, 2, "a table tab and the console on prod-pg");
+        (window.into(), shell)
+    }
+
+    fn tab_origins(shell: &gpui_kit::Entity<super::Shell>, cx: &gpui_kit::VisualTestContext) -> Vec<(gpui_kit::SharedString, super::tabs::Origin)> {
+        shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter_map(|t| Some((t.key.clone(), t.origin.clone()?))).collect())
+    }
+
+    #[gpui_kit::test]
+    fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{ConnectionId, ConnectionStatus};
+        let (window, shell) = open_with_connection_tabs(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let before = tab_origins(&shell, &cx);
+        let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("f2");
+        for _ in 0.."prod-pg".len() {
+            cx.simulate_keystrokes("backspace");
+        }
+        cx.simulate_keystrokes("l i v e enter");
+        cx.run_until_parked();
+
+        assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels()[0].clone()), "live", "tree row");
+        let panel = shell.read_with(&cx, |this, cx| this.bottom_panel.read(cx).connection(ConnectionId(1)).0);
+        assert_eq!(panel, "live", "bottom panel connection label");
+        let conn = shell.read_with(&cx, |this, cx| this.workspace.read(cx).connections[0].clone());
+        assert_eq!((conn.name.as_str(), conn.status), ("live", ConnectionStatus::Connected), "shared workspace: renamed, still connected");
+        let after = tab_origins(&shell, &cx);
+        assert_eq!(after.len(), before.len());
+        for ((key, b), (_, a)) in before.iter().zip(&after) {
+            let path = match b.path.strip_prefix("prod-pg") {
+                Some(tail) if b.connection == ConnectionId(1) => format!("live{tail}"),
+                _ => b.path.to_string(),
+            };
+            assert_eq!(a, &super::tabs::Origin { path: path.into(), ..b.clone() }, "tab {key}");
+        }
+    }
 }

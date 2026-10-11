@@ -202,6 +202,9 @@ impl<C> Tabs<C> {
         self.active = self.tabs.iter().position(|t| t.key == active).unwrap_or(0);
     }
 
+    /// Gives open and recently closed tabs their connection's current name, color and production flag.
+    pub fn refresh_origins(&mut self, _ws: &crate::model::Workspace) {}
+
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {
             self.active = ix;
@@ -560,5 +563,43 @@ mod tests {
             assert_eq!(super::first_match(&tabs, query), want, "query {query:?}");
         }
         assert_eq!(super::first_match::<()>(&[], ""), None);
+    }
+
+    #[test]
+    fn refresh_origins_cases() {
+        use crate::model::{Connection, Workspace};
+        let ws = crate::mock::workspaces().remove(0);
+        let prod = Origin::of(&ws.connections[0]);
+        let local = Origin::of(&ws.connections[2]);
+        let tail = prod.path.strip_prefix("prod-pg").expect("path starts with the connection name").to_string();
+        assert!(tail.starts_with(" › "), "path has segments after the name: {:?}", prod.path);
+        let edit = |f: fn(&mut Connection)| {
+            let mut ws = ws.clone();
+            f(&mut ws.connections[0]);
+            ws
+        };
+        let with = |color: u8, production: bool, path: &str| Origin { color, production, path: path.to_string().into(), ..prod.clone() };
+        let gone = Workspace { connections: ws.connections[1..].to_vec(), ..ws.clone() };
+        // (case, workspace after the change, tab origin before, origin expected after)
+        let cases: Vec<(&str, Workspace, Option<Origin>, Option<Origin>)> = vec![
+            ("rename", edit(|c| c.name = "live".into()), Some(prod.clone()), Some(with(0, true, &format!("live{tail}")))),
+            ("recolor", edit(|c| c.color = 3), Some(prod.clone()), Some(with(3, true, &prod.path))),
+            ("production off", edit(|c| c.is_production = false), Some(prod.clone()), Some(with(0, false, &prod.path))),
+            ("rename, recolor and production off", edit(|c| (c.name, c.color, c.is_production) = ("live".into(), 7, false)), Some(prod.clone()), Some(with(7, false, &format!("live{tail}")))),
+            ("path is only the connection name", edit(|c| c.name = "live".into()), Some(with(0, true, "prod-pg")), Some(with(0, true, "live"))),
+            ("new name contains the old one", edit(|c| c.name = "prod-pg-2".into()), Some(prod.clone()), Some(with(0, true, &format!("prod-pg-2{tail}")))),
+            ("another connection's tab", edit(|c| (c.name, c.color) = ("live".into(), 7)), Some(local.clone()), Some(local.clone())),
+            ("sample tab without an origin", edit(|c| c.name = "live".into()), None, None),
+            ("connection no longer in the workspace", gone, Some(prod.clone()), Some(prod.clone())),
+            ("nothing changed", ws.clone(), Some(prod.clone()), Some(prod.clone())),
+        ];
+        for (case, ws, before, expected) in cases {
+            let mut tabs = Tabs::new(vec![EditorTab { origin: before.clone(), ..tab("open", false) }, EditorTab { origin: before, ..tab("closed", false) }]);
+            tabs.close(1);
+            tabs.refresh_origins(&ws);
+            assert_eq!(tabs.tabs[0].origin, expected, "{case}: open tab");
+            tabs.reopen();
+            assert_eq!(tabs.tabs[1].origin, expected, "{case}: closed tab, once reopened");
+        }
     }
 }
