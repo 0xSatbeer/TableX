@@ -1990,6 +1990,10 @@ mod tests {
             let had_databases = workspace.read_with(&cx, |ws, _| ws.connections[ci].databases.len());
             assert!(had_databases > 0, "{label}: fixture has databases");
             let before = tab_origins(&shell, &cx);
+            let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+            // Scrolls the row into view; prod-pg is open down to a table.
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+            cx.run_until_parked();
             let dialog = open_edit_dialog(&mut cx, &shell, row);
             fill(&mut cx, &dialog, &edits);
             for selector in &clicks {
@@ -2021,7 +2025,6 @@ mod tests {
             assert!(after.iter().any(|(_, o)| o.connection == ConnectionId(1)), "{label}: prod-pg tabs still open");
             if !stays {
                 // Disconnected by the edit, it connects again from its row.
-                let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
                 explorer.update_in(&mut cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
                 cx.simulate_keystrokes("enter");
                 let status = workspace.read_with(&cx, |ws, _| ws.connections[ci].status.clone());

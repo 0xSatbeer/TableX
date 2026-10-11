@@ -348,7 +348,9 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
             pk: false,
         };
         let key = format!("{ci}");
-        let open = push(FlatNode { expandable: !conn.databases.is_empty(), ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
+        // Expanding a connection that isn't connected connects it, even with no databases yet.
+        let expandable = !conn.databases.is_empty() || conn.status != ConnectionStatus::Connected;
+        let open = push(FlatNode { expandable, ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
         match &conn.status {
             ConnectionStatus::Connected => {}
             ConnectionStatus::Error(msg) => {
@@ -616,7 +618,12 @@ impl Explorer {
     fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {
         let dialog = ConnectionDialog::open(self.workspace.clone(), editing, window, cx);
         cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
-            if let Some(ix) = this.workspace.read(cx).connections.iter().position(|c| c.id == *id) {
+            let connections = &this.workspace.read(cx).connections;
+            if let Some(ix) = connections.iter().position(|c| c.id == *id) {
+                // Collapse a connection the edit disconnected, so expanding it connects again.
+                if connections[ix].status == ConnectionStatus::Disconnected {
+                    this.expanded.remove(&ix.to_string());
+                }
                 this.reveal(&ix.to_string(), window, cx);
             }
         })

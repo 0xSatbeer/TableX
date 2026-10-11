@@ -22,10 +22,14 @@ impl Workspace {
         id
     }
 
-    /// Replaces connection `id`'s name, color, Production flag and params in place. Does nothing
-    /// if it is gone.
+    /// Replaces connection `id`'s name, color, Production flag and params in place. New params
+    /// disconnect it and clear its databases, which came from the old server. Does nothing if it
+    /// is gone.
     pub fn edit(&mut self, id: ConnectionId, name: String, color: u8, is_production: bool, params: ConnectionParams) {
         let Some(conn) = self.connections.iter_mut().find(|c| c.id == id) else { return };
+        if conn.params != params {
+            (conn.status, conn.databases) = (ConnectionStatus::Disconnected, Vec::new());
+        }
         (conn.name, conn.color, conn.is_production, conn.params) = (name, color, is_production, params);
     }
 }
