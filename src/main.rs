@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use std::rc::Rc;
 
 mod assets;
+mod connection_dialog;
 mod explorer;
 mod gallery;
 mod grid;
@@ -26,7 +27,7 @@ mod statusbar;
 mod tabs;
 mod theme;
 
-actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme]);
+actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme, AddConnection, EditConnection, DeleteConnection]);
 
 enum TabContent {
     Grid(Entity<grid::Grid>),
@@ -160,6 +161,8 @@ impl LayoutState {
 }
 
 struct Shell {
+    /// The one copy of the workspace's connections; explorer, panel and tabs follow it.
+    workspace: Entity<model::Workspace>,
     explorer: Entity<explorer::Explorer>,
     editor: Entity<EditorState>,
     tabs: tabs::Tabs<TabContent>,
@@ -187,8 +190,23 @@ struct Shell {
 
 impl Shell {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let workspace = &mock::workspaces()[0];
+        let workspace = cx.new(|_| mock::workspaces().remove(0));
+        let console_origin = workspace.read(cx).connections.iter().find(|c| c.is_production).map(tabs::Origin::of);
         let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), window, cx));
+        cx.observe(&workspace, |this, workspace, cx| {
+            this.tabs.refresh_origins(workspace.read(cx));
+            let (origin, has_tab) = (this.tabs.active().and_then(|t| t.origin.clone()), this.tabs.active().is_some());
+            this.status_bar.update(cx, |bar, cx| bar.set_origin(origin, has_tab, cx));
+            cx.notify();
+        })
+        .detach();
+        cx.subscribe(&explorer, |this, _, ev: &explorer::ConnectionDeleted, cx| {
+            this.tabs.drop_connection(ev.id);
+            // Explorer-opened tabs are keyed by tree key, so they follow their connection's move.
+            this.tabs.rekey(|key| explorer::shift_key(key, ev.ix).map_or_else(|| key.clone(), SharedString::from));
+            this.tab_changed(cx);
+        })
+        .detach();
         cx.subscribe(&explorer, |this, _, ev: &explorer::OpenObject, cx| {
             // ponytail: every table shows a mock query result until drivers land (Phase 5)
             let rows = match mock::run_query(&format!("SELECT * FROM {}", ev.name)) {
@@ -221,6 +239,7 @@ impl Shell {
         let mut this = Self {
             overflow_open: false,
             overflow_search,
+            workspace: workspace.clone(),
             explorer,
             editor: cx.new(|cx| {
                 EditorState::new(window, cx)
@@ -236,7 +255,7 @@ impl Shell {
                     key: "console-1".into(),
                     title: "console-1".into(),
                     // The console runs against production, so the tint shows up in the demo.
-                    origin: workspace.connections.iter().find(|c| c.is_production).map(tabs::Origin::of),
+                    origin: console_origin,
                     tooltip: None,
                     preview: false,
                     pinned: false,
@@ -253,7 +272,7 @@ impl Shell {
                 dragging: None,
             },
             status_bar: cx.new(|cx| statusbar::StatusBar::new(window, cx)),
-            bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace, window, cx)),
+            bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace.clone(), window, cx)),
             focus_handle: cx.focus_handle(),
             gallery_visible: false,
             focus_content: false,
@@ -815,6 +834,15 @@ impl Render for Shell {
                     this.tabs.activate(n - 1);
                     this.tab_changed(cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &AddConnection, window, cx| {
+                this.explorer.update(cx, |explorer, cx| explorer.add_connection(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &EditConnection, window, cx| {
+                this.explorer.update(cx, |explorer, cx| explorer.edit_connection(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &DeleteConnection, window, cx| {
+                this.explorer.update(cx, |explorer, cx| explorer.delete_connection(window, cx));
             }))
             .on_action(cx.listener(|this, _: &FocusExplorer, window, cx| {
                 this.layout.show_explorer();
@@ -1518,6 +1546,1330 @@ mod tests {
             cx.run_until_parked();
             let text = shell.read_with(&cx, |this, cx| this.status_bar.read(cx).aggregate_text());
             assert_eq!(&text, expected, "{focus} focused");
+        }
+    }
+
+    /// The Shell with a table tab from prod-pg opened from the tree, the console on prod-pg it
+    /// starts with, and a console on local.db.
+    fn open_with_connection_tabs(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let explorer = shell.read_with(&vcx, |this, _| this.explorer.clone());
+        explorer.update_in(&mut vcx, |e, window, cx| e.reveal("0/0/0/table/0", window, cx));
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("enter");
+        vcx.run_until_parked();
+        shell.update(&mut vcx, |this, cx| {
+            let local = this.workspace.read(cx).connections[2].clone();
+            this.tabs.open(super::tabs::EditorTab {
+                key: "console-local".into(),
+                title: "console-local".into(),
+                origin: Some(super::tabs::Origin::of(&local)),
+                tooltip: None,
+                preview: false,
+                pinned: false,
+                content: super::TabContent::Console,
+            });
+            this.tab_changed(cx);
+        });
+        vcx.run_until_parked();
+        let prod_tabs = shell.read_with(&vcx, |this, _| this.tabs.tabs.iter().filter(|t| t.origin.as_ref().is_some_and(|o| o.connection == crate::model::ConnectionId(1))).count());
+        assert_eq!(prod_tabs, 2, "a table tab and the console on prod-pg");
+        (window.into(), shell)
+    }
+
+    fn tab_origins(shell: &gpui_kit::Entity<super::Shell>, cx: &gpui_kit::VisualTestContext) -> Vec<(gpui_kit::SharedString, super::tabs::Origin)> {
+        shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter_map(|t| Some((t.key.clone(), t.origin.clone()?))).collect())
+    }
+
+    /// The Shell with the mock workspace, parked. Motion is reduced so a dialog lands in place
+    /// at once; mid-slide, a click's mouse-up would hit a different spot than its mouse-down.
+    fn open_plain(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        gpui_kit::VisualTestContext::from_window(window.into(), cx).run_until_parked();
+        (window.into(), shell)
+    }
+
+    #[gpui_kit::test]
+    fn plus_button_or_add_connection_action_opens_the_dialog(cx: &mut gpui_kit::TestAppContext) {
+        for via in ["action", "plus button"] {
+            let (window, _shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{via}: no dialog before");
+            if via == "action" {
+                cx.dispatch_action(super::AddConnection);
+            } else {
+                let plus = cx.debug_bounds("add-connection");
+                assert!(plus.is_some(), "explorer header has a + button");
+                cx.simulate_click(plus.unwrap().center(), Default::default());
+            }
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("dialog-layer").is_some(), "{via}: the dialog layer renders");
+        }
+    }
+
+    /// Dispatches `AddConnection` and returns the dialog it opened.
+    fn open_add_dialog(cx: &mut gpui_kit::VisualTestContext) -> gpui_kit::Entity<crate::connection_dialog::ConnectionDialog> {
+        use std::{cell::RefCell, rc::Rc};
+        let opened = Rc::new(RefCell::new(None));
+        let sink = opened.clone();
+        let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
+        cx.dispatch_action(super::AddConnection);
+        cx.run_until_parked();
+        opened.take().expect("AddConnection opened a dialog")
+    }
+
+    #[gpui_kit::test]
+    fn add_dialog_opens_with_the_spec_defaults(cx: &mut gpui_kit::TestAppContext) {
+        use crate::connection_dialog::Form;
+        use crate::model::{DbKind, SslMode};
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        // The mock workspace uses colors 0, 2 and 4.
+        let want = Form {
+            name: "".into(),
+            color: 1,
+            is_production: false,
+            kind: DbKind::Postgres,
+            host: "".into(),
+            port: "5432".into(),
+            user: "".into(),
+            database: "postgres".into(),
+            ssl: SslMode::Prefer,
+            path: "".into(),
+        };
+        assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx)), want);
+    }
+
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} drawn"));
+        cx.simulate_click(bounds.center(), Default::default());
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn switching_to_sqlite_shows_only_an_empty_path_field(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::DbKind;
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        let postgres = ["field-host", "field-port", "field-user", "field-database", "field-ssl"];
+        // (click, kind, fields shown, fields hidden)
+        let cases: [(&str, DbKind, &[&str], &[&str]); 2] = [
+            ("kind-sqlite", DbKind::Sqlite, &["field-path"], &postgres),
+            ("kind-postgres", DbKind::Postgres, &postgres, &["field-path"]),
+        ];
+        for (button, kind, shown, hidden) in cases {
+            click(&mut cx, button);
+            let form = dialog.read_with(&cx, |d, cx| d.form(cx));
+            assert_eq!((form.kind, form.path.as_str()), (kind, ""), "{button}");
+            for field in shown {
+                assert!(cx.debug_bounds(field).is_some(), "{button}: {field} shown");
+            }
+            for field in hidden {
+                assert!(cx.debug_bounds(field).is_none(), "{button}: {field} hidden");
+            }
+        }
+    }
+
+    /// Replaces a dialog field's text by typing into it.
+    fn type_into(cx: &mut gpui_kit::VisualTestContext, input: gpui_kit::Entity<gpui_kit::component::input::InputState>, text: &str) {
+        cx.update(|window, cx| input.update(cx, |input, cx| input.focus(window, cx)));
+        cx.simulate_keystrokes("ctrl-a backspace");
+        if !text.is_empty() {
+            cx.simulate_input(text);
+        }
+        cx.run_until_parked();
+    }
+
+    /// Types `edits` (field, text) into the open dialog; field "kind-sqlite" clicks that button instead.
+    fn fill(cx: &mut gpui_kit::VisualTestContext, dialog: &gpui_kit::Entity<crate::connection_dialog::ConnectionDialog>, edits: &[(&str, &str)]) {
+        for (field, text) in edits {
+            let input = dialog.read_with(cx, |d, _| match *field {
+                "name" => Some(d.name.clone()),
+                "host" => Some(d.host.clone()),
+                "port" => Some(d.port.clone()),
+                "user" => Some(d.user.clone()),
+                "database" => Some(d.database.clone()),
+                "path" => Some(d.path.clone()),
+                _ => None,
+            });
+            match input {
+                Some(input) => type_into(cx, input, text),
+                None => click(cx, "kind-sqlite"),
+            }
+        }
+    }
+
+    #[gpui_kit::test]
+    fn invalid_fields_show_their_error_and_keep_save_disabled(cx: &mut gpui_kit::TestAppContext) {
+        let valid = [("name", "new"), ("host", "h"), ("user", "u")];
+        let port = "Port must be a number from 1 to 65535";
+        // (edits after `valid`, errors shown, Save enabled)
+        let cases: Vec<(Vec<(&str, &str)>, Vec<(&str, &str)>, bool)> = vec![
+            (vec![], vec![], true),
+            (vec![("name", "prod-pg")], vec![("name", "Another connection is already named prod-pg")], false),
+            (vec![("name", " prod-pg ")], vec![("name", "Another connection is already named prod-pg")], false),
+            (vec![("name", "Prod-pg")], vec![], true),
+            (vec![("name", "   ")], vec![("name", "Name can't be empty")], false),
+            (vec![("name", "")], vec![("name", "Name can't be empty")], false),
+            (vec![("host", "  ")], vec![("host", "Host can't be empty")], false),
+            (vec![("user", "")], vec![("user", "User can't be empty")], false),
+            (vec![("database", "")], vec![("database", "Database can't be empty")], false),
+            (vec![("port", "0")], vec![("port", port)], false),
+            (vec![("port", "65536")], vec![("port", port)], false),
+            (vec![("port", "54a")], vec![("port", port)], false),
+            (vec![("port", "")], vec![("port", port)], false),
+            (vec![("port", " 65535 ")], vec![], true),
+            (vec![("name", "prod-pg"), ("port", "x")], vec![("name", "Another connection is already named prod-pg"), ("port", port)], false),
+            (vec![("kind-sqlite", ""), ("path", " ")], vec![("path", "Path can't be empty")], false),
+            (vec![("kind-sqlite", ""), ("path", "/nope/x.db")], vec![], true),
+            // Junk in a Postgres field doesn't block a SQLite save.
+            (vec![("port", "x"), ("kind-sqlite", ""), ("path", "/nope/x.db")], vec![], true),
+        ];
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        for (edits, want_errors, want_save) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &valid);
+            fill(&mut cx, &dialog, &edits);
+            let errors = dialog.read_with(&cx, |d, cx| d.errors(cx));
+            let want: Vec<(&str, String)> = want_errors.iter().map(|(f, m)| (*f, m.to_string())).collect();
+            assert_eq!(errors, want, "{edits:?}");
+            for (field, _) in &want_errors {
+                assert!(cx.debug_bounds(format!("error-{field}").leak()).is_some(), "{edits:?}: {field} error drawn");
+            }
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.save_enabled(cx)), want_save, "{edits:?}: Save enabled");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn untouched_fields_show_no_error_yet(cx: &mut gpui_kit::TestAppContext) {
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        fill(&mut cx, &dialog, &[("host", "h"), ("host", "")]);
+        let errors = dialog.read_with(&cx, |d, cx| d.errors(cx));
+        assert_eq!(errors, vec![("host", "Host can't be empty".to_string())], "only the field the user touched");
+        assert!(!dialog.read_with(&cx, |d, cx| d.save_enabled(cx)), "Save disabled: name, host and user are empty");
+    }
+
+    #[gpui_kit::test]
+    fn saving_a_valid_form_appends_the_connection_and_selects_its_row(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{Connection, ConnectionParams, ConnectionStatus, SslMode};
+        use std::path::PathBuf;
+        let postgres = ConnectionParams::Postgres { host: "db.local".into(), port: 5433, user: "u".into(), database: "d".into(), ssl: SslMode::Prefer };
+        // (empty the workspace first, edits, clicks, want name, color, production, params)
+        let cases: Vec<(bool, Vec<(&str, &str)>, Vec<&'static str>, &str, u8, bool, ConnectionParams)> = vec![
+            (false, vec![("name", " c "), ("host", " db.local "), ("port", " 5433 "), ("user", " u "), ("database", " d ")], vec![], "c", 1, false, postgres.clone()),
+            (false, vec![("name", "c"), ("host", "db.local"), ("port", "5433"), ("user", "u"), ("database", "d")], vec!["swatch-6", "production"], "c", 6, true, postgres.clone()),
+            (false, vec![("kind-sqlite", ""), ("name", "notes"), ("path", " /tmp/notes.db ")], vec![], "notes", 1, false, ConnectionParams::Sqlite { path: PathBuf::from("/tmp/notes.db") }),
+            (true, vec![("name", "c"), ("host", "db.local"), ("port", "5433"), ("user", "u"), ("database", "d")], vec![], "c", 0, false, postgres.clone()),
+        ];
+        for (empty, edits, clicks, name, color, production, params) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer, panel) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone(), this.bottom_panel.clone()));
+            if empty {
+                workspace.update(&mut cx, |ws, cx| {
+                    ws.connections.clear();
+                    cx.notify();
+                });
+            }
+            let before = workspace.read_with(&cx, |ws, _| ws.connections.clone());
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &edits);
+            for selector in clicks {
+                click(&mut cx, selector);
+            }
+            click(&mut cx, "dialog-save");
+
+            let after = workspace.read_with(&cx, |ws, _| ws.connections.clone());
+            assert_eq!(after.len(), before.len() + 1, "{name}: one connection added");
+            assert_eq!(after[..before.len()], before[..], "{name}: the others unchanged, in order");
+            let added = after.last().unwrap();
+            assert!(!before.iter().any(|c| c.id == added.id), "{name}: fresh id {:?}", added.id);
+            let want = Connection { id: added.id, name: name.into(), color, is_production: production, status: ConnectionStatus::Disconnected, params, databases: vec![] };
+            assert_eq!(added, &want, "{name}: trimmed values, Disconnected, no databases");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels().last().cloned()), Some(name.into()), "{name}: last tree row");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(name.into()), "{name}: new row selected");
+            assert_eq!(panel.read_with(&cx, |p, cx| p.connection(added.id, cx).0), name, "{name}: bottom panel knows it");
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{name}: dialog closed");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn enter_saves_a_valid_form_and_esc_or_cancel_close_without_changes(cx: &mut gpui_kit::TestAppContext) {
+        let valid = [("host", "db.local"), ("user", "u"), ("name", "c")];
+        let invalid = [("host", "db.local"), ("user", "u"), ("name", "prod-pg")];
+        // (edits, then press, dialog still open, connections added)
+        let cases: [(&[(&str, &str)], &str, bool, usize); 5] = [
+            (&valid, "enter", false, 1),
+            (&invalid, "enter", true, 0),
+            (&valid, "escape", false, 0),
+            (&invalid, "escape", false, 0),
+            (&valid, "click dialog-cancel", false, 0),
+        ];
+        for (edits, press, open, added) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let before = workspace.read_with(&cx, |ws, _| ws.clone());
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, edits);
+            match press.strip_prefix("click ") {
+                Some(selector) => click(&mut cx, selector),
+                None => cx.simulate_keystrokes(press),
+            }
+            cx.run_until_parked();
+            let label = format!("{:?} {press}", edits.last().unwrap());
+            assert_eq!(cx.debug_bounds("dialog-layer").is_some(), open, "{label}: dialog open");
+            let after = workspace.read_with(&cx, |ws, _| ws.clone());
+            assert_eq!(after.connections.len(), before.connections.len() + added, "{label}: connections added");
+            if added == 0 {
+                assert_eq!(after, before, "{label}: workspace unchanged");
+            }
+        }
+    }
+
+    #[gpui_kit::test]
+    fn enter_on_an_invalid_form_shows_every_error(cx: &mut gpui_kit::TestAppContext) {
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        cx.simulate_keystrokes("enter");
+        let fields: Vec<&str> = dialog.read_with(&cx, |d, cx| d.errors(cx)).into_iter().map(|(f, _)| f).collect();
+        assert_eq!(fields, ["name", "host", "user"], "untouched fields show why Enter did nothing");
+    }
+
+    /// Right-clicks the tree row labeled `name`, picks Edit… from its menu and returns the dialog.
+    fn open_edit_dialog(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) -> gpui_kit::Entity<crate::connection_dialog::ConnectionDialog> {
+        use std::{cell::RefCell, rc::Rc};
+        let opened = Rc::new(RefCell::new(None));
+        let sink = opened.clone();
+        let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
+        right_click_row(cx, shell, name);
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        opened.take().unwrap_or_else(|| panic!("Edit… on {name} opened a dialog"))
+    }
+
+    /// Right-clicks the tree row labeled `name`, revealing it first if it is scrolled out of view.
+    fn right_click_row(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) {
+        let (explorer, workspace) = shell.read_with(cx, |this, _| (this.explorer.clone(), this.workspace.clone()));
+        let row = |cx: &mut gpui_kit::VisualTestContext| explorer.read_with(cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap_or_else(|| panic!("{name} row"));
+        let selector = |row: usize| -> &'static str { format!("tree-label-{row}").leak() };
+        let first = selector(row(cx));
+        if cx.debug_bounds(first).is_none() {
+            // Scrolled out of view: reveal it.
+            let ci = workspace.read_with(cx, |ws, _| ws.connections.iter().position(|c| c.name == name).unwrap());
+            explorer.update_in(cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+            cx.run_until_parked();
+        }
+        let shown = selector(row(cx));
+        let at = cx.debug_bounds(shown).unwrap_or_else(|| panic!("{name} row drawn")).center();
+        cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
+        cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn right_click_edit_opens_the_dialog_prefilled_with_the_type_locked(cx: &mut gpui_kit::TestAppContext) {
+        use crate::connection_dialog::Form;
+        use crate::model::{DbKind, SslMode};
+        let blank = Form { name: "".into(), color: 0, is_production: false, kind: DbKind::Postgres, host: "".into(), port: "5432".into(), user: "".into(), database: "postgres".into(), ssl: SslMode::Prefer, path: "".into() };
+        // (row, its form, the other type's button)
+        let cases = [
+            ("prod-pg", Form { name: "prod-pg".into(), color: 0, is_production: true, host: "db.acme.internal".into(), user: "app".into(), database: "app_db".into(), ..blank.clone() }, "kind-sqlite"),
+            ("staging-pg", Form { name: "staging-pg".into(), color: 2, host: "staging.acme.internal".into(), user: "app".into(), database: "app_db".into(), ..blank.clone() }, "kind-sqlite"),
+            ("local.db", Form { name: "local.db".into(), color: 4, kind: DbKind::Sqlite, path: "~/acme/local.db".into(), ..blank.clone() }, "kind-postgres"),
+        ];
+        for (row, want, other_kind) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            assert!(cx.debug_bounds("dialog-layer").is_some(), "{row}: dialog shown");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx)), want, "{row}: prefilled");
+            click(&mut cx, other_kind);
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx).kind), want.kind, "{row}: type locked");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn edit_name_validation_excludes_the_connection_being_edited(cx: &mut gpui_kit::TestAppContext) {
+        // (row, name typed or None to leave it, error shown, Save enabled)
+        let cases: [(&str, Option<&str>, Option<&str>, bool); 8] = [
+            ("prod-pg", None, None, true),
+            ("prod-pg", Some("prod-pg"), None, true),
+            ("prod-pg", Some(" prod-pg "), None, true),
+            ("prod-pg", Some("staging-pg"), Some("Another connection is already named staging-pg"), false),
+            ("prod-pg", Some(" local.db "), Some("Another connection is already named local.db"), false),
+            ("prod-pg", Some("Staging-pg"), None, true),
+            ("prod-pg", Some("  "), Some("Name can't be empty"), false),
+            ("local.db", Some("local.db"), None, true),
+        ];
+        for (row, name, error, save) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            if let Some(name) = name {
+                fill(&mut cx, &dialog, &[("name", name)]);
+            }
+            let errors = dialog.read_with(&cx, |d, cx| d.errors(cx));
+            let want: Vec<(&str, String)> = error.map(|e| ("name", e.to_string())).into_iter().collect();
+            assert_eq!(errors, want, "{row} {name:?}");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.save_enabled(cx)), save, "{row} {name:?}: Save enabled");
+        }
+    }
+
+    /// Types `edits` into the open dialog, then presses a key or clicks `click <selector>`.
+    fn finish(cx: &mut gpui_kit::VisualTestContext, dialog: &gpui_kit::Entity<crate::connection_dialog::ConnectionDialog>, edits: &[(&str, &str)], press: &'static str) {
+        fill(cx, dialog, edits);
+        match press.strip_prefix("click ") {
+            Some(selector) => click(cx, selector),
+            None => cx.simulate_keystrokes(press),
+        }
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn edit_with_no_changes_or_cancelled_leaves_the_workspace_as_it_was(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus;
+        // (row, edits, press, the name it ends with)
+        let cases: [(&str, &[(&str, &str)], &str, &str); 7] = [
+            ("prod-pg", &[], "enter", "prod-pg"),
+            ("prod-pg", &[], "click dialog-save", "prod-pg"),
+            ("prod-pg", &[("name", " prod-pg ")], "enter", "prod-pg"),
+            ("prod-pg", &[("name", "live"), ("port", "5433")], "escape", "prod-pg"),
+            ("prod-pg", &[("name", "live"), ("port", "5433")], "click dialog-cancel", "prod-pg"),
+            ("local.db", &[], "enter", "local.db"),
+            ("staging-pg", &[("name", "staging-2")], "enter", "staging-2"),
+        ];
+        for (row, edits, press, name) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let mut want = workspace.read_with(&cx, |ws, _| ws.clone());
+            want.connections.iter_mut().find(|c| c.name == row).unwrap().name = name.into();
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            finish(&mut cx, &dialog, edits, press);
+            let label = format!("{row} {edits:?} {press}");
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{label}: dialog closed");
+            assert_eq!(workspace.read_with(&cx, |ws, _| ws.clone()), want, "{label}: workspace");
+            if row == "staging-pg" {
+                let status = workspace.read_with(&cx, |ws, _| ws.connections[1].status.clone());
+                assert!(matches!(status, ConnectionStatus::Error(_)), "{label}: still Error");
+            }
+        }
+    }
+
+    #[gpui_kit::test]
+    fn edit_keeps_tabs_open_and_disconnects_only_on_a_params_change(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{ConnectionId, ConnectionStatus};
+        // (row, edits, clicks, stays Connected, then name, color, production)
+        let cases: Vec<(&str, Vec<(&str, &str)>, Vec<&'static str>, bool, &str, u8, bool)> = vec![
+            ("prod-pg", vec![("name", "live")], vec![], true, "live", 0, true),
+            ("prod-pg", vec![], vec!["swatch-5"], true, "prod-pg", 5, true),
+            ("prod-pg", vec![], vec!["production"], true, "prod-pg", 0, false),
+            ("prod-pg", vec![("host", "  db.acme.internal ")], vec![], true, "prod-pg", 0, true),
+            ("prod-pg", vec![("port", " 5432 ")], vec![], true, "prod-pg", 0, true),
+            ("prod-pg", vec![("name", "live"), ("port", "5433")], vec![], false, "live", 0, true),
+            ("prod-pg", vec![], vec!["ssl Require"], false, "prod-pg", 0, true),
+            ("prod-pg", vec![("host", "db2.acme.internal")], vec![], false, "prod-pg", 0, true),
+            ("prod-pg", vec![("user", "admin")], vec![], false, "prod-pg", 0, true),
+            ("prod-pg", vec![("database", "other_db")], vec![], false, "prod-pg", 0, true),
+            ("prod-pg", vec![("name", "live")], vec!["swatch-5", "production"], true, "live", 5, false),
+            ("local.db", vec![("path", "~/acme/other.db")], vec![], false, "local.db", 4, false),
+            ("local.db", vec![("path", " ~/acme/local.db ")], vec![], true, "local.db", 4, false),
+            ("local.db", vec![], vec!["production"], true, "local.db", 4, true),
+        ];
+        for (row, edits, clicks, stays, name, color, production) in cases {
+            let label = format!("{row} {edits:?} {clicks:?}");
+            let (window, shell) = open_with_connection_tabs(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let ci = workspace.update(&mut cx, |ws, cx| {
+                let ci = ws.connections.iter().position(|c| c.name == row).unwrap();
+                ws.connections[ci].status = ConnectionStatus::Connected;
+                cx.notify();
+                ci
+            });
+            let id = workspace.read_with(&cx, |ws, _| ws.connections[ci].id);
+            let had_databases = workspace.read_with(&cx, |ws, _| ws.connections[ci].databases.len());
+            assert!(had_databases > 0, "{label}: fixture has databases");
+            let before = tab_origins(&shell, &cx);
+            let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+            // Scrolls the row into view; prod-pg is open down to a table.
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+            cx.run_until_parked();
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            fill(&mut cx, &dialog, &edits);
+            for selector in &clicks {
+                match selector.strip_prefix("ssl ") {
+                    Some("Require") => {
+                        let ssl = dialog.read_with(&cx, |d, _| d.ssl.clone());
+                        ssl.update_in(&mut cx, |s, window, cx| s.set_selected_index(Some(gpui_kit::component::IndexPath::new(2)), window, cx));
+                        cx.run_until_parked();
+                    }
+                    _ => click(&mut cx, selector),
+                }
+            }
+            click(&mut cx, "dialog-save");
+
+            let conn = workspace.read_with(&cx, |ws, _| ws.connections[ci].clone());
+            assert_eq!((conn.name.as_str(), conn.color, conn.is_production), (name, color, production), "{label}: saved in place");
+            let (status, databases) = if stays { (ConnectionStatus::Connected, had_databases) } else { (ConnectionStatus::Disconnected, 0) };
+            assert_eq!((conn.status, conn.databases.len()), (status, databases), "{label}: status and databases");
+            let after = tab_origins(&shell, &cx);
+            assert_eq!(after.len(), before.len(), "{label}: tab count unchanged");
+            for ((key, b), (_, a)) in before.iter().zip(&after) {
+                let want = if b.connection == id {
+                    super::tabs::Origin { path: super::tabs::join_path(name, &b.tail).into(), color, production, ..b.clone() }
+                } else {
+                    b.clone()
+                };
+                assert_eq!(a, &want, "{label}: tab {key}");
+            }
+            assert!(after.iter().any(|(_, o)| o.connection == ConnectionId(1)), "{label}: prod-pg tabs still open");
+            let row = explorer.read_with(&cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap();
+            assert_eq!(cx.debug_bounds(format!("prod-badge-{row}").leak()).is_some(), production, "{label}: PROD badge in the tree");
+            if !stays {
+                // Disconnected by the edit, it connects again from its row.
+                explorer.update_in(&mut cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+                cx.simulate_keystrokes("enter");
+                let status = workspace.read_with(&cx, |ws, _| ws.connections[ci].status.clone());
+                assert_eq!(status, ConnectionStatus::Connected, "{label}: Enter reconnects");
+            }
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_connect_in_flight_is_discarded_when_an_edit_changes_the_params(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{ConnectionParams, ConnectionStatus};
+        use std::{path::PathBuf, time::Duration};
+        use ConnectionStatus::{Connected, Connecting, Disconnected};
+        // (new name, paths saved in turn, connect again after the edits, status once the first
+        // connect finishes, status once the second one does)
+        let cases: [(&str, &[&str], bool, ConnectionStatus, ConnectionStatus); 7] = [
+            ("local.db", &["~/acme/other.db"], false, Disconnected, Disconnected),
+            ("renamed.db", &["~/acme/other.db"], false, Disconnected, Disconnected),
+            ("renamed.db", &["~/acme/local.db"], false, Connected, Connected),
+            ("local.db", &["~/acme/local.db"], false, Connected, Connected),
+            // Edited away and back: the params match again, but the edit still discarded it.
+            ("local.db", &["~/acme/other.db", "~/acme/local.db"], false, Disconnected, Disconnected),
+            // Only the latest connect lands, on the old params or the new.
+            ("local.db", &["~/acme/other.db"], true, Connecting, Connected),
+            ("local.db", &["~/acme/other.db", "~/acme/local.db"], true, Connecting, Connected),
+        ];
+        let latency = Duration::from_millis(1000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        for (name, paths, again, first, second) in cases {
+            let label = format!("{name} {paths:?} again {again}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("2", window, cx));
+            cx.run_until_parked();
+            // Enter on the disconnected local.db starts a connect that lands after `latency`.
+            cx.simulate_keystrokes("enter");
+            let (id, status) = workspace.read_with(&cx, |ws, _| (ws.connections[2].id, ws.connections[2].status.clone()));
+            assert_eq!(status, Connecting, "{label}: connecting");
+            for path in paths {
+                workspace.update(&mut cx, |ws, cx| {
+                    ws.edit(id, name.into(), 4, false, ConnectionParams::Sqlite { path: PathBuf::from(path) });
+                    cx.notify();
+                });
+            }
+            cx.executor().advance_clock(latency / 2);
+            if again {
+                // The edit left the row open; close it and open it to connect again.
+                cx.simulate_keystrokes("left enter");
+                assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections[2].status.clone()), Connecting, "{label}: connecting again");
+            }
+            cx.executor().advance_clock(latency / 2);
+            cx.run_until_parked();
+            let conn = workspace.read_with(&cx, |ws, _| ws.connections[2].clone());
+            assert_eq!((conn.name.as_str(), conn.status), (name, first), "{label}: after the first connect finished");
+            cx.executor().advance_clock(latency);
+            cx.run_until_parked();
+            assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections[2].status.clone()), second, "{label}: after the second connect finished");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels().iter().filter(|l| l.as_ref() == name).count()), 1, "{label}: one tree row");
+        }
+        crate::mock::set_latency(0);
+    }
+
+    #[gpui_kit::test]
+    fn after_an_edit_the_selection_stays_on_that_connection(cx: &mut gpui_kit::TestAppContext) {
+        // (filter typed first, row, edits, its label after)
+        let cases: [(&str, &str, &[(&str, &str)], &str); 5] = [
+            ("", "prod-pg", &[("name", "live")], "live"),
+            ("", "staging-pg", &[("name", "z")], "z"),
+            ("", "local.db", &[("path", "~/acme/other.db")], "local.db"),
+            ("", "prod-pg", &[("port", "5433")], "prod-pg"),
+            // The filter would hide the renamed row, so it is cleared.
+            ("local", "local.db", &[("name", "z.db")], "z.db"),
+        ];
+        for (filter, row, edits, label) in cases {
+            let (window, shell) = open_with_connection_tabs(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+            cx.run_until_parked();
+            if !filter.is_empty() {
+                cx.simulate_input(filter);
+            }
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            finish(&mut cx, &dialog, edits, "enter");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(label.into()), "{filter:?} {row} {edits:?}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{ConnectionId, ConnectionStatus};
+        let (window, shell) = open_with_connection_tabs(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let before = tab_origins(&shell, &cx);
+        let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("f2");
+        for _ in 0.."prod-pg".len() {
+            cx.simulate_keystrokes("backspace");
+        }
+        cx.simulate_keystrokes("l i v e enter");
+        cx.run_until_parked();
+
+        assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels()[0].clone()), "live", "tree row");
+        let panel = shell.read_with(&cx, |this, cx| this.bottom_panel.read(cx).connection(ConnectionId(1), cx).0);
+        assert_eq!(panel, "live", "bottom panel connection label");
+        let conn = shell.read_with(&cx, |this, cx| this.workspace.read(cx).connections[0].clone());
+        assert_eq!((conn.name.as_str(), conn.status), ("live", ConnectionStatus::Connected), "shared workspace: renamed, still connected");
+        let after = tab_origins(&shell, &cx);
+        assert_eq!(after.len(), before.len());
+        for ((key, b), (_, a)) in before.iter().zip(&after) {
+            let path = match b.path.strip_prefix("prod-pg") {
+                Some(tail) if b.connection == ConnectionId(1) => format!("live{tail}"),
+                _ => b.path.to_string(),
+            };
+            assert_eq!(a, &super::tabs::Origin { path: path.into(), ..b.clone() }, "tab {key}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn recolor_and_production_from_outside_the_explorer_rerender_the_tree_the_panel_and_tabs(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionId;
+        use std::{cell::Cell, rc::Rc};
+        let (window, shell) = open_with_connection_tabs(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer, panel) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone(), this.bottom_panel.clone()));
+        let renders = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+        cx.update(|_, cx| {
+            let hits = renders[0].clone();
+            cx.observe(&explorer, move |_, _| hits.set(hits.get() + 1)).detach();
+            let hits = renders[1].clone();
+            cx.observe(&panel, move |_, _| hits.set(hits.get() + 1)).detach();
+        });
+        let before = tab_origins(&shell, &cx);
+        // (change, new color, new production flag)
+        let cases: [(&str, u8, bool); 3] = [("recolor", 5, true), ("production off", 5, false), ("production on", 5, true)];
+        for (change, color, production) in cases {
+            renders.iter().for_each(|r| r.set(0));
+            workspace.update(&mut cx, |ws, cx| {
+                let conn = &mut ws.connections[0];
+                (conn.color, conn.is_production) = (color, production);
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert!(renders[0].get() > 0, "{change}: explorer re-rendered");
+            assert!(renders[1].get() > 0, "{change}: bottom panel re-rendered");
+            assert_eq!(panel.read_with(&cx, |p, cx| p.connection(ConnectionId(1), cx)), ("prod-pg".to_string(), color, production), "{change}: panel row");
+            for ((key, b), (_, a)) in before.iter().zip(&tab_origins(&shell, &cx)) {
+                let expected = if b.connection == ConnectionId(1) { super::tabs::Origin { color, production, ..b.clone() } } else { b.clone() };
+                assert_eq!(a, &expected, "{change}: tab {key} stripe and tint");
+            }
+        }
+    }
+
+    #[gpui_kit::test]
+    fn test_connection_is_enabled_only_while_the_connection_fields_are_valid(cx: &mut gpui_kit::TestAppContext) {
+        // (edits, Test connection enabled)
+        let cases: Vec<(Vec<(&str, &str)>, bool)> = vec![
+            (vec![], false),
+            (vec![("host", "h")], false),
+            (vec![("host", "h"), ("user", "u")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "prod-pg")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "  ")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "new")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "new"), ("port", "0")], false),
+            (vec![("host", "h"), ("user", "u"), ("port", " 65535 ")], true),
+            (vec![("host", "h"), ("user", "u"), ("database", " ")], false),
+            (vec![("kind-sqlite", "")], false),
+            (vec![("kind-sqlite", ""), ("path", "/nope/x.db")], true),
+            (vec![("kind-sqlite", ""), ("path", "/nope/x.db"), ("name", "prod-pg")], true),
+        ];
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        for (edits, enabled) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &edits);
+            assert!(cx.debug_bounds("dialog-test").is_some(), "{edits:?}: Test connection drawn");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", enabled), "{edits:?}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn test_connection_reads_testing_while_it_runs_then_shows_the_outcome_line(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::component::ActiveTheme as _;
+        use std::time::Duration;
+        let file = std::env::current_exe().unwrap().display().to_string();
+        let dir = std::env::temp_dir().display().to_string();
+        let pg = |host: &'static str| vec![("host", host), ("user", "u")];
+        let sqlite = |path: String| vec![("kind-sqlite", ""), ("path", path.leak() as &str)];
+        // (edits, result line, success)
+        let cases: Vec<(Vec<(&str, &str)>, String, bool)> = vec![
+            (pg("db.local"), "Connection OK".into(), true),
+            (pg("db.invalid"), "Could not connect: Could not resolve host db.invalid".into(), false),
+            (pg("DB.INVALID"), "Could not connect: Could not resolve host DB.INVALID".into(), false),
+            (pg(" db.invalid "), "Could not connect: Could not resolve host db.invalid".into(), false),
+            (pg("invalid.db"), "Connection OK".into(), true),
+            (sqlite(file.clone()), "Connection OK".into(), true),
+            (sqlite(format!(" {file} ")), "Connection OK".into(), true),
+            (sqlite("/nope/x.db".into()), "Could not connect: No file at /nope/x.db".into(), false),
+            (sqlite(dir.clone()), format!("Could not connect: No file at {dir}"), false),
+        ];
+        let latency = Duration::from_millis(1000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (success, danger) = cx.update(|_, cx| (cx.theme().success, cx.theme().danger));
+        for (edits, line, ok) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &edits);
+            click(&mut cx, "dialog-test");
+            for _ in 0..2 {
+                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Testing…", false), "{edits:?}: running");
+                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), None, "{edits:?}: no line yet");
+                cx.executor().advance_clock(latency / 2 - Duration::from_millis(1));
+                cx.run_until_parked();
+            }
+            cx.executor().advance_clock(Duration::from_millis(2));
+            cx.run_until_parked();
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", true), "{edits:?}: finished");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), Some((line, if ok { success } else { danger })), "{edits:?}");
+            assert!(cx.debug_bounds("test-result").is_some(), "{edits:?}: line drawn");
+        }
+        crate::mock::set_latency(0);
+    }
+
+    #[gpui_kit::test]
+    fn changing_a_connection_field_clears_the_test_line_and_name_color_or_production_keep_it(cx: &mut gpui_kit::TestAppContext) {
+        let file = std::env::current_exe().unwrap().display().to_string().leak() as &str;
+        let pg: &[(&str, &str)] = &[("name", "x"), ("host", "h"), ("user", "u")];
+        let sqlite: &[(&str, &str)] = &[("name", "x"), ("kind-sqlite", ""), ("path", file)];
+        // (form tested, then the change, line kept). "click <selector>" clicks; "ssl" picks the next SSL mode.
+        let cases: Vec<(&[(&str, &str)], (&str, &str), bool)> = vec![
+            (pg, ("host", "h2"), false),
+            (pg, ("port", "5433"), false),
+            (pg, ("user", "u2"), false),
+            (pg, ("database", "d2"), false),
+            (pg, ("ssl", ""), false),
+            (pg, ("click", "kind-sqlite"), false),
+            (sqlite, ("path", "/nope/x.db"), false),
+            (sqlite, ("click", "kind-postgres"), false),
+            (pg, ("name", "y"), true),
+            (pg, ("name", "prod-pg"), true),
+            (pg, ("click", "swatch-6"), true),
+            (pg, ("click", "production"), true),
+            (pg, ("click", "kind-postgres"), true),
+            (sqlite, ("click", "kind-sqlite"), true),
+        ];
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        for (form, change, kept) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, form);
+            click(&mut cx, "dialog-test");
+            let line = dialog.read_with(&cx, |d, cx| d.test_line(cx));
+            assert!(line.is_some(), "{change:?}: line shown before the change");
+            match change {
+                ("click", selector) => click(&mut cx, selector),
+                ("ssl", _) => {
+                    // The select sits under the field's label.
+                    let field = cx.debug_bounds("field-ssl").expect("SSL field drawn");
+                    cx.simulate_click(gpui_kit::point(field.center().x, field.bottom() - gpui_kit::px(8.)), Default::default());
+                    cx.run_until_parked();
+                    cx.simulate_keystrokes("down enter");
+                    cx.run_until_parked();
+                    assert_ne!(dialog.read_with(&cx, |d, cx| d.form(cx).ssl), crate::model::SslMode::Prefer, "SSL changed");
+                }
+                edit => fill(&mut cx, &dialog, &[edit]),
+            }
+            let want = if kept { line } else { None };
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), want, "{change:?}");
+            assert_eq!(cx.debug_bounds("test-result").is_some(), kept, "{change:?}: line drawn");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_running_test_never_shows_its_result_after_a_field_change_save_or_close(cx: &mut gpui_kit::TestAppContext) {
+        use std::time::Duration;
+        let form = [("name", "c"), ("host", "h"), ("user", "u")];
+        // (what happens mid-test, then test again, line shown at the end, dialog open, connections added)
+        let cases: [(&str, bool, Option<&str>, bool, usize); 10] = [
+            ("host", false, None, true, 0),
+            ("port", false, None, true, 0),
+            ("click kind-sqlite", false, None, true, 0),
+            ("host", true, Some("Could not connect: Could not resolve host db.invalid"), true, 0),
+            ("name", false, Some("Connection OK"), true, 0),
+            ("click production", false, Some("Connection OK"), true, 0),
+            ("click dialog-save", false, None, false, 1),
+            ("enter", false, None, false, 1),
+            ("escape", false, None, false, 0),
+            ("click dialog-cancel", false, None, false, 0),
+        ];
+        let latency = Duration::from_millis(1000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        for (step, again, line, open, added) in cases {
+            let label = format!("{step} again {again}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let before = workspace.read_with(&cx, |ws, _| ws.connections.len());
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &form);
+            click(&mut cx, "dialog-test");
+            cx.executor().advance_clock(latency / 2);
+            match step {
+                "host" => fill(&mut cx, &dialog, &[("host", "db.invalid")]),
+                "port" => fill(&mut cx, &dialog, &[("port", "5433")]),
+                "name" => fill(&mut cx, &dialog, &[("name", "d")]),
+                _ => finish(&mut cx, &dialog, &[], step),
+            }
+            if open && line.is_none() {
+                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx).0), "Test connection", "{label}: no longer testing");
+            }
+            if again {
+                click(&mut cx, "dialog-test");
+            }
+            // A closed dialog's body is dropped with it, unless something else holds it.
+            let held = if open || added > 0 { Some(dialog.clone()) } else { None };
+            let weak = dialog.downgrade();
+            drop(dialog);
+            cx.executor().advance_clock(latency);
+            cx.run_until_parked();
+            let shown = weak.upgrade().and_then(|d| d.read_with(&cx, |d, cx| d.test_line(cx).map(|(text, _)| text)));
+            assert_eq!(shown.as_deref(), line, "{label}: line");
+            assert_eq!(cx.debug_bounds("test-result").is_some(), line.is_some(), "{label}: line drawn");
+            assert_eq!(cx.debug_bounds("dialog-layer").is_some(), open, "{label}: dialog open");
+            assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections.len()), before + added, "{label}: connections added");
+            drop(held);
+        }
+        crate::mock::set_latency(0);
+    }
+
+    #[gpui_kit::test]
+    fn save_works_with_no_test_run_in_the_add_and_edit_dialogs(cx: &mut gpui_kit::TestAppContext) {
+        // (edit this row, or None to add; edits; press; the name saved)
+        let cases: [(Option<&str>, &[(&str, &str)], &str, &str); 4] = [
+            (None, &[("name", "c"), ("host", "db.invalid"), ("user", "u")], "click dialog-save", "c"),
+            (None, &[("name", "c"), ("kind-sqlite", ""), ("path", "/nope/x.db")], "enter", "c"),
+            (Some("prod-pg"), &[("name", "live")], "click dialog-save", "live"),
+            (Some("local.db"), &[("path", "/nope/x.db")], "enter", "local.db"),
+        ];
+        for (row, edits, press, name) in cases {
+            let label = format!("{row:?} {edits:?} {press}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let dialog = match row {
+                Some(row) => open_edit_dialog(&mut cx, &shell, row),
+                None => open_add_dialog(&mut cx),
+            };
+            assert!(cx.debug_bounds("dialog-test").is_some(), "{label}: Test connection offered");
+            finish(&mut cx, &dialog, edits, press);
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{label}: dialog closed");
+            assert!(workspace.read_with(&cx, |ws, _| ws.connections.iter().any(|c| c.name == name)), "{label}: saved");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), None, "{label}: no test line");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn delete_in_the_row_menu_opens_the_confirmation_with_the_spec_title_and_buttons(cx: &mut gpui_kit::TestAppContext) {
+        for row in ["prod-pg", "staging-pg", "local.db"] {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            right_click_row(&mut cx, &shell, row);
+            assert!(cx.debug_bounds("menu-delete").is_some(), "{row}: Delete in the row menu");
+            click(&mut cx, "menu-delete");
+            assert!(cx.debug_bounds("dialog-layer").is_some(), "{row}: confirmation shown");
+            let title: &'static str = format!("delete-title Delete connection {row}?").leak();
+            assert!(cx.debug_bounds(title).is_some(), "{row}: titled {title:?}");
+            for button in ["delete-cancel", "delete-confirm"] {
+                assert!(cx.debug_bounds(button).is_some(), "{row}: {button} drawn");
+            }
+        }
+    }
+
+    /// A console tab on `conn`, pinned or not.
+    fn console_on(conn: &crate::model::Connection, key: &str, pinned: bool) -> super::tabs::EditorTab<super::TabContent> {
+        super::tabs::EditorTab { key: key.to_string().into(), title: key.to_string().into(), origin: Some(super::tabs::Origin::of(conn)), tooltip: None, preview: false, pinned, content: super::TabContent::Console }
+    }
+
+    /// Right-clicks the row labeled `name` and picks Delete from its menu.
+    fn open_delete(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) {
+        right_click_row(cx, shell, name);
+        click(cx, "menu-delete");
+    }
+
+    /// Deletes the row labeled `name` through its menu, typing the name for Production.
+    fn delete_row(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) {
+        open_delete(cx, shell, name);
+        if cx.debug_bounds("delete-name").is_some() {
+            cx.simulate_input(name);
+        }
+        click(cx, "delete-confirm");
+    }
+
+    #[gpui_kit::test]
+    fn deleting_the_connection_the_logs_are_filtered_to_clears_that_filter(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let panel = shell.read_with(&cx, |this, _| this.bottom_panel.clone());
+        let staging = shell.read_with(&cx, |this, cx| this.workspace.read(cx).connections.iter().find(|c| c.name == "staging-pg").unwrap().id);
+        let mut remaining = panel.read_with(&cx, |p, _| p.shown_connections());
+        assert!(remaining.remove(&staging) && !remaining.is_empty(), "the log has rows for staging-pg and others");
+        panel.update(&mut cx, |p, cx| {
+            p.show_logs();
+            p.set_connection_filter(&[staging], cx);
+        });
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection_filter_label(cx)), "staging-pg");
+        delete_row(&mut cx, &shell, "staging-pg");
+        cx.run_until_parked();
+        assert_eq!(panel.read_with(&cx, |p, _| p.shown_connections()), remaining, "the log shows the remaining connections' rows");
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection_filter_label(cx)), "All connections", "the filter no longer counts staging-pg");
+    }
+
+    #[gpui_kit::test]
+    fn deleting_a_connection_with_no_log_rows_the_logs_are_filtered_to_clears_that_filter(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, panel) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.bottom_panel.clone()));
+        let all = panel.read_with(&cx, |p, _| p.logged_connections());
+        let fresh = workspace.update(&mut cx, |w, cx| {
+            cx.notify();
+            w.add("new.db".into(), 0, false, crate::model::ConnectionParams::Sqlite { path: "new.db".into() })
+        });
+        cx.run_until_parked();
+        panel.update(&mut cx, |p, cx| {
+            p.show_logs();
+            p.set_connection_filter(&[fresh], cx);
+        });
+        assert!(panel.read_with(&cx, |p, _| p.shown_connections()).is_empty(), "new.db has no log rows");
+        delete_row(&mut cx, &shell, "new.db");
+        cx.run_until_parked();
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection_filter_label(cx)), "All connections", "the filter no longer counts new.db");
+        assert_eq!(panel.read_with(&cx, |p, _| p.shown_connections()), all, "every remaining row is shown");
+    }
+
+    #[gpui_kit::test]
+    fn confirming_the_delete_of_b_removes_it_from_the_tree_and_the_panel_and_closes_only_its_tabs(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionId;
+        let (window, shell) = open_with_connection_tabs(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer, panel) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone(), this.bottom_panel.clone()));
+        // Two tabs from staging-pg, one pinned, and one of them closed into the reopen history.
+        shell.update(&mut cx, |this, cx| {
+            let staging = this.workspace.read(cx).connections[1].clone();
+            for (key, pinned) in [("staging-1", false), ("staging-2", true), ("staging-3", false)] {
+                this.tabs.open(console_on(&staging, key, pinned));
+            }
+            let closed = this.tabs.tabs.iter().position(|t| t.key == "staging-3").unwrap();
+            this.tabs.close(closed);
+            this.tab_changed(cx);
+        });
+        cx.run_until_parked();
+        let staging = ConnectionId(2);
+        let from = |id: ConnectionId, cx: &gpui_kit::VisualTestContext| shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter(|t| t.origin.as_ref().is_some_and(|o| o.connection == id)).map(|t| t.key.clone()).collect::<Vec<_>>());
+        assert_eq!(from(staging, &cx).len(), 2, "two tabs from staging-pg open");
+        assert!(panel.read_with(&cx, |p, _| p.logged_connections().contains(&staging)), "the log has staging-pg rows");
+        let others: Vec<_> = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().map(|t| t.key.clone()).filter(|k| !k.starts_with("staging")).collect());
+        let prod_tabs = from(ConnectionId(1), &cx);
+
+        open_delete(&mut cx, &shell, "staging-pg");
+        click(&mut cx, "delete-confirm");
+
+        assert!(cx.debug_bounds("dialog-layer").is_none(), "confirmation closed");
+        let names: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
+        assert_eq!(names, ["prod-pg", "local.db"], "workspace [a, c]");
+        assert!(!explorer.read_with(&cx, |e, _| e.row_labels()).iter().any(|l| l == "staging-pg"), "no tree row");
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection(staging, cx)), Default::default(), "the panel no longer knows it");
+        assert!(!panel.read_with(&cx, |p, _| p.logged_connections().contains(&staging)), "its log rows are gone");
+        assert!(from(staging, &cx).is_empty(), "both its tabs closed, the pinned one too");
+        let keys: Vec<_> = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().map(|t| t.key.clone()).collect());
+        assert_eq!(keys, others, "every other tab stays open, in order");
+        assert_eq!(from(ConnectionId(1), &cx), prod_tabs, "prod-pg's tabs stay");
+        shell.update(&mut cx, |this, _| this.tabs.reopen());
+        assert!(from(staging, &cx).is_empty(), "reopen never brings back a deleted connection's tab");
+    }
+
+    #[gpui_kit::test]
+    fn delete_connection_is_enabled_at_once_for_non_production_and_only_on_the_exact_name_for_production(cx: &mut gpui_kit::TestAppContext) {
+        // (row, typed into the name field, then press, enabled)
+        let cases: [(&str, &str, &str, bool); 13] = [
+            ("local.db", "", "click delete-confirm", true),
+            ("staging-pg", "", "click delete-confirm", true),
+            ("local.db", "", "enter", true),
+            ("prod-pg", "", "click delete-confirm", false),
+            ("prod-pg", "prod-p", "click delete-confirm", false),
+            ("prod-pg", "Prod-pg", "click delete-confirm", false),
+            ("prod-pg", " prod-pg", "click delete-confirm", false),
+            ("prod-pg", "prod-pg ", "click delete-confirm", false),
+            ("prod-pg", "prod-pg", "click delete-confirm", true),
+            ("prod-pg", "", "enter", false),
+            ("prod-pg", "prod-p", "enter", false),
+            ("prod-pg", "Prod-pg", "enter", false),
+            ("prod-pg", "prod-pg", "enter", true),
+        ];
+        for (row, typed, press, enabled) in cases {
+            let label = format!("{row} {typed:?} {press}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            open_delete(&mut cx, &shell, row);
+            assert_eq!(cx.debug_bounds("delete-name").is_some(), row == "prod-pg", "{label}: name field only for Production");
+            if !typed.is_empty() {
+                cx.simulate_input(typed);
+            }
+            match press.strip_prefix("click ") {
+                Some(selector) => click(&mut cx, selector),
+                None => cx.simulate_keystrokes(press),
+            }
+            cx.run_until_parked();
+            let kept = workspace.read_with(&cx, |ws, _| ws.connections.iter().any(|c| c.name == row));
+            assert_eq!(!kept, enabled, "{label}: deleted");
+            assert_eq!(cx.debug_bounds("dialog-layer").is_none(), enabled, "{label}: confirmation closed");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn cancel_or_esc_in_the_delete_confirmation_leaves_the_workspace_and_tabs_unchanged(cx: &mut gpui_kit::TestAppContext) {
+        // (row, typed first, press)
+        let cases: [(&str, &str, &str); 5] = [
+            ("local.db", "", "escape"),
+            ("local.db", "", "click delete-cancel"),
+            ("prod-pg", "", "escape"),
+            ("prod-pg", "prod-pg", "escape"),
+            ("prod-pg", "prod-pg", "click delete-cancel"),
+        ];
+        for (row, typed, press) in cases {
+            let label = format!("{row} {typed:?} {press}");
+            let (window, shell) = open_with_connection_tabs(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let before = (workspace.read_with(&cx, |ws, _| ws.clone()), tab_origins(&shell, &cx));
+            open_delete(&mut cx, &shell, row);
+            if !typed.is_empty() {
+                cx.simulate_input(typed);
+            }
+            match press.strip_prefix("click ") {
+                Some(selector) => click(&mut cx, selector),
+                None => cx.simulate_keystrokes(press),
+            }
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{label}: confirmation closed");
+            assert_eq!((workspace.read_with(&cx, |ws, _| ws.clone()), tab_origins(&shell, &cx)), before, "{label}: workspace and tabs");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn after_a_delete_the_selection_moves_to_the_row_that_took_its_place_or_the_previous_one(cx: &mut gpui_kit::TestAppContext) {
+        // (rows expanded first, row deleted, row selected after). staging-pg always shows its error row.
+        let cases: [(&[&str], &str, &str); 5] = [
+            (&[], "staging-pg", "local.db"),
+            (&[], "local.db", "staging-pg"),
+            (&[], "prod-pg", "staging-pg"),
+            // Its open subtree goes with it, so the next connection takes its place.
+            (&["0/0/0/table"], "prod-pg", "staging-pg"),
+            // The previous connection's row, not the last row above (prod-pg's open tables).
+            (&["0/0/0/table"], "staging-pg", "local.db"),
+        ];
+        for (open, row, want) in cases {
+            let label = format!("{open:?} delete {row}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+            for key in open {
+                explorer.update_in(&mut cx, |e, window, cx| e.reveal(key, window, cx));
+            }
+            cx.run_until_parked();
+            delete_row(&mut cx, &shell, row);
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(want.into()), "{label}");
+        }
+        // Deleting the last of several: the previous row.
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+        for (row, want) in [("local.db", "staging-pg"), ("staging-pg", "prod-pg")] {
+            delete_row(&mut cx, &shell, row);
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(want.into()), "delete {row} in turn");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn after_a_delete_the_connections_below_keep_their_open_rows_and_their_tabs_point_at_them(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+        // Connect local.db, open its first table in a tab, and open prod-pg's tables above it.
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("2", window, cx));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("2/0/0/table/0", window, cx));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("0/0/0/table", window, cx));
+        cx.run_until_parked();
+        let labels = |cx: &gpui_kit::VisualTestContext| explorer.read_with(cx, |e, _| e.row_labels());
+        let under_local = |rows: Vec<gpui_kit::SharedString>| rows.into_iter().skip_while(|l| l != "local.db").collect::<Vec<_>>();
+        let local_before = under_local(labels(&cx));
+        assert!(local_before.len() > 3, "local.db is open down to its tables: {local_before:?}");
+        let tab_keys = |cx: &gpui_kit::VisualTestContext| shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter(|t| t.tooltip.is_some()).map(|t| t.key.clone()).collect::<Vec<_>>());
+        assert_eq!(tab_keys(&cx), ["2/0/0/table/0"], "local.db's table tab");
+        let table = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().find(|t| t.key == "2/0/0/table/0").unwrap().title.clone());
+
+        delete_row(&mut cx, &shell, "prod-pg");
+
+        assert_eq!(under_local(labels(&cx)), local_before, "local.db stays open as it was");
+        assert_eq!(tab_keys(&cx), ["1/0/0/table/0"], "its tab follows it to its new position");
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("1/0/0/table/0", window, cx));
+        assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(table.clone()), "reveal in explorer finds the tab's table");
+        let open = shell.read_with(&cx, |this, _| this.tabs.tabs.len());
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(shell.read_with(&cx, |this, _| this.tabs.tabs.len()), open, "opening the table again activates its tab, no duplicate");
+    }
+
+    #[gpui_kit::test]
+    fn a_connect_in_flight_finds_its_connection_deleted_and_is_discarded(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus::{self, *};
+        use std::time::Duration;
+        // (row connecting, key to press Enter on, then add a connection and connect it, the new one's status once the old connect finished)
+        let cases: [(&str, &str, Option<bool>, Option<ConnectionStatus>); 4] = [
+            ("local.db", "2", None, None),
+            ("staging-pg", "1/error", None, None),
+            // local.db has the highest id, so the new connection may get it again.
+            ("local.db", "2", Some(false), Some(Disconnected)),
+            ("local.db", "2", Some(true), Some(Connecting)),
+        ];
+        let latency = Duration::from_millis(1000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        for (row, key, add, want) in cases {
+            let label = format!("{row} add {add:?}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(key, window, cx));
+            cx.simulate_keystrokes("enter");
+            let status = workspace.read_with(&cx, |ws, _| ws.connections.iter().find(|c| c.name == row).unwrap().status.clone());
+            assert_eq!(status, Connecting, "{label}: connecting");
+            delete_row(&mut cx, &shell, row);
+            // Half way through the old connect, so a new one lands later than it.
+            cx.executor().advance_clock(latency / 2);
+            if let Some(connect) = add {
+                let dialog = open_add_dialog(&mut cx);
+                finish(&mut cx, &dialog, &[("kind-sqlite", ""), ("name", "new.db"), ("path", "/tmp/new.db")], "enter");
+                if connect {
+                    let at = explorer.read_with(&cx, |e, _| e.row_labels().iter().position(|l| l == "new.db").unwrap());
+                    explorer.update_in(&mut cx, |e, window, cx| e.reveal(&(at - 1).to_string(), window, cx));
+                    cx.simulate_keystrokes("enter");
+                }
+            }
+            let rows = explorer.read_with(&cx, |e, _| e.row_labels());
+            let others = workspace.read_with(&cx, |ws, _| ws.clone());
+            cx.executor().advance_clock(latency / 2);
+            cx.run_until_parked();
+            assert!(!workspace.read_with(&cx, |ws, _| ws.connections.iter().any(|c| c.name == row)), "{label}: stays deleted");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels()), rows, "{label}: no row comes back, no error row");
+            if let Some(want) = want {
+                let status = workspace.read_with(&cx, |ws, _| ws.connections.iter().find(|c| c.name == "new.db").unwrap().status.clone());
+                assert_eq!(status, want, "{label}: the new connection");
+            } else {
+                assert_eq!(workspace.read_with(&cx, |ws, _| ws.clone()), others, "{label}: the others unchanged");
+            }
+        }
+        crate::mock::set_latency(0);
+    }
+
+    /// Selects the row keyed `key` and presses Right on it: expands it, or connects a connection.
+    fn expand_row(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, key: &str) {
+        let explorer = shell.read_with(cx, |this, _| this.explorer.clone());
+        explorer.update_in(cx, |e, window, cx| e.reveal(key, window, cx));
+        cx.simulate_keystrokes("right");
+    }
+
+    fn shows_loading_objects(shell: &gpui_kit::Entity<super::Shell>, cx: &gpui_kit::VisualTestContext) -> bool {
+        shell.read_with(cx, |this, cx| this.explorer.read(cx).row_labels().iter().any(|l| l == "Loading objects…"))
+    }
+
+    #[gpui_kit::test]
+    fn a_schema_load_still_running_when_a_connection_above_is_deleted_lands_on_its_connection_at_the_new_position(cx: &mut gpui_kit::TestAppContext) {
+        use std::time::Duration;
+        let latency = Duration::from_millis(2000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        expand_row(&mut cx, &shell, "2");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        expand_row(&mut cx, &shell, "2/0/0");
+        assert!(shows_loading_objects(&shell, &cx), "local.db's schema is loading");
+        delete_row(&mut cx, &shell, "staging-pg");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        assert!(!shows_loading_objects(&shell, &cx), "the load lands on local.db, now at position 1");
+        crate::mock::set_latency(0);
+    }
+
+    #[gpui_kit::test]
+    fn a_schema_load_still_running_when_its_connection_is_deleted_marks_nothing_loaded(cx: &mut gpui_kit::TestAppContext) {
+        use std::time::Duration;
+        let latency = Duration::from_millis(2000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        expand_row(&mut cx, &shell, "1");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        expand_row(&mut cx, &shell, "1/0/0");
+        assert!(shows_loading_objects(&shell, &cx), "staging-pg's schema is loading");
+        delete_row(&mut cx, &shell, "staging-pg");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        // local.db now sits at position 1, where the deleted load's key points.
+        expand_row(&mut cx, &shell, "1");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        expand_row(&mut cx, &shell, "1/0/0");
+        assert!(shows_loading_objects(&shell, &cx), "local.db's schema still loads its objects");
+        crate::mock::set_latency(0);
+    }
+
+    #[gpui_kit::test]
+    fn deleting_a_connection_during_an_f2_rename_leaves_no_rename_to_land_on_another_connection(cx: &mut gpui_kit::TestAppContext) {
+        // (row being renamed, row deleted, how). DeleteConnection acts on the selected row, the one being renamed.
+        let cases: [(&str, &str, &str); 4] = [
+            ("local.db", "local.db", "action"),
+            ("staging-pg", "staging-pg", "action"),
+            ("local.db", "prod-pg", "menu"),
+            ("local.db", "staging-pg", "menu"),
+        ];
+        for (renamed, deleted, how) in cases {
+            let label = format!("rename {renamed}, delete {deleted} by {how}");
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+            let mut want: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
+            let at = want.iter().position(|n| n == renamed).unwrap();
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&at.to_string(), window, cx));
+            cx.simulate_keystrokes("f2 x");
+            if how == "action" {
+                cx.dispatch_action(super::DeleteConnection);
+                cx.run_until_parked();
+                click(&mut cx, "delete-confirm");
+            } else {
+                delete_row(&mut cx, &shell, deleted);
+            }
+            want.retain(|n| n != deleted);
+            // Back in the tree, Enter would commit a rename still open.
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+            cx.simulate_keystrokes("enter");
+            cx.run_until_parked();
+            let names: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
+            assert_eq!(names, want, "{label}: no connection renamed");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn deleting_a_connection_leaves_no_ctrl_clicked_row_marked_on_the_connection_that_moves_into_its_key(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+        workspace.update(&mut cx, |w, cx| {
+            cx.notify();
+            w.add("new.db".into(), 0, false, crate::model::ConnectionParams::Sqlite { path: "new.db".into() })
+        });
+        cx.run_until_parked();
+        let at = |cx: &mut gpui_kit::VisualTestContext, name: &str| {
+            let row = explorer.read_with(cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap();
+            cx.debug_bounds(format!("tree-label-{row}").leak()).unwrap_or_else(|| panic!("{name} row drawn")).center()
+        };
+        // Select staging-pg, Ctrl+click local.db below it, delete staging-pg: new.db takes local.db's old key.
+        let staging = at(&mut cx, "staging-pg");
+        cx.simulate_click(staging, Default::default());
+        let local = at(&mut cx, "local.db");
+        cx.simulate_click(local, gpui_kit::Modifiers::secondary_key());
+        cx.run_until_parked();
+        cx.dispatch_action(super::DeleteConnection);
+        cx.run_until_parked();
+        click(&mut cx, "delete-confirm");
+        assert!(!explorer.read_with(&cx, |e, _| e.row_labels()).iter().any(|l| l == "staging-pg"), "staging-pg deleted");
+        explorer.update_in(&mut cx, |e, window, cx| window.focus(&gpui_kit::Focusable::focus_handle(e, cx), cx));
+        cx.simulate_keystrokes("ctrl-c");
+        let copied = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
+        assert_eq!(copied, "local.db", "only the selected row is copied, not new.db");
+    }
+
+    #[gpui_kit::test]
+    fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
+        // (filter typed once the workspace is empty)
+        for filter in ["", "zzz"] {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+            for row in ["local.db", "staging-pg"] {
+                delete_row(&mut cx, &shell, row);
+            }
+            assert!(cx.debug_bounds("explorer-empty").is_none(), "{filter:?}: no empty state while one is left");
+            delete_row(&mut cx, &shell, "prod-pg");
+            assert!(workspace.read_with(&cx, |ws, _| ws.connections.is_empty()), "{filter:?}: workspace []");
+            if !filter.is_empty() {
+                explorer.update_in(&mut cx, |e, window, cx| e.focus_field(window, cx));
+                cx.simulate_input(filter);
+            }
+            assert!(cx.debug_bounds("explorer-empty").is_some(), "{filter:?}: No connections yet");
+            let dialog = {
+                use std::{cell::RefCell, rc::Rc};
+                let opened = Rc::new(RefCell::new(None));
+                let sink = opened.clone();
+                let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
+                click(&mut cx, "empty-add-connection");
+                opened.take().unwrap_or_else(|| panic!("{filter:?}: Add connection opened a dialog"))
+            };
+            finish(&mut cx, &dialog, &[("host", "db.local"), ("user", "u"), ("name", "first")], "enter");
+            assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect::<Vec<_>>()), ["first"], "{filter:?}: the Add dialog added it");
+            assert!(cx.debug_bounds("explorer-empty").is_none(), "{filter:?}: the empty state gives way to the row");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some("first".into()), "{filter:?}: new row selected");
         }
     }
 }

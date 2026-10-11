@@ -1,12 +1,13 @@
 //! Explorer tree: the visible nodes flattened into a `Vec<FlatNode>` and rendered with
 //! `uniform_list`. The flat list is rebuilt only on expand or collapse.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _,
+    menu::ContextMenuExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -16,7 +17,8 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
+use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
+use crate::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
 
@@ -46,7 +48,7 @@ enum Part {
 
 /// The trimmed name to commit, or the message to show inline. `others` are the other connections'
 /// names; uniqueness is case-sensitive.
-fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
+pub(crate) fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
     let name = input.trim();
     if name.is_empty() {
         Err("Name can't be empty".into())
@@ -54,6 +56,17 @@ fn validate_rename(input: &str, others: &[&str]) -> Result<String, String> {
         Err(format!("Another connection is already named {name}"))
     } else {
         Ok(name.into())
+    }
+}
+
+/// `key` once the connection at position `removed` is deleted: `None` for its own rows, one position
+/// up for the rows of the connections below it. Keys that are not tree keys stay as they are.
+pub(crate) fn shift_key(key: &str, removed: usize) -> Option<String> {
+    let head = key.split('/').next().unwrap_or(key);
+    match head.parse::<usize>() {
+        Ok(ci) if ci == removed => None,
+        Ok(ci) if ci > removed => Some(format!("{}{}", ci - 1, &key[head.len()..])),
+        _ => Some(key.to_string()),
     }
 }
 
@@ -346,7 +359,9 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
             pk: false,
         };
         let key = format!("{ci}");
-        let open = push(FlatNode { expandable: !conn.databases.is_empty(), ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
+        // Expanding a connection that isn't connected connects it, even with no databases yet.
+        let expandable = !conn.databases.is_empty() || conn.status != ConnectionStatus::Connected;
+        let open = push(FlatNode { expandable, ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
         match &conn.status {
             ConnectionStatus::Connected => {}
             ConnectionStatus::Error(msg) => {
@@ -466,12 +481,23 @@ pub struct OpenObject {
 
 impl EventEmitter<OpenObject> for Explorer {}
 
+/// Emitted after connection `id` was deleted from position `ix`, so the Shell can close its tabs
+/// and move the tree keys of the tabs below it.
+pub struct ConnectionDeleted {
+    pub id: ConnectionId,
+    pub ix: usize,
+}
+
+impl EventEmitter<ConnectionDeleted> for Explorer {}
+
 pub struct Explorer {
-    workspace: Workspace,
+    workspace: Entity<Workspace>,
     expanded: HashSet<String>,
     /// Schema keys whose objects have "arrived", and those still waiting on mock latency.
     loaded: HashSet<String>,
     loading: HashSet<String>,
+    /// The latest connect started on each connection; only that one may land.
+    connects: HashMap<ConnectionId, usize>,
     /// Mirror of the field's text; non-empty shows only matches and their ancestors.
     filter: String,
     field: Entity<InputState>,
@@ -488,11 +514,13 @@ pub struct Explorer {
 }
 
 impl Explorer {
-    pub fn new(workspace: Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // ponytail: starts collapsed; QX-020 restores the last session's expanded nodes
         let expanded = HashSet::new();
-        let nodes = flatten(&workspace, &expanded, &HashSet::new(), false);
+        let nodes = flatten(workspace.read(cx), &expanded, &HashSet::new(), false);
         let loaded = HashSet::new();
+        // Edits made elsewhere (rename, recolor, connect) rebuild the rows.
+        cx.observe(&workspace, |this, _, cx| this.refresh(cx)).detach();
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("Filter objects…"));
         cx.subscribe(&field, |this, field, ev: &InputEvent, cx| {
             if let InputEvent::Change = ev {
@@ -501,7 +529,7 @@ impl Explorer {
             }
         })
         .detach();
-        Self { field, workspace, expanded, loaded, loading: HashSet::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { field, workspace, expanded, loaded, loading: HashSet::new(), connects: HashMap::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -510,14 +538,19 @@ impl Explorer {
             return;
         }
         let key = node.key.clone();
-        if open && matches!(node.kind, NodeKind::Connection(_)) && self.workspace.connections[node.conn].status != ConnectionStatus::Connected {
+        if open && matches!(node.kind, NodeKind::Connection(_)) && self.workspace.read(cx).connections[node.conn].status != ConnectionStatus::Connected {
             let ci = node.conn;
             return self.connect(ci, cx);
         }
         if open && node.kind == NodeKind::Schema && !self.loaded.contains(&key) && self.loading.insert(key.clone()) {
+            // A delete can move the connection while this runs, so the key is rebuilt from its id at the end.
+            let id = self.workspace.read(cx).connections[node.conn].id;
+            let path = key[key.find('/').unwrap_or(key.len())..].to_string();
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(mock::latency()).await;
                 this.update(cx, |this, cx| {
+                    let Some(ci) = this.workspace.read(cx).connections.iter().position(|c| c.id == id) else { return };
+                    let key = format!("{ci}{path}");
                     this.loading.remove(&key);
                     this.loaded.insert(key);
                     this.refresh(cx);
@@ -537,17 +570,35 @@ impl Explorer {
     /// Starts a mock connect that lands after `mock::latency()`. Expanding a connection that is
     /// not connected and Retry on a failed one both come here.
     fn connect(&mut self, ci: usize, cx: &mut Context<Self>) {
-        let status = &mut self.workspace.connections[ci].status;
-        if matches!(status, ConnectionStatus::Connected | ConnectionStatus::Connecting) {
-            return;
-        }
-        *status = ConnectionStatus::Connecting;
+        let started = self.workspace.update(cx, |ws, cx| {
+            let conn = &mut ws.connections[ci];
+            if matches!(conn.status, ConnectionStatus::Connected | ConnectionStatus::Connecting) {
+                return None;
+            }
+            conn.status = ConnectionStatus::Connecting;
+            cx.notify();
+            Some(conn.id)
+        });
+        let Some(id) = started else { return };
+        let token = self.connects.entry(id).or_default();
+        *token += 1;
+        let token = *token;
         self.expanded.insert(format!("{ci}"));
         // ponytail: every mock connect succeeds, including retries; drivers report real failures (QX-023)
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(mock::latency()).await;
             this.update(cx, |this, cx| {
-                this.workspace.connections[ci].status = ConnectionStatus::Connected;
+                if this.connects.get(&id) != Some(&token) {
+                    return; // a later connect owns the result
+                }
+                this.workspace.update(cx, |ws, cx| {
+                    // A params edit disconnects it, so Connecting means none happened since this connect began.
+                    let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) else { return };
+                    if conn.status == ConnectionStatus::Connecting {
+                        conn.status = ConnectionStatus::Connected;
+                        cx.notify();
+                    }
+                });
                 this.refresh(cx);
             })
             .ok();
@@ -577,7 +628,7 @@ impl Explorer {
     fn expand_all_under(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(root) = self.nodes.get(ix).map(|n| n.key.clone()) else { return };
         let prefix = format!("{root}/");
-        let all = flatten(&self.workspace, &HashSet::new(), &HashSet::new(), true);
+        let all = flatten(self.workspace.read(cx), &HashSet::new(), &HashSet::new(), true);
         for n in all.into_iter().filter(|n| n.expandable && (n.key.starts_with(&prefix) || n.key == root)) {
             if n.kind == NodeKind::Schema {
                 self.loaded.insert(n.key.clone());
@@ -585,6 +636,64 @@ impl Explorer {
             self.expanded.insert(n.key);
         }
         self.refresh(cx);
+    }
+
+    /// Opens the Add connection dialog ("+" in the header, `AddConnection`).
+    pub fn add_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_dialog(None, window, cx);
+    }
+
+    /// Opens the Edit dialog for the selected connection row (Edit… in its menu, `EditConnection`).
+    pub fn edit_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected).filter(|n| matches!(n.kind, NodeKind::Connection(_))) else { return };
+        let id = self.workspace.read(cx).connections[node.conn].id;
+        self.open_dialog(Some(id), window, cx);
+    }
+
+    /// Asks to confirm deleting the selected connection row (Delete in its menu, `DeleteConnection`).
+    pub fn delete_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected).filter(|n| matches!(n.kind, NodeKind::Connection(_))) else { return };
+        let conn = self.workspace.read(cx).connections[node.conn].clone();
+        let dialog = DeleteConfirm::open(&conn, window, cx);
+        cx.subscribe(&dialog, move |this, _, Confirmed, cx| this.remove_connection(conn.id, cx)).detach();
+    }
+
+    /// Deletes connection `id`. A connect still running for it finds it gone and is discarded.
+    fn remove_connection(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        let removed = self.workspace.update(cx, |ws, cx| {
+            cx.notify();
+            ws.delete(id)
+        });
+        let Some(ix) = removed else { return };
+        // Tree keys start with the connection's position, which moves up for those below it.
+        for keys in [&mut self.expanded, &mut self.loaded, &mut self.loading] {
+            *keys = std::mem::take(keys).into_iter().filter_map(|k| shift_key(&k, ix)).collect();
+        }
+        // A rename and the marked rows hold positions too; the delete ends them.
+        self.rename = None;
+        self.marked.clear();
+        cx.emit(ConnectionDeleted { id, ix });
+        self.refresh(cx);
+        // The connection that took its place, or the previous one when it was last.
+        let next = ix.min(self.workspace.read(cx).connections.len().saturating_sub(1)).to_string();
+        if let Some(row) = self.nodes.iter().position(|n| n.key == next) {
+            self.select(row, cx);
+        }
+    }
+
+    fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = ConnectionDialog::open(self.workspace.clone(), editing, window, cx);
+        cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
+            let connections = &this.workspace.read(cx).connections;
+            if let Some(ix) = connections.iter().position(|c| c.id == *id) {
+                // Collapse a connection the edit disconnected, so expanding it connects again.
+                if connections[ix].status == ConnectionStatus::Disconnected {
+                    this.expanded.remove(&ix.to_string());
+                }
+                this.reveal(&ix.to_string(), window, cx);
+            }
+        })
+        .detach();
     }
 
     /// Focuses the filter field (Ctrl+Alt+F).
@@ -614,14 +723,14 @@ impl Explorer {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
+        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loading, &self.filter);
         self.selected = self.selected.min(self.nodes.len().saturating_sub(1));
         cx.notify();
     }
 
     fn set_filter(&mut self, filter: String, cx: &mut Context<Self>) {
         self.filter = filter;
-        self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
+        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loading, &self.filter);
         // First match, or the top when clearing.
         let first = first_match(&self.nodes, &self.filter);
         self.select(first.unwrap_or(0), cx);
@@ -630,7 +739,8 @@ impl Explorer {
     fn open(&mut self, ix: usize, preview: bool, cx: &mut Context<Self>) {
         let node = &self.nodes[ix];
         if opens_tab(node.kind) {
-            let conn = &self.workspace.connections[node.conn];
+            let conn = &self.workspace.read(cx).connections[node.conn];
+            let (connection, color, production) = (conn.id, conn.color, conn.is_production);
             let mut names = vec![node.label.to_string()];
             let mut at = ix;
             while let Some(parent) = parent_of(&self.nodes, at) {
@@ -644,7 +754,10 @@ impl Explorer {
             cx.emit(OpenObject {
                 key: node.key.clone().into(),
                 name: node.label.clone(),
-                origin: Origin { color: conn.color, production: conn.is_production, path: names[..names.len() - 1].join(" › ").into() },
+                origin: {
+                    let tail = names[1..names.len() - 1].join(" › ");
+                    Origin { connection, color, production, path: crate::tabs::join_path(&names[0], &tail), tail: tail.into() }
+                },
                 path: names.join(" › ").into(),
                 preview,
             });
@@ -662,6 +775,16 @@ impl Explorer {
         }
     }
 
+    #[cfg(test)]
+    pub fn row_labels(&self) -> Vec<SharedString> {
+        self.nodes.iter().map(|n| n.label.clone()).collect()
+    }
+
+    #[cfg(test)]
+    pub fn selected_label(&self) -> Option<SharedString> {
+        self.nodes.get(self.selected).map(|n| n.label.clone())
+    }
+
     fn select(&mut self, ix: usize, cx: &mut Context<Self>) {
         (self.selected, self.picked) = (ix, true);
         self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
@@ -674,11 +797,15 @@ impl Explorer {
             return;
         }
         if let Some(rn) = &mut self.rename {
-            let others = other_names(&self.workspace, rn.conn);
+            let conn = rn.conn;
+            let others = other_names(self.workspace.read(cx), conn);
             match rn.key(&ev.keystroke.key, ev.keystroke.key_char.as_deref().filter(|_| !m.control && !m.alt && !m.platform), &others) {
                 RenameKey::Open => {}
                 RenameKey::Commit(name) => {
-                    self.workspace.connections[rn.conn].name = name;
+                    self.workspace.update(cx, |ws, cx| {
+                        ws.connections[conn].name = name;
+                        cx.notify();
+                    });
                     self.rename = None;
                     self.refresh(cx);
                 }
@@ -708,7 +835,7 @@ impl Explorer {
         match ev.keystroke.key.as_str() {
             "f2" if self.nodes.get(self.selected).is_some_and(|n| can_rename(n.kind)) => {
                 let conn = self.nodes[self.selected].conn;
-                self.rename = Some(Rename { conn, text: self.workspace.connections[conn].name.clone(), error: None });
+                self.rename = Some(Rename { conn, text: self.workspace.read(cx).connections[conn].name.clone(), error: None });
                 return cx.notify();
             }
             "escape" if !self.marked.is_empty() => {
@@ -756,9 +883,11 @@ impl Explorer {
         cx.stop_propagation();
     }
 
-    fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Stateful<Div>> {
+    fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
         let focused = self.focus.contains_focused(window, cx);
+        let ws = self.workspace.read(cx);
+        let range_kinds: Vec<bool> = range.clone().map(|ix| matches!(self.nodes[ix].kind, NodeKind::Connection(_))).collect();
         range
             .map(|ix| {
                 let node = &self.nodes[ix];
@@ -787,7 +916,7 @@ impl Explorer {
                     NodeKind::Loading => (Icon::new(Lucide::LoaderCircle), theme.muted_foreground),
                     NodeKind::ConnError => (Icon::new(Lucide::CircleAlert), theme.danger),
                 };
-                let conn = &self.workspace.connections[node.conn];
+                let conn = &ws.connections[node.conn];
                 let is_conn = matches!(node.kind, NodeKind::Connection(_));
                 let chevron = if node.expanded { Lucide::ChevronDown } else { Lucide::ChevronRight };
                 let selected = ix == self.selected && (self.picked || focused);
@@ -830,6 +959,16 @@ impl Explorer {
                                 return cx.notify();
                             }
                             this.press(ix, Hit::Row { clicks: ev.click_count }, cx);
+                        }),
+                    )
+                    // The row's menu acts on the selection, so a right-click selects first.
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, _, window, cx| {
+                            window.focus(&this.focus, cx);
+                            this.rename = None;
+                            this.marked.clear();
+                            this.select(ix, cx);
                         }),
                     )
                     .child(
@@ -891,9 +1030,15 @@ impl Explorer {
                         d.child(div().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child(n.to_string()))
                     })
                     .when(is_conn && conn.is_production, |d| {
-                        d.child(theme::prod_badge(theme))
+                        d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
+            .zip(range_kinds)
+            .map(|(row, is_conn)| if is_conn { row.context_menu(|menu, _, _| {
+                    menu.menu("Edit…", Box::new(crate::EditConnection)).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                        div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
+                    })
+                }).into_any_element() } else { row.into_any_element() })
             .collect()
     }
 }
@@ -912,13 +1057,28 @@ impl Render for Explorer {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
             .child(
-                div()
+                h_flex()
                     .flex_none()
+                    .gap(theme::space_4())
                     .p(theme::space_6())
                     .border_b_1()
                     .border_color(theme.border)
-                    .capture_key_down(cx.listener(Self::on_field_key))
-                    .child(Input::new(&self.field).small().prefix(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))),
+                    .child(
+                        div()
+                            .flex_1()
+                            .capture_key_down(cx.listener(Self::on_field_key))
+                            .child(Input::new(&self.field).small().prefix(Icon::new(Lucide::Search).xsmall().text_color(theme.muted_foreground))),
+                    )
+                    .child(
+                        div().debug_selector(|| "add-connection".into()).child(
+                            Button::new("add-connection")
+                                .ghost()
+                                .small()
+                                .icon(Lucide::Plus)
+                                .tooltip("Add connection")
+                                .on_click(cx.listener(|this, _, window, cx| this.add_connection(window, cx))),
+                        ),
+                    ),
             )
             .when_some(self.rename.as_ref().and_then(|rn| rn.error.clone()), |d, msg| {
                 d.child(
@@ -933,7 +1093,26 @@ impl Render for Explorer {
                         .child(msg),
                 )
             })
-            .map(|d| if self.nodes.is_empty() && !self.filter.is_empty() {
+            .map(|d| if self.workspace.read(cx).connections.is_empty() {
+                d.child(
+                    v_flex()
+                        .debug_selector(|| "explorer-empty".into())
+                        .flex_1()
+                        .items_center()
+                        .justify_center()
+                        .gap(theme::space_8())
+                        .child(div().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child("No connections yet"))
+                        .child(
+                            div().debug_selector(|| "empty-add-connection".into()).child(
+                                Button::new("empty-add-connection")
+                                    .primary()
+                                    .small()
+                                    .label("Add connection")
+                                    .on_click(cx.listener(|this, _, window, cx| this.add_connection(window, cx))),
+                            ),
+                        ),
+                )
+            } else if self.nodes.is_empty() && !self.filter.is_empty() {
                 d.child(
                     div()
                         .flex_none()
@@ -957,7 +1136,29 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute, no_match_text};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute, no_match_text, shift_key};
+
+    #[test]
+    fn shift_key_cases() {
+        // (key, position deleted, key after)
+        let cases = [
+            ("1", 1, None),
+            ("1/0/0/table/2", 1, None),
+            ("0", 1, Some("0")),
+            ("0/0/0", 1, Some("0/0/0")),
+            ("2", 1, Some("1")),
+            ("2/0/0/table/0", 1, Some("1/0/0/table/0")),
+            ("10/3", 1, Some("9/3")),
+            ("1", 0, Some("0")),
+            ("0", 0, None),
+            ("console-1", 0, Some("console-1")),
+            ("big_events", 0, Some("big_events")),
+            ("", 0, Some("")),
+        ];
+        for (key, removed, want) in cases {
+            assert_eq!(shift_key(key, removed).as_deref(), want, "{key:?} after deleting {removed}");
+        }
+    }
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
 
     #[test]
@@ -1397,7 +1598,7 @@ mod tests {
         let ws = mock::workspaces().remove(0);
         let key = flatten(&ws, &default_expanded(&ws), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == "orders").expect("orders").key;
         let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), window, cx))).expect("open test window")
         });
         cx.update_window(window.into(), |_, window, cx| {
             explorer.update(cx, |e, cx| {
@@ -1428,7 +1629,7 @@ mod tests {
                 ..Default::default()
             };
             let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
-                gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, window, cx))).expect("open test window")
+                gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), window, cx))).expect("open test window")
             });
             let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
             explorer.update_in(&mut cx, |e, window, cx| e.reveal(&key, window, cx));

@@ -14,6 +14,33 @@ pub struct Workspace {
     pub connections: Vec<Connection>,
 }
 
+impl Workspace {
+    /// Appends a new, disconnected connection with an id no current connection has.
+    pub fn add(&mut self, name: String, color: u8, is_production: bool, params: ConnectionParams) -> ConnectionId {
+        let id = ConnectionId(self.connections.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+        self.connections.push(Connection { id, name, color, is_production, status: ConnectionStatus::Disconnected, params, databases: Vec::new() });
+        id
+    }
+
+    /// Removes connection `id` and returns the position it had, or `None` if it is gone.
+    pub fn delete(&mut self, id: ConnectionId) -> Option<usize> {
+        let ix = self.connections.iter().position(|c| c.id == id)?;
+        self.connections.remove(ix);
+        Some(ix)
+    }
+
+    /// Replaces connection `id`'s name, color, Production flag and params in place. New params
+    /// disconnect it and clear its databases, which came from the old server. Does nothing if it
+    /// is gone.
+    pub fn edit(&mut self, id: ConnectionId, name: String, color: u8, is_production: bool, params: ConnectionParams) {
+        let Some(conn) = self.connections.iter_mut().find(|c| c.id == id) else { return };
+        if conn.params != params {
+            (conn.status, conn.databases) = (ConnectionStatus::Disconnected, Vec::new());
+        }
+        (conn.name, conn.color, conn.is_production, conn.params) = (name, color, is_production, params);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ConnectionId(pub u32);
 
@@ -276,6 +303,31 @@ pub struct QueryLogEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delete_and_edit_cases() {
+        let ws = crate::mock::workspaces().remove(0);
+        let ids: Vec<ConnectionId> = ws.connections.iter().map(|c| c.id).collect();
+        let names = |ws: &Workspace| ws.connections.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        // (id deleted, position returned, names left)
+        let cases = [
+            (ids[1], Some(1), vec!["prod-pg", "local.db"]),
+            (ids[0], Some(0), vec!["staging-pg", "local.db"]),
+            (ids[2], Some(2), vec!["prod-pg", "staging-pg"]),
+            (ConnectionId(99), None, vec!["prod-pg", "staging-pg", "local.db"]),
+        ];
+        for (id, at, left) in cases {
+            let mut after = ws.clone();
+            assert_eq!(after.delete(id), at, "{id:?}");
+            assert_eq!(names(&after), left, "{id:?}");
+        }
+        let mut last = Workspace { connections: ws.connections[..1].to_vec(), ..ws.clone() };
+        assert_eq!(last.delete(ids[0]), Some(0));
+        assert!(last.connections.is_empty(), "deleting the last leaves []");
+        let mut gone = ws.clone();
+        gone.edit(ConnectionId(99), "x".into(), 1, true, ConnectionParams::Sqlite { path: PathBuf::from("x") });
+        assert_eq!(gone, ws, "an edit of a deleted connection does nothing");
+    }
 
     #[test]
     fn value_stays_compact() {

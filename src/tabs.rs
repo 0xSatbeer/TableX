@@ -7,10 +7,13 @@ use gpui_kit::SharedString;
 /// the grid or console, and the status bar, so they cannot disagree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Origin {
+    pub connection: crate::model::ConnectionId,
     pub color: u8,
     pub production: bool,
     /// `connection › database › schema`
     pub path: SharedString,
+    /// `database › schema`: the path without the connection name, so a rename never has to parse the old name.
+    pub tail: SharedString,
 }
 
 impl Origin {
@@ -18,13 +21,14 @@ impl Origin {
     pub fn of(conn: &crate::model::Connection) -> Self {
         let db = conn.databases.first();
         let schema = db.and_then(|d| d.schemas.first());
-        let path = [Some(conn.name.as_str()), db.map(|d| d.name.as_str()), schema.map(|s| s.name.as_str())];
-        Self {
-            color: conn.color,
-            production: conn.is_production,
-            path: path.into_iter().flatten().collect::<Vec<_>>().join(" › ").into(),
-        }
+        let tail = [db.map(|d| d.name.as_str()), schema.map(|s| s.name.as_str())].into_iter().flatten().collect::<Vec<_>>().join(" › ");
+        Self { connection: conn.id, color: conn.color, production: conn.is_production, path: join_path(&conn.name, &tail), tail: tail.into() }
     }
+}
+
+/// `name › tail`, or just `name` when there is no tail.
+pub fn join_path(name: &str, tail: &str) -> SharedString {
+    if tail.is_empty() { name.to_string().into() } else { format!("{name} › {tail}").into() }
 }
 
 /// Tab tooltip: title on line 1, origin path on line 2.
@@ -198,6 +202,35 @@ impl<C> Tabs<C> {
         let ix = if tab.pinned { ix.min(pinned) } else { ix.max(pinned) };
         self.tabs.insert(ix, tab);
         self.active = self.tabs.iter().position(|t| t.key == active).unwrap_or(0);
+    }
+
+    /// Gives open and recently closed tabs their connection's current name, color and production flag.
+    pub fn refresh_origins(&mut self, ws: &crate::model::Workspace) {
+        for origin in self.tabs.iter_mut().chain(&mut self.closed).filter_map(|t| t.origin.as_mut()) {
+            let Some(conn) = ws.connections.iter().find(|c| c.id == origin.connection) else { continue };
+            origin.path = join_path(&conn.name, &origin.tail);
+            (origin.color, origin.production) = (conn.color, conn.is_production);
+        }
+    }
+
+    /// Closes every tab from connection `id`, pinned ones too, and drops them from the reopen history.
+    pub fn drop_connection(&mut self, id: crate::model::ConnectionId) {
+        let from = |t: &EditorTab<C>| t.origin.as_ref().is_some_and(|o| o.connection == id);
+        // Set the history aside so these closes neither enter it nor evict other connections' tabs.
+        let mut kept = std::mem::take(&mut self.closed);
+        kept.retain(|t| !from(t));
+        while let Some(ix) = self.tabs.iter().position(from) {
+            self.close(ix);
+        }
+        self.closed = kept;
+    }
+
+    /// Replaces every open and recently closed tab's key with `f(key)`.
+    pub fn rekey(&mut self, f: impl Fn(&SharedString) -> SharedString) {
+        for tab in self.tabs.iter_mut().chain(&mut self.closed) {
+            tab.key = f(&tab.key);
+        }
+        self.mru.iter_mut().for_each(|key| *key = f(key));
     }
 
     pub fn activate(&mut self, ix: usize) {
@@ -486,7 +519,7 @@ mod tests {
 
     #[test]
     fn tooltip_is_title_then_origin_path() {
-        let origin = |path: &str| Origin { color: 0, production: false, path: path.to_string().into() };
+        let origin = |path: &str| Origin { connection: crate::model::ConnectionId(0), color: 0, production: false, path: path.to_string().into(), tail: "".into() };
         let cases = [
             ("users", Some(origin("prod-pg › app_db › public")), "users\nprod-pg › app_db › public"),
             ("big_events", None, "big_events\nSample data · not from a connection"),
@@ -531,7 +564,7 @@ mod tests {
 
     #[test]
     fn match_tabs_filters_by_path() {
-        let origin = |path: &'static str| Some(Origin { color: 0, production: false, path: path.into() });
+        let origin = |path: &'static str| Some(Origin { connection: crate::model::ConnectionId(0), color: 0, production: false, path: path.into(), tail: "".into() });
         let tabs = [
             EditorTab { origin: origin("prod-pg › app_db › public"), ..titled("users") },
             EditorTab { origin: origin("prod-pg › app_db › audit"), ..titled("log") },
@@ -558,5 +591,72 @@ mod tests {
             assert_eq!(super::first_match(&tabs, query), want, "query {query:?}");
         }
         assert_eq!(super::first_match::<()>(&[], ""), None);
+    }
+
+    #[test]
+    fn refresh_origins_cases() {
+        use crate::model::{Connection, Workspace};
+        let ws = crate::mock::workspaces().remove(0);
+        let prod = Origin::of(&ws.connections[0]);
+        let local = Origin::of(&ws.connections[2]);
+        let tail = prod.path.strip_prefix("prod-pg").expect("path starts with the connection name").to_string();
+        assert!(tail.starts_with(" › "), "path has segments after the name: {:?}", prod.path);
+        let edit = |f: fn(&mut Connection)| {
+            let mut ws = ws.clone();
+            f(&mut ws.connections[0]);
+            ws
+        };
+        let with = |color: u8, production: bool, path: &str| Origin { color, production, path: path.to_string().into(), ..prod.clone() };
+        let gone = Workspace { connections: ws.connections[1..].to_vec(), ..ws.clone() };
+        // (case, workspace after the change, tab origin before, origin expected after)
+        let cases: Vec<(&str, Workspace, Option<Origin>, Option<Origin>)> = vec![
+            ("rename", edit(|c| c.name = "live".into()), Some(prod.clone()), Some(with(0, true, &format!("live{tail}")))),
+            ("recolor", edit(|c| c.color = 3), Some(prod.clone()), Some(with(3, true, &prod.path))),
+            ("production off", edit(|c| c.is_production = false), Some(prod.clone()), Some(with(0, false, &prod.path))),
+            ("rename, recolor and production off", edit(|c| (c.name, c.color, c.is_production) = ("live".into(), 7, false)), Some(prod.clone()), Some(with(7, false, &format!("live{tail}")))),
+            ("path is only the connection name", edit(|c| c.name = "live".into()), Some(Origin::of(&Connection { databases: vec![], ..ws.connections[0].clone() })), Some(Origin { tail: "".into(), ..with(0, true, "live") })),
+            ("old name contains the separator", edit(|c| c.name = "c".into()), Some(Origin::of(&Connection { name: "a › b".into(), ..ws.connections[0].clone() })), Some(with(0, true, &format!("c{tail}")))),
+            ("new name contains the old one", edit(|c| c.name = "prod-pg-2".into()), Some(prod.clone()), Some(with(0, true, &format!("prod-pg-2{tail}")))),
+            ("another connection's tab", edit(|c| (c.name, c.color) = ("live".into(), 7)), Some(local.clone()), Some(local.clone())),
+            ("sample tab without an origin", edit(|c| c.name = "live".into()), None, None),
+            ("connection no longer in the workspace", gone, Some(prod.clone()), Some(prod.clone())),
+            ("nothing changed", ws.clone(), Some(prod.clone()), Some(prod.clone())),
+        ];
+        for (case, ws, before, expected) in cases {
+            let mut tabs = Tabs::new(vec![EditorTab { origin: before.clone(), ..tab("open", false) }, EditorTab { origin: before, ..tab("closed", false) }]);
+            tabs.close(1);
+            tabs.refresh_origins(&ws);
+            assert_eq!(tabs.tabs[0].origin, expected, "{case}: open tab");
+            tabs.reopen();
+            assert_eq!(tabs.tabs[1].origin, expected, "{case}: closed tab, once reopened");
+        }
+    }
+
+    #[test]
+    fn dropping_a_connection_keeps_a_full_reopen_history_of_other_connections() {
+        use crate::model::ConnectionId;
+        let on = |key: String, conn: u32| {
+            let origin = Origin { connection: ConnectionId(conn), color: 0, production: false, path: "".into(), tail: "".into() };
+            EditorTab { key: key.clone().into(), title: key.into(), origin: Some(origin), tooltip: None, preview: false, pinned: false, content: () }
+        };
+        let others: Vec<String> = (0..super::CLOSED_HISTORY).map(|i| format!("other-{i}")).collect();
+        let mut t = Tabs::new(vec![on("gone-a".into(), 2), on("keep".into(), 1), on("gone-b".into(), 2)]);
+        for key in &others {
+            t.open(on(key.clone(), 1));
+            t.close(t.tabs.iter().position(|x| x.key == key.as_str()).unwrap());
+        }
+        t.drop_connection(ConnectionId(2));
+        assert_eq!(keys(&t), ["keep"]);
+        let mut reopened = Vec::new();
+        while t.tabs.len() < 1 + super::CLOSED_HISTORY + 1 {
+            let before = t.tabs.len();
+            t.reopen();
+            if t.tabs.len() == before {
+                break;
+            }
+            reopened.push(t.tabs[t.active].key.to_string());
+        }
+        reopened.reverse();
+        assert_eq!(reopened, others, "every other connection's closed tab is still reopenable");
     }
 }

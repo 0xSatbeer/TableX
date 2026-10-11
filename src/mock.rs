@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::cell::Cell;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::model::*;
@@ -31,16 +31,29 @@ fn pick<T: Copy>(items: &[T], r: u64) -> T {
     items[(r % items.len() as u64) as usize]
 }
 
-static LATENCY_MS: AtomicU32 = AtomicU32::new(0);
+thread_local! {
+    // Per thread: only the UI thread reads it in the app, and each test sets its own without racing the others.
+    static LATENCY_MS: Cell<u32> = const { Cell::new(0) };
+}
 
 /// Fake round-trip time (0–2000 ms). Callers wait this long off the UI thread before
 /// delivering a mock result, to exercise loading states.
 pub fn latency() -> Duration {
-    Duration::from_millis(LATENCY_MS.load(Ordering::Relaxed) as u64)
+    Duration::from_millis(LATENCY_MS.get() as u64)
+}
+
+/// shortcut: mocked, replace with Driver::test (QX-023)
+/// The caller waits `latency()` first, like `Explorer::connect`.
+pub fn test_connection(host: &str) -> Result<(), String> {
+    if host.to_ascii_lowercase().ends_with(".invalid") {
+        Err(format!("Could not resolve host {host}"))
+    } else {
+        Ok(())
+    }
 }
 
 pub fn set_latency(ms: u32) {
-    LATENCY_MS.store(ms.min(2000), Ordering::Relaxed);
+    LATENCY_MS.set(ms.min(2000));
 }
 
 // ---------------------------------------------------------------- schema tree
