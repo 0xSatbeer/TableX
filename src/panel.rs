@@ -102,6 +102,18 @@ impl BottomPanel {
         self.search.clone()
     }
 
+    #[cfg(test)]
+    pub fn set_connection_filter(&mut self, ids: &[ConnectionId], cx: &App) {
+        self.filter.connections = ids.iter().map(|id| id.0).collect();
+        self.refilter(cx);
+    }
+
+    /// The connections of the Logs rows the filters let through.
+    #[cfg(test)]
+    pub fn shown_connections(&self) -> std::collections::HashSet<ConnectionId> {
+        self.rows.iter().map(|&ix| self.log[ix].connection_id).collect()
+    }
+
     fn refilter(&mut self, cx: &App) {
         self.filter.text = self.search.read(cx).value().to_string();
         self.rows = filter_rows(&self.log, &self.filter);
@@ -111,11 +123,7 @@ impl BottomPanel {
     /// "All connections" or the chosen ones; each item toggles one connection.
     fn connection_menu(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
         let items: Vec<_> = self.workspace.read(cx).connections.iter().map(|c| (c.id.0, c.name.clone(), self.filter.connections.contains(&c.id.0))).collect();
-        let label = match self.filter.connections.len() {
-            0 => "All connections".to_string(),
-            1 => items.iter().find(|(_, _, on)| *on).map(|(_, name, _)| name.clone()).unwrap_or_default(),
-            n => format!("{n} connections"),
-        };
+        let label = self.connection_filter_label(cx);
         let panel = cx.entity().downgrade();
         Button::new("log-connections").ghost().small().label(label).icon(IconName::ChevronDown).dropdown_menu(move |mut menu, _, _| {
             for (id, name, on) in items.clone() {
@@ -132,6 +140,16 @@ impl BottomPanel {
             }
             menu
         })
+    }
+
+    /// The connection filter's button label: "All connections", the one chosen name, or "<n> connections".
+    pub fn connection_filter_label(&self, cx: &App) -> String {
+        let connections = &self.workspace.read(cx).connections;
+        match self.filter.connections.len() {
+            0 => "All connections".to_string(),
+            1 => connections.iter().find(|c| self.filter.connections.contains(&c.id.0)).map(|c| c.name.clone()).unwrap_or_default(),
+            n => format!("{n} connections"),
+        }
     }
 
     fn log_row(&self, ix: usize, cx: &Context<Self>) -> impl IntoElement {

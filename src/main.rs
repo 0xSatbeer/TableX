@@ -2452,6 +2452,25 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn deleting_the_connection_the_logs_are_filtered_to_clears_that_filter(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let panel = shell.read_with(&cx, |this, _| this.bottom_panel.clone());
+        let staging = shell.read_with(&cx, |this, cx| this.workspace.read(cx).connections.iter().find(|c| c.name == "staging-pg").unwrap().id);
+        let mut remaining = panel.read_with(&cx, |p, _| p.shown_connections());
+        assert!(remaining.remove(&staging) && !remaining.is_empty(), "the log has rows for staging-pg and others");
+        panel.update(&mut cx, |p, cx| {
+            p.show_logs();
+            p.set_connection_filter(&[staging], cx);
+        });
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection_filter_label(cx)), "staging-pg");
+        delete_row(&mut cx, &shell, "staging-pg");
+        cx.run_until_parked();
+        assert_eq!(panel.read_with(&cx, |p, _| p.shown_connections()), remaining, "the log shows the remaining connections' rows");
+        assert_eq!(panel.read_with(&cx, |p, cx| p.connection_filter_label(cx)), "All connections", "the filter no longer counts staging-pg");
+    }
+
+    #[gpui_kit::test]
     fn confirming_the_delete_of_b_removes_it_from_the_tree_and_the_panel_and_closes_only_its_tabs(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::ConnectionId;
         let (window, shell) = open_with_connection_tabs(cx);
