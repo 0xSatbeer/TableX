@@ -191,8 +191,15 @@ struct Shell {
 impl Shell {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let workspace = cx.new(|_| mock::workspaces().remove(0));
-        let ws = workspace.read(cx).clone();
-        let explorer = cx.new(|cx| explorer::Explorer::new(ws.clone(), window, cx));
+        let console_origin = workspace.read(cx).connections.iter().find(|c| c.is_production).map(tabs::Origin::of);
+        let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), window, cx));
+        cx.observe(&workspace, |this, workspace, cx| {
+            this.tabs.refresh_origins(workspace.read(cx));
+            let (origin, has_tab) = (this.tabs.active().and_then(|t| t.origin.clone()), this.tabs.active().is_some());
+            this.status_bar.update(cx, |bar, cx| bar.set_origin(origin, has_tab, cx));
+            cx.notify();
+        })
+        .detach();
         cx.subscribe(&explorer, |this, _, ev: &explorer::OpenObject, cx| {
             // ponytail: every table shows a mock query result until drivers land (Phase 5)
             let rows = match mock::run_query(&format!("SELECT * FROM {}", ev.name)) {
@@ -225,7 +232,7 @@ impl Shell {
         let mut this = Self {
             overflow_open: false,
             overflow_search,
-            workspace,
+            workspace: workspace.clone(),
             explorer,
             editor: cx.new(|cx| {
                 EditorState::new(window, cx)
@@ -241,7 +248,7 @@ impl Shell {
                     key: "console-1".into(),
                     title: "console-1".into(),
                     // The console runs against production, so the tint shows up in the demo.
-                    origin: ws.connections.iter().find(|c| c.is_production).map(tabs::Origin::of),
+                    origin: console_origin,
                     tooltip: None,
                     preview: false,
                     pinned: false,
@@ -258,7 +265,7 @@ impl Shell {
                 dragging: None,
             },
             status_bar: cx.new(|cx| statusbar::StatusBar::new(window, cx)),
-            bottom_panel: cx.new(|cx| panel::BottomPanel::new(&ws, window, cx)),
+            bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace.clone(), window, cx)),
             focus_handle: cx.focus_handle(),
             gallery_visible: false,
             focus_content: false,
@@ -1581,7 +1588,7 @@ mod tests {
         cx.run_until_parked();
 
         assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels()[0].clone()), "live", "tree row");
-        let panel = shell.read_with(&cx, |this, cx| this.bottom_panel.read(cx).connection(ConnectionId(1)).0);
+        let panel = shell.read_with(&cx, |this, cx| this.bottom_panel.read(cx).connection(ConnectionId(1), cx).0);
         assert_eq!(panel, "live", "bottom panel connection label");
         let conn = shell.read_with(&cx, |this, cx| this.workspace.read(cx).connections[0].clone());
         assert_eq!((conn.name.as_str(), conn.status), ("live", ConnectionStatus::Connected), "shared workspace: renamed, still connected");

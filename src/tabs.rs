@@ -203,7 +203,15 @@ impl<C> Tabs<C> {
     }
 
     /// Gives open and recently closed tabs their connection's current name, color and production flag.
-    pub fn refresh_origins(&mut self, _ws: &crate::model::Workspace) {}
+    pub fn refresh_origins(&mut self, ws: &crate::model::Workspace) {
+        for origin in self.tabs.iter_mut().chain(&mut self.closed).filter_map(|t| t.origin.as_mut()) {
+            let Some(conn) = ws.connections.iter().find(|c| c.id == origin.connection) else { continue };
+            // shortcut: the old name is taken to end at the first " › ", so renaming a connection whose name contains " › " garbles its tab paths; keep the path tail apart from the name if names may contain it
+            let tail = origin.path.find(" › ").map_or("", |i| &origin.path[i..]);
+            origin.path = format!("{}{tail}", conn.name).into();
+            (origin.color, origin.production) = (conn.color, conn.is_production);
+        }
+    }
 
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {

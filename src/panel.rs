@@ -1,6 +1,6 @@
 //! Bottom panel (QX-014): Results / Logs / Messages.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::{Duration, UNIX_EPOCH};
 
 use gpui_kit::component::{
@@ -35,13 +35,13 @@ pub struct BottomPanel {
     list: ListState,
     /// Log indexes of rows shown expanded.
     expanded: BTreeSet<usize>,
-    /// Connection id to (name, color index, production).
-    connections: BTreeMap<u32, (String, u8, bool)>,
+    /// The shared workspace, for each log row's connection name, color and production flag.
+    workspace: Entity<Workspace>,
     focus: FocusHandle,
 }
 
 impl BottomPanel {
-    pub fn new(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter SQL…"));
         cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
@@ -63,14 +63,15 @@ impl BottomPanel {
             list: ListState::new(rows.len(), ListAlignment::Top, px(240.)),
             rows,
             expanded: BTreeSet::new(),
-            connections: workspace.connections.iter().map(|c| (c.id.0, (c.name.clone(), c.color, c.is_production))).collect(),
+            workspace,
             focus: cx.focus_handle(),
         }
     }
 
     /// The (name, color index, production) a log row shows for `id`.
-    pub fn connection(&self, id: ConnectionId) -> (String, u8, bool) {
-        self.connections.get(&id.0).cloned().unwrap_or_default()
+    pub fn connection(&self, id: ConnectionId, cx: &App) -> (String, u8, bool) {
+        let conn = self.workspace.read(cx).connections.iter().find(|c| c.id == id);
+        conn.map(|c| (c.name.clone(), c.color, c.is_production)).unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -91,7 +92,7 @@ impl BottomPanel {
 
     /// "All connections" or the chosen ones; each item toggles one connection.
     fn connection_menu(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
-        let items: Vec<_> = self.connections.iter().map(|(&id, (name, ..))| (id, name.clone(), self.filter.connections.contains(&id))).collect();
+        let items: Vec<_> = self.workspace.read(cx).connections.iter().map(|c| (c.id.0, c.name.clone(), self.filter.connections.contains(&c.id.0))).collect();
         let label = match self.filter.connections.len() {
             0 => "All connections".to_string(),
             1 => items.iter().find(|(_, _, on)| *on).map(|(_, name, _)| name.clone()).unwrap_or_default(),
@@ -126,7 +127,7 @@ impl BottomPanel {
         });
         let theme = cx.theme();
         let entry = &self.log[ix];
-        let (conn, color, production) = self.connection(entry.connection_id);
+        let (conn, color, production) = self.connection(entry.connection_id, cx);
         let (icon, icon_color) = match entry.status {
             QueryStatus::Ok => (IconName::CircleCheck, theme.success),
             QueryStatus::Err(_) => (IconName::CircleX, theme.danger),
@@ -610,7 +611,7 @@ mod tests {
         cx.update(|cx| gpui_kit::init(cx));
         let workspace = crate::mock::workspaces().remove(0);
         let (_, panel) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::BottomPanel::new(&workspace, window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::BottomPanel::new(cx.new(|_| workspace), window, cx))).expect("open test window")
         });
         assert_eq!(panel.read_with(cx, |p, _| p.tab), super::RESULTS, "active panel tab at launch");
     }
@@ -736,7 +737,7 @@ mod tests {
             ..Default::default()
         };
         let (window, panel): (_, Entity<super::BottomPanel>) = cx.update(|cx| {
-            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::BottomPanel::new(&crate::mock::workspaces()[0], window, cx))).expect("open test window")
+            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::BottomPanel::new(cx.new(|_| crate::mock::workspaces().remove(0)), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         let long = format!("SELECT {} FROM orders", (0..40).map(|i| format!("column_{i}")).collect::<Vec<_>>().join(", "));

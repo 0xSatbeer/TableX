@@ -467,7 +467,7 @@ pub struct OpenObject {
 impl EventEmitter<OpenObject> for Explorer {}
 
 pub struct Explorer {
-    workspace: Workspace,
+    workspace: Entity<Workspace>,
     expanded: HashSet<String>,
     /// Schema keys whose objects have "arrived", and those still waiting on mock latency.
     loaded: HashSet<String>,
@@ -488,10 +488,10 @@ pub struct Explorer {
 }
 
 impl Explorer {
-    pub fn new(workspace: Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // ponytail: starts collapsed; QX-020 restores the last session's expanded nodes
         let expanded = HashSet::new();
-        let nodes = flatten(&workspace, &expanded, &HashSet::new(), false);
+        let nodes = flatten(workspace.read(cx), &expanded, &HashSet::new(), false);
         let loaded = HashSet::new();
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("Filter objects…"));
         cx.subscribe(&field, |this, field, ev: &InputEvent, cx| {
@@ -510,7 +510,7 @@ impl Explorer {
             return;
         }
         let key = node.key.clone();
-        if open && matches!(node.kind, NodeKind::Connection(_)) && self.workspace.connections[node.conn].status != ConnectionStatus::Connected {
+        if open && matches!(node.kind, NodeKind::Connection(_)) && self.workspace.read(cx).connections[node.conn].status != ConnectionStatus::Connected {
             let ci = node.conn;
             return self.connect(ci, cx);
         }
@@ -537,17 +537,27 @@ impl Explorer {
     /// Starts a mock connect that lands after `mock::latency()`. Expanding a connection that is
     /// not connected and Retry on a failed one both come here.
     fn connect(&mut self, ci: usize, cx: &mut Context<Self>) {
-        let status = &mut self.workspace.connections[ci].status;
-        if matches!(status, ConnectionStatus::Connected | ConnectionStatus::Connecting) {
+        let started = self.workspace.update(cx, |ws, cx| {
+            let status = &mut ws.connections[ci].status;
+            if matches!(status, ConnectionStatus::Connected | ConnectionStatus::Connecting) {
+                return false;
+            }
+            *status = ConnectionStatus::Connecting;
+            cx.notify();
+            true
+        });
+        if !started {
             return;
         }
-        *status = ConnectionStatus::Connecting;
         self.expanded.insert(format!("{ci}"));
         // ponytail: every mock connect succeeds, including retries; drivers report real failures (QX-023)
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(mock::latency()).await;
             this.update(cx, |this, cx| {
-                this.workspace.connections[ci].status = ConnectionStatus::Connected;
+                this.workspace.update(cx, |ws, cx| {
+                    ws.connections[ci].status = ConnectionStatus::Connected;
+                    cx.notify();
+                });
                 this.refresh(cx);
             })
             .ok();
@@ -577,7 +587,7 @@ impl Explorer {
     fn expand_all_under(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(root) = self.nodes.get(ix).map(|n| n.key.clone()) else { return };
         let prefix = format!("{root}/");
-        let all = flatten(&self.workspace, &HashSet::new(), &HashSet::new(), true);
+        let all = flatten(self.workspace.read(cx), &HashSet::new(), &HashSet::new(), true);
         for n in all.into_iter().filter(|n| n.expandable && (n.key.starts_with(&prefix) || n.key == root)) {
             if n.kind == NodeKind::Schema {
                 self.loaded.insert(n.key.clone());
@@ -614,14 +624,14 @@ impl Explorer {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
+        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loading, &self.filter);
         self.selected = self.selected.min(self.nodes.len().saturating_sub(1));
         cx.notify();
     }
 
     fn set_filter(&mut self, filter: String, cx: &mut Context<Self>) {
         self.filter = filter;
-        self.nodes = tree_nodes(&self.workspace, &self.expanded, &self.loading, &self.filter);
+        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loading, &self.filter);
         // First match, or the top when clearing.
         let first = first_match(&self.nodes, &self.filter);
         self.select(first.unwrap_or(0), cx);
@@ -630,7 +640,8 @@ impl Explorer {
     fn open(&mut self, ix: usize, preview: bool, cx: &mut Context<Self>) {
         let node = &self.nodes[ix];
         if opens_tab(node.kind) {
-            let conn = &self.workspace.connections[node.conn];
+            let conn = &self.workspace.read(cx).connections[node.conn];
+            let (connection, color, production) = (conn.id, conn.color, conn.is_production);
             let mut names = vec![node.label.to_string()];
             let mut at = ix;
             while let Some(parent) = parent_of(&self.nodes, at) {
@@ -644,7 +655,7 @@ impl Explorer {
             cx.emit(OpenObject {
                 key: node.key.clone().into(),
                 name: node.label.clone(),
-                origin: Origin { connection: conn.id, color: conn.color, production: conn.is_production, path: names[..names.len() - 1].join(" › ").into() },
+                origin: Origin { connection, color, production, path: names[..names.len() - 1].join(" › ").into() },
                 path: names.join(" › ").into(),
                 preview,
             });
@@ -679,11 +690,15 @@ impl Explorer {
             return;
         }
         if let Some(rn) = &mut self.rename {
-            let others = other_names(&self.workspace, rn.conn);
+            let conn = rn.conn;
+            let others = other_names(self.workspace.read(cx), conn);
             match rn.key(&ev.keystroke.key, ev.keystroke.key_char.as_deref().filter(|_| !m.control && !m.alt && !m.platform), &others) {
                 RenameKey::Open => {}
                 RenameKey::Commit(name) => {
-                    self.workspace.connections[rn.conn].name = name;
+                    self.workspace.update(cx, |ws, cx| {
+                        ws.connections[conn].name = name;
+                        cx.notify();
+                    });
                     self.rename = None;
                     self.refresh(cx);
                 }
@@ -713,7 +728,7 @@ impl Explorer {
         match ev.keystroke.key.as_str() {
             "f2" if self.nodes.get(self.selected).is_some_and(|n| can_rename(n.kind)) => {
                 let conn = self.nodes[self.selected].conn;
-                self.rename = Some(Rename { conn, text: self.workspace.connections[conn].name.clone(), error: None });
+                self.rename = Some(Rename { conn, text: self.workspace.read(cx).connections[conn].name.clone(), error: None });
                 return cx.notify();
             }
             "escape" if !self.marked.is_empty() => {
@@ -764,6 +779,7 @@ impl Explorer {
     fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Stateful<Div>> {
         let theme = cx.theme();
         let focused = self.focus.contains_focused(window, cx);
+        let ws = self.workspace.read(cx);
         range
             .map(|ix| {
                 let node = &self.nodes[ix];
@@ -792,7 +808,7 @@ impl Explorer {
                     NodeKind::Loading => (Icon::new(Lucide::LoaderCircle), theme.muted_foreground),
                     NodeKind::ConnError => (Icon::new(Lucide::CircleAlert), theme.danger),
                 };
-                let conn = &self.workspace.connections[node.conn];
+                let conn = &ws.connections[node.conn];
                 let is_conn = matches!(node.kind, NodeKind::Connection(_));
                 let chevron = if node.expanded { Lucide::ChevronDown } else { Lucide::ChevronRight };
                 let selected = ix == self.selected && (self.picked || focused);
@@ -1402,7 +1418,7 @@ mod tests {
         let ws = mock::workspaces().remove(0);
         let key = flatten(&ws, &default_expanded(&ws), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == "orders").expect("orders").key;
         let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), window, cx))).expect("open test window")
         });
         cx.update_window(window.into(), |_, window, cx| {
             explorer.update(cx, |e, cx| {
@@ -1433,7 +1449,7 @@ mod tests {
                 ..Default::default()
             };
             let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
-                gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, window, cx))).expect("open test window")
+                gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), window, cx))).expect("open test window")
             });
             let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
             explorer.update_in(&mut cx, |e, window, cx| e.reveal(&key, window, cx));
