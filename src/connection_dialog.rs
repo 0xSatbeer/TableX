@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use crate::mock;
 use crate::model::*;
 
 const PORT_ERROR: &str = "Port must be a number from 1 to 65535";
@@ -107,7 +108,11 @@ pub fn delete_enabled(name: &str, is_production: bool, typed: &str) -> bool {
 
 /// The Test connection result for valid params: `Ok` or the failure reason.
 pub fn test_outcome(params: &ConnectionParams) -> Result<(), String> {
-    Ok(())
+    match params {
+        ConnectionParams::Postgres { host, .. } => mock::test_connection(host),
+        ConnectionParams::Sqlite { path } if path.is_file() => Ok(()),
+        ConnectionParams::Sqlite { path } => Err(format!("No file at {}", path.display())),
+    }
 }
 
 #[cfg(test)]

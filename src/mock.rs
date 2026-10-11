@@ -39,6 +39,16 @@ pub fn latency() -> Duration {
     Duration::from_millis(LATENCY_MS.load(Ordering::Relaxed) as u64)
 }
 
+/// shortcut: mocked, replace with Driver::test (QX-023)
+/// The caller waits `latency()` first, like `Explorer::connect`.
+pub fn test_connection(host: &str) -> Result<(), String> {
+    if host.to_ascii_lowercase().ends_with(".invalid") {
+        Err(format!("Could not resolve host {host}"))
+    } else {
+        Ok(())
+    }
+}
+
 pub fn set_latency(ms: u32) {
     LATENCY_MS.store(ms.min(2000), Ordering::Relaxed);
 }
