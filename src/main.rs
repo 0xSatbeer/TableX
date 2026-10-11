@@ -200,8 +200,10 @@ impl Shell {
             cx.notify();
         })
         .detach();
-        cx.subscribe(&explorer, |this, _, explorer::ConnectionDeleted(id), cx| {
-            this.tabs.drop_connection(*id);
+        cx.subscribe(&explorer, |this, _, ev: &explorer::ConnectionDeleted, cx| {
+            this.tabs.drop_connection(ev.id);
+            // Explorer-opened tabs are keyed by tree key, so they follow their connection's move.
+            this.tabs.rekey(|key| explorer::shift_key(key, ev.ix).map_or_else(|| key.clone(), SharedString::from));
             this.tab_changed(cx);
         })
         .detach();

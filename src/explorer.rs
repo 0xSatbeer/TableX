@@ -59,6 +59,17 @@ pub(crate) fn validate_rename(input: &str, others: &[&str]) -> Result<String, St
     }
 }
 
+/// `key` once the connection at position `removed` is deleted: `None` for its own rows, one position
+/// up for the rows of the connections below it. Keys that are not tree keys stay as they are.
+pub(crate) fn shift_key(key: &str, removed: usize) -> Option<String> {
+    let head = key.split('/').next().unwrap_or(key);
+    match head.parse::<usize>() {
+        Ok(ci) if ci == removed => None,
+        Ok(ci) if ci > removed => Some(format!("{}{}", ci - 1, &key[head.len()..])),
+        _ => Some(key.to_string()),
+    }
+}
+
 /// Whether the status dot is solid (else a ring), and the tooltip naming the status.
 fn status_style(status: &ConnectionStatus) -> (bool, String) {
     match status {
@@ -470,8 +481,12 @@ pub struct OpenObject {
 
 impl EventEmitter<OpenObject> for Explorer {}
 
-/// Emitted after connection `id` was deleted, so the Shell can close its tabs.
-pub struct ConnectionDeleted(pub ConnectionId);
+/// Emitted after connection `id` was deleted from position `ix`, so the Shell can close its tabs
+/// and move the tree keys of the tabs below it.
+pub struct ConnectionDeleted {
+    pub id: ConnectionId,
+    pub ix: usize,
+}
 
 impl EventEmitter<ConnectionDeleted> for Explorer {}
 
@@ -645,7 +660,11 @@ impl Explorer {
             ws.delete(id)
         });
         let Some(ix) = removed else { return };
-        cx.emit(ConnectionDeleted(id));
+        // Tree keys start with the connection's position, which moves up for those below it.
+        for keys in [&mut self.expanded, &mut self.loaded, &mut self.loading] {
+            *keys = std::mem::take(keys).into_iter().filter_map(|k| shift_key(&k, ix)).collect();
+        }
+        cx.emit(ConnectionDeleted { id, ix });
         self.refresh(cx);
         // The connection that took its place, or the previous one when it was last.
         let next = ix.min(self.workspace.read(cx).connections.len().saturating_sub(1)).to_string();
