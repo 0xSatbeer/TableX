@@ -1852,9 +1852,18 @@ mod tests {
     /// Right-clicks the tree row labeled `name`, picks Edit… from its menu and returns the dialog.
     fn open_edit_dialog(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) -> gpui_kit::Entity<crate::connection_dialog::ConnectionDialog> {
         use std::{cell::RefCell, rc::Rc};
-        let explorer = shell.read_with(cx, |this, _| this.explorer.clone());
-        let row = explorer.read_with(cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap_or_else(|| panic!("{name} row"));
-        let at = cx.debug_bounds(format!("tree-label-{row}").leak()).unwrap_or_else(|| panic!("{name} row drawn")).center();
+        let (explorer, workspace) = shell.read_with(cx, |this, _| (this.explorer.clone(), this.workspace.clone()));
+        let row = |cx: &mut gpui_kit::VisualTestContext| explorer.read_with(cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap_or_else(|| panic!("{name} row"));
+        let selector = |row: usize| -> &'static str { format!("tree-label-{row}").leak() };
+        let first = selector(row(cx));
+        if cx.debug_bounds(first).is_none() {
+            // Scrolled out of view: reveal it.
+            let ci = workspace.read_with(cx, |ws, _| ws.connections.iter().position(|c| c.name == name).unwrap());
+            explorer.update_in(cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+            cx.run_until_parked();
+        }
+        let shown = selector(row(cx));
+        let at = cx.debug_bounds(shown).unwrap_or_else(|| panic!("{name} row drawn")).center();
         let opened = Rc::new(RefCell::new(None));
         let sink = opened.clone();
         let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
@@ -2062,6 +2071,32 @@ mod tests {
             let conn = workspace.read_with(&cx, |ws, _| ws.connections[2].clone());
             assert_eq!((conn.name.as_str(), conn.status), (name, want), "{name} {path}: after the connect finished");
             assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels().iter().filter(|l| l.as_ref() == name).count()), 1, "{name} {path}: one tree row");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn after_an_edit_the_selection_stays_on_that_connection(cx: &mut gpui_kit::TestAppContext) {
+        // (filter typed first, row, edits, its label after)
+        let cases: [(&str, &str, &[(&str, &str)], &str); 5] = [
+            ("", "prod-pg", &[("name", "live")], "live"),
+            ("", "staging-pg", &[("name", "z")], "z"),
+            ("", "local.db", &[("path", "~/acme/other.db")], "local.db"),
+            ("", "prod-pg", &[("port", "5433")], "prod-pg"),
+            // The filter would hide the renamed row, so it is cleared.
+            ("local", "local.db", &[("name", "z.db")], "z.db"),
+        ];
+        for (filter, row, edits, label) in cases {
+            let (window, shell) = open_with_connection_tabs(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+            cx.run_until_parked();
+            if !filter.is_empty() {
+                cx.simulate_input(filter);
+            }
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            finish(&mut cx, &dialog, edits, "enter");
+            assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(label.into()), "{filter:?} {row} {edits:?}");
         }
     }
 
