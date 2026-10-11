@@ -22,6 +22,13 @@ impl Workspace {
         id
     }
 
+    /// Removes connection `id` and returns the position it had, or `None` if it is gone.
+    pub fn delete(&mut self, id: ConnectionId) -> Option<usize> {
+        let ix = self.connections.iter().position(|c| c.id == id)?;
+        self.connections.remove(ix);
+        Some(ix)
+    }
+
     /// Replaces connection `id`'s name, color, Production flag and params in place. New params
     /// disconnect it and clear its databases, which came from the old server. Does nothing if it
     /// is gone.

@@ -200,6 +200,11 @@ impl Shell {
             cx.notify();
         })
         .detach();
+        cx.subscribe(&explorer, |this, _, explorer::ConnectionDeleted(id), cx| {
+            this.tabs.drop_connection(*id);
+            this.tab_changed(cx);
+        })
+        .detach();
         cx.subscribe(&explorer, |this, _, ev: &explorer::OpenObject, cx| {
             // ponytail: every table shows a mock query result until drivers land (Phase 5)
             let rows = match mock::run_query(&format!("SELECT * FROM {}", ev.name)) {

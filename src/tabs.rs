@@ -213,6 +213,15 @@ impl<C> Tabs<C> {
         }
     }
 
+    /// Closes every tab from connection `id`, pinned ones too, and drops them from the reopen history.
+    pub fn drop_connection(&mut self, id: crate::model::ConnectionId) {
+        let from = |t: &EditorTab<C>| t.origin.as_ref().is_some_and(|o| o.connection == id);
+        while let Some(ix) = self.tabs.iter().position(from) {
+            self.close(ix);
+        }
+        self.closed.retain(|t| !from(t));
+    }
+
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {
             self.active = ix;

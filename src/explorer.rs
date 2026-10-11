@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
-use crate::connection_dialog::{ConnectionDialog, DeleteConfirm, Saved};
+use crate::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
 
@@ -470,6 +470,11 @@ pub struct OpenObject {
 
 impl EventEmitter<OpenObject> for Explorer {}
 
+/// Emitted after connection `id` was deleted, so the Shell can close its tabs.
+pub struct ConnectionDeleted(pub ConnectionId);
+
+impl EventEmitter<ConnectionDeleted> for Explorer {}
+
 pub struct Explorer {
     workspace: Entity<Workspace>,
     expanded: HashSet<String>,
@@ -629,7 +634,19 @@ impl Explorer {
     pub fn delete_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(node) = self.nodes.get(self.selected).filter(|n| matches!(n.kind, NodeKind::Connection(_))) else { return };
         let conn = self.workspace.read(cx).connections[node.conn].clone();
-        DeleteConfirm::open(&conn, window, cx);
+        let dialog = DeleteConfirm::open(&conn, window, cx);
+        cx.subscribe(&dialog, move |this, _, Confirmed, cx| this.remove_connection(conn.id, cx)).detach();
+    }
+
+    /// Deletes connection `id`. A connect still running for it finds it gone and is discarded.
+    fn remove_connection(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        let removed = self.workspace.update(cx, |ws, cx| {
+            cx.notify();
+            ws.delete(id)
+        });
+        if removed.is_some() {
+            cx.emit(ConnectionDeleted(id));
+        }
     }
 
     fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {

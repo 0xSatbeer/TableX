@@ -50,7 +50,18 @@ impl BottomPanel {
             }
         })
         .detach();
-        cx.observe(&workspace, |_, _, cx| cx.notify()).detach();
+        cx.observe(&workspace, |this, workspace, cx| {
+            // A deleted connection takes its log rows with it.
+            let ids: Vec<ConnectionId> = workspace.read(cx).connections.iter().map(|c| c.id).collect();
+            if this.log.iter().any(|e| !ids.contains(&e.connection_id)) {
+                this.log.retain(|e| ids.contains(&e.connection_id));
+                this.filter.connections.retain(|id| ids.contains(&ConnectionId(*id)));
+                this.expanded.clear();
+                this.refilter(cx);
+            }
+            cx.notify();
+        })
+        .detach();
         let mut log = Vec::new();
         mock::mock_query_log(LOG_CAP).into_iter().for_each(|entry| push_log(&mut log, entry));
         let filter = LogFilter::default();
