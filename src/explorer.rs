@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
-use crate::connection_dialog::{ConnectionDialog, Saved};
+use crate::connection_dialog::{ConnectionDialog, DeleteConfirm, Saved};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
 
@@ -625,6 +625,13 @@ impl Explorer {
         self.open_dialog(Some(id), window, cx);
     }
 
+    /// Asks to confirm deleting the selected connection row (Delete in its menu, `DeleteConnection`).
+    pub fn delete_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected).filter(|n| matches!(n.kind, NodeKind::Connection(_))) else { return };
+        let conn = self.workspace.read(cx).connections[node.conn].clone();
+        DeleteConfirm::open(&conn, window, cx);
+    }
+
     fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {
         let dialog = ConnectionDialog::open(self.workspace.clone(), editing, window, cx);
         cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
@@ -978,7 +985,11 @@ impl Explorer {
                     })
             })
             .zip(range_kinds)
-            .map(|(row, is_conn)| if is_conn { row.context_menu(|menu, _, _| menu.menu("Edit…", Box::new(crate::EditConnection))).into_any_element() } else { row.into_any_element() })
+            .map(|(row, is_conn)| if is_conn { row.context_menu(|menu, _, _| {
+                    menu.menu("Edit…", Box::new(crate::EditConnection)).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                        div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
+                    })
+                }).into_any_element() } else { row.into_any_element() })
             .collect()
     }
 }

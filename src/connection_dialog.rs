@@ -239,6 +239,54 @@ impl ConnectionDialog {
     }
 }
 
+/// The delete confirmation's body. Confirming emits `Confirmed`; the caller removes the connection.
+pub struct DeleteConfirm {
+    name: String,
+}
+
+/// Emitted when the user confirms the delete.
+pub struct Confirmed;
+
+impl EventEmitter<Confirmed> for DeleteConfirm {}
+
+impl DeleteConfirm {
+    /// Opens "Delete connection <name>?" over `window`.
+    pub fn open(conn: &Connection, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        let view = cx.new(|_| Self { name: conn.name.clone() });
+        let body = view.clone();
+        let title = format!("Delete connection {}?", conn.name);
+        window.open_dialog(cx, move |dialog, _, _| {
+            let title = title.clone();
+            dialog.title(div().debug_selector({
+                let title = title.clone();
+                move || format!("delete-title {title}")
+            }).child(title)).child(body.clone()).footer(
+                h_flex()
+                    .gap(theme::space_8())
+                    .child(div().flex_1())
+                    .child(Button::new("delete-cancel").debug_selector(|| "delete-cancel".into()).small().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
+                    .child(Button::new("delete-confirm").debug_selector(|| "delete-confirm".into()).danger().small().label("Delete connection").on_click({
+                        let body = body.clone();
+                        move |_, window, cx| {
+                            body.update(cx, |_, cx| cx.emit(Confirmed));
+                            window.close_dialog(cx);
+                        }
+                    })),
+            )
+        });
+        view
+    }
+}
+
+impl Render for DeleteConfirm {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .text_size(theme::ui_sm())
+            .text_color(theme::text_secondary(cx.theme()))
+            .child(format!("{} is removed from the workspace and its tabs close. This can't be undone.", self.name))
+    }
+}
+
 /// A labeled control with its entry in `errors` under it. `id` names it for tests (`field-<id>`).
 fn field(id: &'static str, label: &'static str, control: impl IntoElement, errors: &[(&str, String)], cx: &App) -> gpui_kit::Stateful<gpui_kit::Div> {
     let error = errors.iter().find(|(field, _)| *field == id).map(|(_, msg)| msg.clone());
