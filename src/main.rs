@@ -1800,6 +1800,50 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn enter_saves_a_valid_form_and_esc_or_cancel_close_without_changes(cx: &mut gpui_kit::TestAppContext) {
+        let valid = [("host", "db.local"), ("user", "u"), ("name", "c")];
+        let invalid = [("host", "db.local"), ("user", "u"), ("name", "prod-pg")];
+        // (edits, then press, dialog still open, connections added)
+        let cases: [(&[(&str, &str)], &str, bool, usize); 5] = [
+            (&valid, "enter", false, 1),
+            (&invalid, "enter", true, 0),
+            (&valid, "escape", false, 0),
+            (&invalid, "escape", false, 0),
+            (&valid, "click dialog-cancel", false, 0),
+        ];
+        for (edits, press, open, added) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            let before = workspace.read_with(&cx, |ws, _| ws.clone());
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, edits);
+            match press.strip_prefix("click ") {
+                Some(selector) => click(&mut cx, selector),
+                None => cx.simulate_keystrokes(press),
+            }
+            cx.run_until_parked();
+            let label = format!("{:?} {press}", edits.last().unwrap());
+            assert_eq!(cx.debug_bounds("dialog-layer").is_some(), open, "{label}: dialog open");
+            let after = workspace.read_with(&cx, |ws, _| ws.clone());
+            assert_eq!(after.connections.len(), before.connections.len() + added, "{label}: connections added");
+            if added == 0 {
+                assert_eq!(after, before, "{label}: workspace unchanged");
+            }
+        }
+    }
+
+    #[gpui_kit::test]
+    fn enter_on_an_invalid_form_shows_every_error(cx: &mut gpui_kit::TestAppContext) {
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        cx.simulate_keystrokes("enter");
+        let fields: Vec<&str> = dialog.read_with(&cx, |d, cx| d.errors(cx)).into_iter().map(|(f, _)| f).collect();
+        assert_eq!(fields, ["name", "host", "user"], "untouched fields show why Enter did nothing");
+    }
+
+    #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};
         let (window, shell) = open_with_connection_tabs(cx);
