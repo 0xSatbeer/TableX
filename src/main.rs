@@ -2220,4 +2220,49 @@ mod tests {
             assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", enabled), "{edits:?}");
         }
     }
+
+    #[gpui_kit::test]
+    fn test_connection_reads_testing_while_it_runs_then_shows_the_outcome_line(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::component::ActiveTheme as _;
+        use std::time::Duration;
+        let file = std::env::current_exe().unwrap().display().to_string();
+        let dir = std::env::temp_dir().display().to_string();
+        let pg = |host: &'static str| vec![("host", host), ("user", "u")];
+        let sqlite = |path: String| vec![("kind-sqlite", ""), ("path", path.leak() as &str)];
+        // (edits, result line, success)
+        let cases: Vec<(Vec<(&str, &str)>, String, bool)> = vec![
+            (pg("db.local"), "Connection OK".into(), true),
+            (pg("db.invalid"), "Could not connect: Could not resolve host db.invalid".into(), false),
+            (pg("DB.INVALID"), "Could not connect: Could not resolve host DB.INVALID".into(), false),
+            (pg(" db.invalid "), "Could not connect: Could not resolve host db.invalid".into(), false),
+            (pg("invalid.db"), "Connection OK".into(), true),
+            (sqlite(file.clone()), "Connection OK".into(), true),
+            (sqlite(format!(" {file} ")), "Connection OK".into(), true),
+            (sqlite("/nope/x.db".into()), "Could not connect: No file at /nope/x.db".into(), false),
+            (sqlite(dir.clone()), format!("Could not connect: No file at {dir}"), false),
+        ];
+        let latency = Duration::from_millis(1000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (success, danger) = cx.update(|_, cx| (cx.theme().success, cx.theme().danger));
+        for (edits, line, ok) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &edits);
+            click(&mut cx, "dialog-test");
+            for _ in 0..2 {
+                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Testing…", false), "{edits:?}: running");
+                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), None, "{edits:?}: no line yet");
+                cx.executor().advance_clock(latency / 2 - Duration::from_millis(1));
+                cx.run_until_parked();
+            }
+            cx.executor().advance_clock(Duration::from_millis(2));
+            cx.run_until_parked();
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", true), "{edits:?}: finished");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), Some((line, if ok { success } else { danger })), "{edits:?}");
+            assert!(cx.debug_bounds("test-result").is_some(), "{edits:?}: line drawn");
+        }
+        crate::mock::set_latency(0);
+    }
 }
