@@ -1983,6 +1983,7 @@ mod tests {
             ("prod-pg", vec![("name", "live")], vec!["swatch-5", "production"], true, "live", 5, false),
             ("local.db", vec![("path", "~/acme/other.db")], vec![], false, "local.db", 4, false),
             ("local.db", vec![("path", " ~/acme/local.db ")], vec![], true, "local.db", 4, false),
+            ("local.db", vec![], vec!["production"], true, "local.db", 4, true),
         ];
         for (row, edits, clicks, stays, name, color, production) in cases {
             let label = format!("{row} {edits:?} {clicks:?}");
@@ -2032,6 +2033,8 @@ mod tests {
                 assert_eq!(a, &want, "{label}: tab {key}");
             }
             assert!(after.iter().any(|(_, o)| o.connection == ConnectionId(1)), "{label}: prod-pg tabs still open");
+            let row = explorer.read_with(&cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap();
+            assert_eq!(cx.debug_bounds(format!("prod-badge-{row}").leak()).is_some(), production, "{label}: PROD badge in the tree");
             if !stays {
                 // Disconnected by the edit, it connects again from its row.
                 explorer.update_in(&mut cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
