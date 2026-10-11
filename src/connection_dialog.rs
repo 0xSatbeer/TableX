@@ -96,7 +96,7 @@ pub fn button_state(name_valid: bool, fields_valid: bool) -> (bool, bool) {
 /// Whether saving `form` over a connection with params `old` changes them (compared trimmed).
 /// An invalid form counts as changed; it can't be saved anyway.
 pub fn params_changed(old: &ConnectionParams, form: &Form) -> bool {
-    false
+    form.params().as_ref() != Ok(old)
 }
 
 #[cfg(test)]
