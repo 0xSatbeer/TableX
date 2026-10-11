@@ -657,7 +657,10 @@ impl Explorer {
             cx.emit(OpenObject {
                 key: node.key.clone().into(),
                 name: node.label.clone(),
-                origin: Origin { connection, color, production, path: names[..names.len() - 1].join(" › ").into() },
+                origin: {
+                    let tail = names[1..names.len() - 1].join(" › ");
+                    Origin { connection, color, production, path: crate::tabs::join_path(&names[0], &tail), tail: tail.into() }
+                },
                 path: names.join(" › ").into(),
                 preview,
             });
