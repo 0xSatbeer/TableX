@@ -974,7 +974,7 @@ impl Explorer {
                         d.child(div().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child(n.to_string()))
                     })
                     .when(is_conn && conn.is_production, |d| {
-                        d.child(theme::prod_badge(theme))
+                        d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
             .zip(range_kinds)
