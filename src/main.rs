@@ -1602,4 +1602,39 @@ mod tests {
             assert_eq!(a, &super::tabs::Origin { path: path.into(), ..b.clone() }, "tab {key}");
         }
     }
+
+    #[gpui_kit::test]
+    fn recolor_and_production_from_outside_the_explorer_rerender_the_tree_the_panel_and_tabs(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionId;
+        use std::{cell::Cell, rc::Rc};
+        let (window, shell) = open_with_connection_tabs(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer, panel) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone(), this.bottom_panel.clone()));
+        let renders = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+        cx.update(|_, cx| {
+            let hits = renders[0].clone();
+            cx.observe(&explorer, move |_, _| hits.set(hits.get() + 1)).detach();
+            let hits = renders[1].clone();
+            cx.observe(&panel, move |_, _| hits.set(hits.get() + 1)).detach();
+        });
+        let before = tab_origins(&shell, &cx);
+        // (change, new color, new production flag)
+        let cases: [(&str, u8, bool); 3] = [("recolor", 5, true), ("production off", 5, false), ("production on", 5, true)];
+        for (change, color, production) in cases {
+            renders.iter().for_each(|r| r.set(0));
+            workspace.update(&mut cx, |ws, cx| {
+                let conn = &mut ws.connections[0];
+                (conn.color, conn.is_production) = (color, production);
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert!(renders[0].get() > 0, "{change}: explorer re-rendered");
+            assert!(renders[1].get() > 0, "{change}: bottom panel re-rendered");
+            assert_eq!(panel.read_with(&cx, |p, cx| p.connection(ConnectionId(1), cx)), ("prod-pg".to_string(), color, production), "{change}: panel row");
+            for ((key, b), (_, a)) in before.iter().zip(&tab_origins(&shell, &cx)) {
+                let expected = if b.connection == ConnectionId(1) { super::tabs::Origin { color, production, ..b.clone() } } else { b.clone() };
+                assert_eq!(a, &expected, "{change}: tab {key} stripe and tint");
+            }
+        }
+    }
 }
