@@ -1574,10 +1574,14 @@ mod tests {
         shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter_map(|t| Some((t.key.clone(), t.origin.clone()?))).collect())
     }
 
-    /// The Shell with the mock workspace, parked.
+    /// The Shell with the mock workspace, parked. Motion is reduced so a dialog lands in place
+    /// at once; mid-slide, a click's mouse-up would hit a different spot than its mouse-down.
     fn open_plain(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
         use gpui_kit::AppContext as _;
-        cx.update(gpui_kit::init);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_reduce_motion(true);
+        });
         let (window, shell) = cx.update(|cx| {
             gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
         });

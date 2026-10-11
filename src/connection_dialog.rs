@@ -113,7 +113,11 @@ impl Render for ConnectionDialog {
             .small()
             .outline()
             .child(Button::new("kind-postgres").debug_selector(|| "kind-postgres".into()).label("Postgres").selected(self.kind == DbKind::Postgres))
-            .child(Button::new("kind-sqlite").debug_selector(|| "kind-sqlite".into()).label("SQLite").selected(self.kind == DbKind::Sqlite));
+            .child(Button::new("kind-sqlite").debug_selector(|| "kind-sqlite".into()).label("SQLite").selected(self.kind == DbKind::Sqlite))
+            .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
+                this.kind = if clicked.first() == Some(&1) { DbKind::Sqlite } else { DbKind::Postgres };
+                cx.notify();
+            }));
         let fields: Vec<AnyElement> = match self.kind {
             DbKind::Postgres => vec![
                 h_flex()
