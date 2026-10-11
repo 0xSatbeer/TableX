@@ -215,13 +215,16 @@ impl Render for ConnectionDialog {
                 }))
                 .into_any_element()
         });
+        let locked = self.editing.is_some();
         let kinds = ButtonGroup::new("kind")
             .small()
             .outline()
-            // Edit mode shows the type but can't change it; must come before the children.
-            .disabled(self.editing.is_some())
-            .child(Button::new("kind-postgres").debug_selector(|| "kind-postgres".into()).label("Postgres").selected(self.kind == DbKind::Postgres))
-            .child(Button::new("kind-sqlite").debug_selector(|| "kind-sqlite".into()).label("SQLite").selected(self.kind == DbKind::Sqlite))
+            // Edit mode locks the type by disabling only the other one, since a disabled button hides
+            // its selected style; `children` because `child` overwrites each button's disabled state.
+            .children([
+                Button::new("kind-postgres").debug_selector(|| "kind-postgres".into()).label("Postgres").selected(self.kind == DbKind::Postgres).disabled(locked && self.kind != DbKind::Postgres),
+                Button::new("kind-sqlite").debug_selector(|| "kind-sqlite".into()).label("SQLite").selected(self.kind == DbKind::Sqlite).disabled(locked && self.kind != DbKind::Sqlite),
+            ])
             .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
                 this.kind = if clicked.first() == Some(&1) { DbKind::Sqlite } else { DbKind::Postgres };
                 cx.notify();
