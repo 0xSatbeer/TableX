@@ -1843,6 +1843,45 @@ mod tests {
         assert_eq!(fields, ["name", "host", "user"], "untouched fields show why Enter did nothing");
     }
 
+    /// Right-clicks the tree row labeled `name`, picks Edit… from its menu and returns the dialog.
+    fn open_edit_dialog(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) -> gpui_kit::Entity<crate::connection_dialog::ConnectionDialog> {
+        use std::{cell::RefCell, rc::Rc};
+        let explorer = shell.read_with(cx, |this, _| this.explorer.clone());
+        let row = explorer.read_with(cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap_or_else(|| panic!("{name} row"));
+        let at = cx.debug_bounds(format!("tree-label-{row}").leak()).unwrap_or_else(|| panic!("{name} row drawn")).center();
+        let opened = Rc::new(RefCell::new(None));
+        let sink = opened.clone();
+        let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
+        cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
+        cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
+        cx.run_until_parked();
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        opened.take().unwrap_or_else(|| panic!("Edit… on {name} opened a dialog"))
+    }
+
+    #[gpui_kit::test]
+    fn right_click_edit_opens_the_dialog_prefilled_with_the_type_locked(cx: &mut gpui_kit::TestAppContext) {
+        use crate::connection_dialog::Form;
+        use crate::model::{DbKind, SslMode};
+        let blank = Form { name: "".into(), color: 0, is_production: false, kind: DbKind::Postgres, host: "".into(), port: "5432".into(), user: "".into(), database: "postgres".into(), ssl: SslMode::Prefer, path: "".into() };
+        // (row, its form, the other type's button)
+        let cases = [
+            ("prod-pg", Form { name: "prod-pg".into(), color: 0, is_production: true, host: "db.acme.internal".into(), user: "app".into(), database: "app_db".into(), ..blank.clone() }, "kind-sqlite"),
+            ("staging-pg", Form { name: "staging-pg".into(), color: 2, host: "staging.acme.internal".into(), user: "app".into(), database: "app_db".into(), ..blank.clone() }, "kind-sqlite"),
+            ("local.db", Form { name: "local.db".into(), color: 4, kind: DbKind::Sqlite, path: "~/acme/local.db".into(), ..blank.clone() }, "kind-postgres"),
+        ];
+        for (row, want, other_kind) in cases {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let dialog = open_edit_dialog(&mut cx, &shell, row);
+            assert!(cx.debug_bounds("dialog-layer").is_some(), "{row}: dialog shown");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx)), want, "{row}: prefilled");
+            click(&mut cx, other_kind);
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx).kind), want.kind, "{row}: type locked");
+        }
+    }
+
     #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};
