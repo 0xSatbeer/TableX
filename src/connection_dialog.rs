@@ -10,7 +10,7 @@ use gpui_kit::component::{
     button::{Button, ButtonGroup, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
-    select::{Select, SelectState},
+    select::{Select, SelectEvent, SelectState},
     switch::Switch,
     v_flex,
 };
@@ -117,11 +117,19 @@ impl ConnectionDialog {
             cx.subscribe(input, move |this, _, ev: &InputEvent, cx| {
                 if let InputEvent::Change = ev {
                     this.touched.insert(id);
+                    if id != "name" {
+                        this.connection_changed();
+                    }
                     cx.notify();
                 }
             })
             .detach();
         }
+        cx.subscribe(&ssl, |this, _, _: &SelectEvent<Vec<&'static str>>, cx| {
+            this.connection_changed();
+            cx.notify();
+        })
+        .detach();
         Self { workspace, editing, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl, touched: HashSet::new(), test: None, test_result: None }
     }
 
@@ -207,6 +215,11 @@ impl ConnectionDialog {
         })
     }
 
+    /// A connection field changed, so the last test no longer applies.
+    fn connection_changed(&mut self) {
+        self.test_result = None;
+    }
+
     /// Starts Test connection on the current fields; its outcome lands after `mock::latency()`.
     fn run_test(&mut self, cx: &mut Context<Self>) {
         let Ok(params) = self.form(cx).params() else { return };
@@ -270,7 +283,11 @@ impl Render for ConnectionDialog {
                 Button::new("kind-sqlite").debug_selector(|| "kind-sqlite".into()).label("SQLite").selected(self.kind == DbKind::Sqlite).disabled(locked && self.kind != DbKind::Sqlite),
             ])
             .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
-                this.kind = if clicked.first() == Some(&1) { DbKind::Sqlite } else { DbKind::Postgres };
+                let kind = if clicked.first() == Some(&1) { DbKind::Sqlite } else { DbKind::Postgres };
+                if kind != this.kind {
+                    this.kind = kind;
+                    this.connection_changed();
+                }
                 cx.notify();
             }));
         let fields: Vec<AnyElement> = match self.kind {

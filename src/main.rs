@@ -2300,7 +2300,10 @@ mod tests {
             match change {
                 ("click", selector) => click(&mut cx, selector),
                 ("ssl", _) => {
-                    click(&mut cx, "field-ssl");
+                    // The select sits under the field's label.
+                    let field = cx.debug_bounds("field-ssl").expect("SSL field drawn");
+                    cx.simulate_click(gpui_kit::point(field.center().x, field.bottom() - gpui_kit::px(8.)), Default::default());
+                    cx.run_until_parked();
                     cx.simulate_keystrokes("down enter");
                     cx.run_until_parked();
                     assert_ne!(dialog.read_with(&cx, |d, cx| d.form(cx).ssl), crate::model::SslMode::Prefer, "SSL changed");
