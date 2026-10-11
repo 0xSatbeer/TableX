@@ -2192,4 +2192,32 @@ mod tests {
             }
         }
     }
+
+    #[gpui_kit::test]
+    fn test_connection_is_enabled_only_while_the_connection_fields_are_valid(cx: &mut gpui_kit::TestAppContext) {
+        // (edits, Test connection enabled)
+        let cases: Vec<(Vec<(&str, &str)>, bool)> = vec![
+            (vec![], false),
+            (vec![("host", "h")], false),
+            (vec![("host", "h"), ("user", "u")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "prod-pg")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "  ")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "new")], true),
+            (vec![("host", "h"), ("user", "u"), ("name", "new"), ("port", "0")], false),
+            (vec![("host", "h"), ("user", "u"), ("port", " 65535 ")], true),
+            (vec![("host", "h"), ("user", "u"), ("database", " ")], false),
+            (vec![("kind-sqlite", "")], false),
+            (vec![("kind-sqlite", ""), ("path", "/nope/x.db")], true),
+            (vec![("kind-sqlite", ""), ("path", "/nope/x.db"), ("name", "prod-pg")], true),
+        ];
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        for (edits, enabled) in cases {
+            cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
+            let dialog = open_add_dialog(&mut cx);
+            fill(&mut cx, &dialog, &edits);
+            assert!(cx.debug_bounds("dialog-test").is_some(), "{edits:?}: Test connection drawn");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", enabled), "{edits:?}");
+        }
+    }
 }

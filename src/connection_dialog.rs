@@ -178,6 +178,16 @@ impl ConnectionDialog {
         let (name, params) = self.validate(cx);
         button_state(name.is_ok(), params.is_ok()).0
     }
+
+    /// The Test connection button: (label, enabled).
+    pub fn test_button(&self, _: &App) -> (&'static str, bool) {
+        ("Test connection", false)
+    }
+
+    /// The test result line above the footer: (text, color).
+    pub fn test_line(&self, _: &App) -> Option<(String, gpui_kit::Hsla)> {
+        None
+    }
 }
 
 /// A labeled control with its entry in `errors` under it. `id` names it for tests (`field-<id>`).
