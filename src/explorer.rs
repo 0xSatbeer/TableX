@@ -669,6 +669,8 @@ impl Explorer {
         for keys in [&mut self.expanded, &mut self.loaded, &mut self.loading] {
             *keys = std::mem::take(keys).into_iter().filter_map(|k| shift_key(&k, ix)).collect();
         }
+        // A rename holds a position too; the delete ends it.
+        self.rename = None;
         cx.emit(ConnectionDeleted { id, ix });
         self.refresh(cx);
         // The connection that took its place, or the previous one when it was last.
