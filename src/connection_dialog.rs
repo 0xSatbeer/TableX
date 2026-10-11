@@ -40,7 +40,7 @@ pub struct ConnectionDialog {
     pub user: Entity<InputState>,
     pub database: Entity<InputState>,
     pub path: Entity<InputState>,
-    ssl: Entity<SelectState<Vec<&'static str>>>,
+    pub ssl: Entity<SelectState<Vec<&'static str>>>,
     /// Fields the user has edited; only these show their error until a save is attempted.
     touched: HashSet<&'static str>,
 }
