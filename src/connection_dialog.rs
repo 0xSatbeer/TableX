@@ -45,7 +45,7 @@ pub struct ConnectionDialog {
     touched: HashSet<&'static str>,
 }
 
-/// Emitted after Save added connection `.0` to the workspace.
+/// Emitted after Save added or edited connection `.0`.
 pub struct Saved(pub ConnectionId);
 
 impl EventEmitter<Saved> for ConnectionDialog {}
@@ -131,18 +131,24 @@ impl ConnectionDialog {
         }
     }
 
-    /// Adds the connection to the workspace if the form is valid. Returns whether it did;
-    /// if not, every field shows its error.
+    /// Adds the connection to the workspace, or applies the edit, if the form is valid. Returns
+    /// whether it did; if not, every field shows its error.
     pub fn save(&mut self, cx: &mut Context<Self>) -> bool {
         let (Ok(name), Ok(params)) = self.validate(cx) else {
             self.touched.extend(TEXT_FIELDS);
             cx.notify();
             return false;
         };
-        let (color, is_production) = (self.color, self.is_production);
+        let (color, is_production, editing) = (self.color, self.is_production, self.editing);
         let id = self.workspace.update(cx, |ws, cx| {
             cx.notify();
-            ws.add(name, color, is_production, params)
+            match editing {
+                Some(id) => {
+                    ws.edit(id, name, color, is_production, params);
+                    id
+                }
+                None => ws.add(name, color, is_production, params),
+            }
         });
         cx.emit(Saved(id));
         true

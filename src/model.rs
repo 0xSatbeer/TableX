@@ -21,6 +21,13 @@ impl Workspace {
         self.connections.push(Connection { id, name, color, is_production, status: ConnectionStatus::Disconnected, params, databases: Vec::new() });
         id
     }
+
+    /// Replaces connection `id`'s name, color, Production flag and params in place. Does nothing
+    /// if it is gone.
+    pub fn edit(&mut self, id: ConnectionId, name: String, color: u8, is_production: bool, params: ConnectionParams) {
+        let Some(conn) = self.connections.iter_mut().find(|c| c.id == id) else { return };
+        (conn.name, conn.color, conn.is_production, conn.params) = (name, color, is_production, params);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
