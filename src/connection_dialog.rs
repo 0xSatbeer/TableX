@@ -26,9 +26,11 @@ const TEXT_FIELDS: [&str; 6] = ["name", "host", "port", "user", "database", "pat
 /// SSL choices in the order the select lists them.
 const SSL_MODES: [(SslMode, &str); 3] = [(SslMode::Disable, "Disable"), (SslMode::Prefer, "Prefer"), (SslMode::Require, "Require")];
 
-/// The Add connection dialog's body. The dialog itself lives in the window's dialog layer.
+/// The Add/Edit connection dialog's body. The dialog itself lives in the window's dialog layer.
 pub struct ConnectionDialog {
     workspace: Entity<Workspace>,
+    /// The connection being edited; `None` adds a new one.
+    editing: Option<ConnectionId>,
     color: u8,
     is_production: bool,
     kind: DbKind,
@@ -49,14 +51,16 @@ pub struct Saved(pub ConnectionId);
 impl EventEmitter<Saved> for ConnectionDialog {}
 
 impl ConnectionDialog {
-    /// Opens the Add connection dialog over `window`, with the name field focused.
-    pub fn open(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) -> Entity<Self> {
-        let view = cx.new(|cx| Self::new(workspace, window, cx));
+    /// Opens the Add connection dialog, or the Edit dialog for `editing`, over `window`, with
+    /// the name field focused.
+    pub fn open(workspace: Entity<Workspace>, editing: Option<ConnectionId>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        let view = cx.new(|cx| Self::new(workspace, editing, window, cx));
         let body = view.clone();
+        let (title, save_label) = if editing.is_some() { ("Edit connection", "Save changes") } else { ("Add connection", "Add connection") };
         window.open_dialog(cx, move |dialog, _, cx| {
             let save_enabled = body.read(cx).save_enabled(cx);
             let on_enter = body.clone();
-            dialog.title("Add connection").child(body.clone()).on_ok(move |_, _, cx| on_enter.update(cx, |d, cx| d.save(cx))).footer(
+            dialog.title(title).child(body.clone()).on_ok(move |_, _, cx| on_enter.update(cx, |d, cx| d.save(cx))).footer(
                 h_flex()
                     .justify_end()
                     .gap(theme::space_8())
@@ -66,7 +70,7 @@ impl ConnectionDialog {
                             .debug_selector(|| "dialog-save".into())
                             .primary()
                             .small()
-                            .label("Add connection")
+                            .label(save_label)
                             .disabled(!save_enabled)
                             .on_click({
                                 let body = body.clone();
@@ -83,9 +87,12 @@ impl ConnectionDialog {
         view
     }
 
-    fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let used: Vec<u8> = workspace.read(cx).connections.iter().map(|c| c.color).collect();
-        let form = Form::new(&used);
+    fn new(workspace: Entity<Workspace>, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let connections = &workspace.read(cx).connections;
+        let form = match connections.iter().find(|c| Some(c.id) == editing) {
+            Some(conn) => Form::of(conn),
+            None => Form::new(&connections.iter().map(|c| c.color).collect::<Vec<_>>()),
+        };
         let mut input = |value: &str, placeholder: &str| {
             let (value, placeholder) = (value.to_string(), placeholder.to_string());
             cx.new(|cx| InputState::new(window, cx).default_value(value).placeholder(placeholder))
@@ -103,7 +110,7 @@ impl ConnectionDialog {
             })
             .detach();
         }
-        Self { workspace, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl, touched: HashSet::new() }
+        Self { workspace, editing, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl, touched: HashSet::new() }
     }
 
     /// The fields as the dialog shows them.
@@ -204,6 +211,8 @@ impl Render for ConnectionDialog {
         let kinds = ButtonGroup::new("kind")
             .small()
             .outline()
+            // Edit mode shows the type but can't change it; must come before the children.
+            .disabled(self.editing.is_some())
             .child(Button::new("kind-postgres").debug_selector(|| "kind-postgres".into()).label("Postgres").selected(self.kind == DbKind::Postgres))
             .child(Button::new("kind-sqlite").debug_selector(|| "kind-sqlite".into()).label("SQLite").selected(self.kind == DbKind::Sqlite))
             .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
@@ -289,6 +298,17 @@ impl Form {
             database: "postgres".into(),
             ssl: SslMode::Prefer,
             path: String::new(),
+        }
+    }
+
+    /// The form for editing `conn`. Fields its type doesn't use keep the new-connection defaults.
+    pub fn of(conn: &Connection) -> Self {
+        let base = Form { name: conn.name.clone(), color: conn.color, is_production: conn.is_production, kind: conn.kind(), ..Form::new(&[]) };
+        match &conn.params {
+            ConnectionParams::Postgres { host, port, user, database, ssl } => {
+                Form { host: host.clone(), port: port.to_string(), user: user.clone(), database: database.clone(), ssl: *ssl, ..base }
+            }
+            ConnectionParams::Sqlite { path } => Form { path: path.display().to_string(), ..base },
         }
     }
 

@@ -27,7 +27,7 @@ mod statusbar;
 mod tabs;
 mod theme;
 
-actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme, AddConnection]);
+actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme, AddConnection, EditConnection]);
 
 enum TabContent {
     Grid(Entity<grid::Grid>),
@@ -830,6 +830,9 @@ impl Render for Shell {
             }))
             .on_action(cx.listener(|this, _: &AddConnection, window, cx| {
                 this.explorer.update(cx, |explorer, cx| explorer.add_connection(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &EditConnection, window, cx| {
+                this.explorer.update(cx, |explorer, cx| explorer.edit_connection(window, cx));
             }))
             .on_action(cx.listener(|this, _: &FocusExplorer, window, cx| {
                 this.layout.show_explorer();

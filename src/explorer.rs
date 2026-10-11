@@ -7,6 +7,7 @@ use std::ops::Range;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _,
+    menu::ContextMenuExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -16,7 +17,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::model::{Connection, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
+use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
 use crate::connection_dialog::{ConnectionDialog, Saved};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
@@ -602,7 +603,18 @@ impl Explorer {
 
     /// Opens the Add connection dialog ("+" in the header, `AddConnection`).
     pub fn add_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let dialog = ConnectionDialog::open(self.workspace.clone(), window, cx);
+        self.open_dialog(None, window, cx);
+    }
+
+    /// Opens the Edit dialog for the selected connection row (Edit… in its menu, `EditConnection`).
+    pub fn edit_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected).filter(|n| matches!(n.kind, NodeKind::Connection(_))) else { return };
+        let id = self.workspace.read(cx).connections[node.conn].id;
+        self.open_dialog(Some(id), window, cx);
+    }
+
+    fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = ConnectionDialog::open(self.workspace.clone(), editing, window, cx);
         cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
             if let Some(ix) = this.workspace.read(cx).connections.iter().position(|c| c.id == *id) {
                 this.reveal(&ix.to_string(), window, cx);
@@ -798,10 +810,11 @@ impl Explorer {
         cx.stop_propagation();
     }
 
-    fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Stateful<Div>> {
+    fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
         let focused = self.focus.contains_focused(window, cx);
         let ws = self.workspace.read(cx);
+        let range_kinds: Vec<bool> = range.clone().map(|ix| matches!(self.nodes[ix].kind, NodeKind::Connection(_))).collect();
         range
             .map(|ix| {
                 let node = &self.nodes[ix];
@@ -875,6 +888,16 @@ impl Explorer {
                             this.press(ix, Hit::Row { clicks: ev.click_count }, cx);
                         }),
                     )
+                    // The row's menu acts on the selection, so a right-click selects first.
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, _, window, cx| {
+                            window.focus(&this.focus, cx);
+                            this.rename = None;
+                            this.marked.clear();
+                            this.select(ix, cx);
+                        }),
+                    )
                     .child(
                         div().flex_none().w(theme::space_12()).when(node.expandable, |d| {
                             d.child(Icon::new(chevron).xsmall().text_color(theme.muted_foreground)).on_mouse_down(
@@ -937,6 +960,8 @@ impl Explorer {
                         d.child(theme::prod_badge(theme))
                     })
             })
+            .zip(range_kinds)
+            .map(|(row, is_conn)| if is_conn { row.context_menu(|menu, _, _| menu.menu("Edit…", Box::new(crate::EditConnection))).into_any_element() } else { row.into_any_element() })
             .collect()
     }
 }
