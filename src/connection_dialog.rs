@@ -105,6 +105,11 @@ pub fn delete_enabled(name: &str, is_production: bool, typed: &str) -> bool {
     !is_production || typed == name
 }
 
+/// The Test connection result for valid params: `Ok` or the failure reason.
+pub fn test_outcome(params: &ConnectionParams) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +286,35 @@ mod tests {
         ];
         for (name, prod, typed, want) in cases {
             assert_eq!(delete_enabled(name, prod, typed), want, "{name} {prod} {typed:?}");
+        }
+    }
+
+    #[test]
+    fn test_outcome_cases() {
+        let dir = std::env::temp_dir();
+        let file = std::env::current_exe().unwrap();
+        let postgres = |host: &str| ConnectionParams::Postgres {
+            host: host.into(),
+            port: 5432,
+            user: "u".into(),
+            database: "d".into(),
+            ssl: SslMode::Prefer,
+        };
+        let sqlite = |path: &std::path::Path| ConnectionParams::Sqlite { path: path.to_path_buf() };
+        let no_file = |path: &std::path::Path| Err(format!("No file at {}", path.display()));
+        let missing = PathBuf::from("/nope/x.db");
+        let cases = [
+            (postgres("db.local"), Ok(())),
+            (postgres("db.invalid"), Err("Could not resolve host db.invalid".to_string())),
+            (postgres("DB.INVALID"), Err("Could not resolve host DB.INVALID".to_string())),
+            (postgres("invalid.db"), Ok(())),
+            (postgres("invalid"), Ok(())),
+            (sqlite(&file), Ok(())),
+            (sqlite(&missing), no_file(&missing)),
+            (sqlite(&dir), no_file(&dir)),
+        ];
+        for (params, want) in cases {
+            assert_eq!(test_outcome(&params), want, "{params:?}");
         }
     }
 }
