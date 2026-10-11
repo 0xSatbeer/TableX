@@ -1852,6 +1852,17 @@ mod tests {
     /// Right-clicks the tree row labeled `name`, picks Edit… from its menu and returns the dialog.
     fn open_edit_dialog(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) -> gpui_kit::Entity<crate::connection_dialog::ConnectionDialog> {
         use std::{cell::RefCell, rc::Rc};
+        let opened = Rc::new(RefCell::new(None));
+        let sink = opened.clone();
+        let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
+        right_click_row(cx, shell, name);
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        opened.take().unwrap_or_else(|| panic!("Edit… on {name} opened a dialog"))
+    }
+
+    /// Right-clicks the tree row labeled `name`, revealing it first if it is scrolled out of view.
+    fn right_click_row(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, name: &str) {
         let (explorer, workspace) = shell.read_with(cx, |this, _| (this.explorer.clone(), this.workspace.clone()));
         let row = |cx: &mut gpui_kit::VisualTestContext| explorer.read_with(cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap_or_else(|| panic!("{name} row"));
         let selector = |row: usize| -> &'static str { format!("tree-label-{row}").leak() };
@@ -1864,15 +1875,9 @@ mod tests {
         }
         let shown = selector(row(cx));
         let at = cx.debug_bounds(shown).unwrap_or_else(|| panic!("{name} row drawn")).center();
-        let opened = Rc::new(RefCell::new(None));
-        let sink = opened.clone();
-        let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
         cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
         cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
         cx.run_until_parked();
-        cx.simulate_keystrokes("down enter");
-        cx.run_until_parked();
-        opened.take().unwrap_or_else(|| panic!("Edit… on {name} opened a dialog"))
     }
 
     #[gpui_kit::test]
@@ -2396,6 +2401,23 @@ mod tests {
             assert!(cx.debug_bounds("dialog-layer").is_none(), "{label}: dialog closed");
             assert!(workspace.read_with(&cx, |ws, _| ws.connections.iter().any(|c| c.name == name)), "{label}: saved");
             assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), None, "{label}: no test line");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn delete_in_the_row_menu_opens_the_confirmation_with_the_spec_title_and_buttons(cx: &mut gpui_kit::TestAppContext) {
+        for row in ["prod-pg", "staging-pg", "local.db"] {
+            let (window, shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            right_click_row(&mut cx, &shell, row);
+            assert!(cx.debug_bounds("menu-delete").is_some(), "{row}: Delete in the row menu");
+            click(&mut cx, "menu-delete");
+            assert!(cx.debug_bounds("dialog-layer").is_some(), "{row}: confirmation shown");
+            let title: &'static str = format!("delete-title Delete connection {row}?").leak();
+            assert!(cx.debug_bounds(title).is_some(), "{row}: titled {title:?}");
+            for button in ["delete-cancel", "delete-confirm"] {
+                assert!(cx.debug_bounds(button).is_some(), "{row}: {button} drawn");
+            }
         }
     }
 }
