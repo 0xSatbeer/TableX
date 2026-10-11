@@ -1603,6 +1603,40 @@ mod tests {
         }
     }
 
+    /// Dispatches `AddConnection` and returns the dialog it opened.
+    fn open_add_dialog(cx: &mut gpui_kit::VisualTestContext) -> gpui_kit::Entity<crate::connection_dialog::ConnectionDialog> {
+        use std::{cell::RefCell, rc::Rc};
+        let opened = Rc::new(RefCell::new(None));
+        let sink = opened.clone();
+        let _watch = cx.update(|_, cx| cx.observe_new(move |_: &mut crate::connection_dialog::ConnectionDialog, _, cx| *sink.borrow_mut() = Some(cx.entity())));
+        cx.dispatch_action(super::AddConnection);
+        cx.run_until_parked();
+        opened.take().expect("AddConnection opened a dialog")
+    }
+
+    #[gpui_kit::test]
+    fn add_dialog_opens_with_the_spec_defaults(cx: &mut gpui_kit::TestAppContext) {
+        use crate::connection_dialog::Form;
+        use crate::model::{DbKind, SslMode};
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        // The mock workspace uses colors 0, 2 and 4.
+        let want = Form {
+            name: "".into(),
+            color: 1,
+            is_production: false,
+            kind: DbKind::Postgres,
+            host: "".into(),
+            port: "5432".into(),
+            user: "".into(),
+            database: "postgres".into(),
+            ssl: SslMode::Prefer,
+            path: "".into(),
+        };
+        assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx)), want);
+    }
+
     #[gpui_kit::test]
     fn f2_rename_shows_in_the_tree_the_panel_and_that_connections_tabs_only(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionId, ConnectionStatus};

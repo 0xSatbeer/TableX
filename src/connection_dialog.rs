@@ -23,6 +23,11 @@ impl ConnectionDialog {
         window.open_dialog(cx, move |dialog, _, _| dialog.title("Add connection").child(body.clone()));
         view
     }
+
+    /// The fields as the dialog shows them.
+    pub fn form(&self, _: &App) -> Form {
+        Form::new(&[])
+    }
 }
 
 impl Render for ConnectionDialog {
