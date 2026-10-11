@@ -27,7 +27,7 @@ mod statusbar;
 mod tabs;
 mod theme;
 
-actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme]);
+actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme, AddConnection]);
 
 enum TabContent {
     Grid(Entity<grid::Grid>),
@@ -1569,6 +1569,35 @@ mod tests {
 
     fn tab_origins(shell: &gpui_kit::Entity<super::Shell>, cx: &gpui_kit::VisualTestContext) -> Vec<(gpui_kit::SharedString, super::tabs::Origin)> {
         shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter_map(|t| Some((t.key.clone(), t.origin.clone()?))).collect())
+    }
+
+    /// The Shell with the mock workspace, parked.
+    fn open_plain(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+        });
+        gpui_kit::VisualTestContext::from_window(window.into(), cx).run_until_parked();
+        (window.into(), shell)
+    }
+
+    #[gpui_kit::test]
+    fn plus_button_or_add_connection_action_opens_the_dialog(cx: &mut gpui_kit::TestAppContext) {
+        for via in ["action", "plus button"] {
+            let (window, _shell) = open_plain(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            assert!(cx.debug_bounds("dialog-layer").is_none(), "{via}: no dialog before");
+            if via == "action" {
+                cx.dispatch_action(super::AddConnection);
+            } else {
+                let plus = cx.debug_bounds("add-connection");
+                assert!(plus.is_some(), "explorer header has a + button");
+                cx.simulate_click(plus.unwrap().center(), Default::default());
+            }
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("dialog-layer").is_some(), "{via}: the dialog layer renders");
+        }
     }
 
     #[gpui_kit::test]
