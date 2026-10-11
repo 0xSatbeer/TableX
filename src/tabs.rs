@@ -7,6 +7,7 @@ use gpui_kit::SharedString;
 /// the grid or console, and the status bar, so they cannot disagree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Origin {
+    pub connection: crate::model::ConnectionId,
     pub color: u8,
     pub production: bool,
     /// `connection › database › schema`
@@ -20,6 +21,7 @@ impl Origin {
         let schema = db.and_then(|d| d.schemas.first());
         let path = [Some(conn.name.as_str()), db.map(|d| d.name.as_str()), schema.map(|s| s.name.as_str())];
         Self {
+            connection: conn.id,
             color: conn.color,
             production: conn.is_production,
             path: path.into_iter().flatten().collect::<Vec<_>>().join(" › ").into(),
@@ -486,7 +488,7 @@ mod tests {
 
     #[test]
     fn tooltip_is_title_then_origin_path() {
-        let origin = |path: &str| Origin { color: 0, production: false, path: path.to_string().into() };
+        let origin = |path: &str| Origin { connection: crate::model::ConnectionId(0), color: 0, production: false, path: path.to_string().into() };
         let cases = [
             ("users", Some(origin("prod-pg › app_db › public")), "users\nprod-pg › app_db › public"),
             ("big_events", None, "big_events\nSample data · not from a connection"),
@@ -531,7 +533,7 @@ mod tests {
 
     #[test]
     fn match_tabs_filters_by_path() {
-        let origin = |path: &'static str| Some(Origin { color: 0, production: false, path: path.into() });
+        let origin = |path: &'static str| Some(Origin { connection: crate::model::ConnectionId(0), color: 0, production: false, path: path.into() });
         let tabs = [
             EditorTab { origin: origin("prod-pg › app_db › public"), ..titled("users") },
             EditorTab { origin: origin("prod-pg › app_db › audit"), ..titled("log") },

@@ -644,7 +644,7 @@ impl Explorer {
             cx.emit(OpenObject {
                 key: node.key.clone().into(),
                 name: node.label.clone(),
-                origin: Origin { color: conn.color, production: conn.is_production, path: names[..names.len() - 1].join(" › ").into() },
+                origin: Origin { connection: conn.id, color: conn.color, production: conn.is_production, path: names[..names.len() - 1].join(" › ").into() },
                 path: names.join(" › ").into(),
                 preview,
             });
@@ -660,6 +660,11 @@ impl Explorer {
             Click::Toggle => self.set_expanded(ix, !self.nodes[ix].expanded, cx),
             Click::Open { preview } => self.open(ix, preview, cx),
         }
+    }
+
+    #[cfg(test)]
+    pub fn row_labels(&self) -> Vec<SharedString> {
+        self.nodes.iter().map(|n| n.label.clone()).collect()
     }
 
     fn select(&mut self, ix: usize, cx: &mut Context<Self>) {

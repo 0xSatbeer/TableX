@@ -14,7 +14,7 @@ use gpui_kit::*;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::prelude::FluentBuilder as _;
 
-use crate::model::{QueryLogEntry, QuerySource, QueryStatus, Workspace};
+use crate::model::{ConnectionId, QueryLogEntry, QuerySource, QueryStatus, Workspace};
 use crate::{MaximizePanel, ToggleBottomPanel, mock, theme};
 
 const TABS: [&str; 3] = ["Results", "Logs", "Messages"];
@@ -66,6 +66,11 @@ impl BottomPanel {
             connections: workspace.connections.iter().map(|c| (c.id.0, (c.name.clone(), c.color, c.is_production))).collect(),
             focus: cx.focus_handle(),
         }
+    }
+
+    /// The (name, color index, production) a log row shows for `id`.
+    pub fn connection(&self, id: ConnectionId) -> (String, u8, bool) {
+        self.connections.get(&id.0).cloned().unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -121,7 +126,7 @@ impl BottomPanel {
         });
         let theme = cx.theme();
         let entry = &self.log[ix];
-        let (conn, color, production) = self.connections.get(&entry.connection_id.0).cloned().unwrap_or_default();
+        let (conn, color, production) = self.connection(entry.connection_id);
         let (icon, icon_color) = match entry.status {
             QueryStatus::Ok => (IconName::CircleCheck, theme.success),
             QueryStatus::Err(_) => (IconName::CircleX, theme.danger),

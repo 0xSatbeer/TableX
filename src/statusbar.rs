@@ -374,7 +374,7 @@ mod tests {
             let (window, bar): (_, Entity<super::StatusBar>) =
                 cx.update(|cx| gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::StatusBar::new(window, cx))).expect("open test window"));
             let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
-            bar.update(&mut cx, |bar, cx| bar.set_origin(Some(Origin { color: 0, production: false, path: path.into() }), true, cx));
+            bar.update(&mut cx, |bar, cx| bar.set_origin(Some(Origin { connection: crate::model::ConnectionId(0), color: 0, production: false, path: path.into() }), true, cx));
             cx.run_until_parked();
             assert_eq!(hover_shows_truncation_tip(&mut cx, "status-path".into()), tip, "{path}");
         }

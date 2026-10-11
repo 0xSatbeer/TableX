@@ -161,6 +161,8 @@ impl LayoutState {
 }
 
 struct Shell {
+    /// The one copy of the workspace's connections; explorer, panel and tabs follow it.
+    workspace: Entity<model::Workspace>,
     explorer: Entity<explorer::Explorer>,
     editor: Entity<EditorState>,
     tabs: tabs::Tabs<TabContent>,
@@ -188,8 +190,9 @@ struct Shell {
 
 impl Shell {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let workspace = &mock::workspaces()[0];
-        let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), window, cx));
+        let workspace = cx.new(|_| mock::workspaces().remove(0));
+        let ws = workspace.read(cx).clone();
+        let explorer = cx.new(|cx| explorer::Explorer::new(ws.clone(), window, cx));
         cx.subscribe(&explorer, |this, _, ev: &explorer::OpenObject, cx| {
             // ponytail: every table shows a mock query result until drivers land (Phase 5)
             let rows = match mock::run_query(&format!("SELECT * FROM {}", ev.name)) {
@@ -222,6 +225,7 @@ impl Shell {
         let mut this = Self {
             overflow_open: false,
             overflow_search,
+            workspace,
             explorer,
             editor: cx.new(|cx| {
                 EditorState::new(window, cx)
@@ -237,7 +241,7 @@ impl Shell {
                     key: "console-1".into(),
                     title: "console-1".into(),
                     // The console runs against production, so the tint shows up in the demo.
-                    origin: workspace.connections.iter().find(|c| c.is_production).map(tabs::Origin::of),
+                    origin: ws.connections.iter().find(|c| c.is_production).map(tabs::Origin::of),
                     tooltip: None,
                     preview: false,
                     pinned: false,
@@ -254,7 +258,7 @@ impl Shell {
                 dragging: None,
             },
             status_bar: cx.new(|cx| statusbar::StatusBar::new(window, cx)),
-            bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace, window, cx)),
+            bottom_panel: cx.new(|cx| panel::BottomPanel::new(&ws, window, cx)),
             focus_handle: cx.focus_handle(),
             gallery_visible: false,
             focus_content: false,
