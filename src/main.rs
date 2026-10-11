@@ -2699,6 +2699,60 @@ mod tests {
         crate::mock::set_latency(0);
     }
 
+    /// Selects the row keyed `key` and presses Right on it: expands it, or connects a connection.
+    fn expand_row(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, key: &str) {
+        let explorer = shell.read_with(cx, |this, _| this.explorer.clone());
+        explorer.update_in(cx, |e, window, cx| e.reveal(key, window, cx));
+        cx.simulate_keystrokes("right");
+    }
+
+    fn shows_loading_objects(shell: &gpui_kit::Entity<super::Shell>, cx: &gpui_kit::VisualTestContext) -> bool {
+        shell.read_with(cx, |this, cx| this.explorer.read(cx).row_labels().iter().any(|l| l == "Loading objects…"))
+    }
+
+    #[gpui_kit::test]
+    fn a_schema_load_still_running_when_a_connection_above_is_deleted_lands_on_its_connection_at_the_new_position(cx: &mut gpui_kit::TestAppContext) {
+        use std::time::Duration;
+        let latency = Duration::from_millis(2000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        expand_row(&mut cx, &shell, "2");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        expand_row(&mut cx, &shell, "2/0/0");
+        assert!(shows_loading_objects(&shell, &cx), "local.db's schema is loading");
+        delete_row(&mut cx, &shell, "staging-pg");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        assert!(!shows_loading_objects(&shell, &cx), "the load lands on local.db, now at position 1");
+        crate::mock::set_latency(0);
+    }
+
+    #[gpui_kit::test]
+    fn a_schema_load_still_running_when_its_connection_is_deleted_marks_nothing_loaded(cx: &mut gpui_kit::TestAppContext) {
+        use std::time::Duration;
+        let latency = Duration::from_millis(2000);
+        crate::mock::set_latency(latency.as_millis() as u32);
+        let (window, shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        expand_row(&mut cx, &shell, "1");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        expand_row(&mut cx, &shell, "1/0/0");
+        assert!(shows_loading_objects(&shell, &cx), "staging-pg's schema is loading");
+        delete_row(&mut cx, &shell, "staging-pg");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        // local.db now sits at position 1, where the deleted load's key points.
+        expand_row(&mut cx, &shell, "1");
+        cx.executor().advance_clock(latency);
+        cx.run_until_parked();
+        expand_row(&mut cx, &shell, "1/0/0");
+        assert!(shows_loading_objects(&shell, &cx), "local.db's schema still loads its objects");
+        crate::mock::set_latency(0);
+    }
+
     #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
