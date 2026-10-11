@@ -256,7 +256,7 @@ impl DeleteConfirm {
     /// Opens "Delete connection <name>?" over `window`.
     pub fn open(conn: &Connection, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let view = cx.new(|cx| {
-            let typed = cx.new(|cx| InputState::new(window, cx).placeholder(conn.name.clone()));
+            let typed = cx.new(|cx| InputState::new(window, cx).placeholder("Connection name"));
             cx.subscribe(&typed, |_, _, _: &InputEvent, cx| cx.notify()).detach();
             Self { name: conn.name.clone(), is_production: conn.is_production, typed }
         });
