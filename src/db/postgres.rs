@@ -121,19 +121,25 @@ impl Driver for Postgres {
         let schema = schema.to_string();
         read(session, |session| async move {
             // One statement for every kind, so a schema of any size costs one round trip.
+            // Each branch names its catalog and oid, so objects an extension owns can be dropped.
             let sql = "SELECT k, name, estimate FROM ( \
                          SELECT CASE c.relkind WHEN 'v' THEN 1 WHEN 'm' THEN 2 WHEN 'S' THEN 3 ELSE 0 END, c.relname::text, \
-                           CASE WHEN c.relkind IN ('r', 'p') AND c.reltuples >= 0 THEN c.reltuples::int8 END \
+                           CASE WHEN c.relkind IN ('r', 'p') AND c.reltuples >= 0 THEN c.reltuples::int8 END, \
+                           'pg_class'::regclass, c.oid \
                          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
                          WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm', 'S') \
                        UNION ALL \
-                         SELECT CASE p.prokind WHEN 'p' THEN 5 ELSE 4 END, format('%s(%s)', p.proname, oidvectortypes(p.proargtypes)), NULL \
+                         SELECT CASE p.prokind WHEN 'p' THEN 5 ELSE 4 END, format('%s(%s)', p.proname, oidvectortypes(p.proargtypes)), NULL, \
+                           'pg_proc'::regclass, p.oid \
                          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 \
                        UNION ALL \
-                         SELECT 6, t.typname::text, NULL FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+                         SELECT 6, t.typname::text, NULL, 'pg_type'::regclass, t.oid \
+                         FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
                          WHERE n.nspname = $1 AND (t.typtype IN ('e', 'd', 'r', 'm') \
                            OR t.typtype = 'c' AND (SELECT relkind FROM pg_class WHERE oid = t.typrelid) = 'c') \
-                       ) o(k, name, estimate) ORDER BY k, name COLLATE \"C\"";
+                       ) o(k, name, estimate, catalog, oid) \
+                       WHERE NOT EXISTS (SELECT FROM pg_depend d WHERE d.classid = o.catalog AND d.objid = o.oid AND d.deptype = 'e') \
+                       ORDER BY k, name COLLATE \"C\"";
             let rows = session.query(sql, &[&schema]).await?;
             Ok(rows
                 .iter()
