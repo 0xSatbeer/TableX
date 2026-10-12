@@ -3099,7 +3099,7 @@ mod tests {
             } else {
                 assert!(rows >= min_rows, "{mode:?}: mock rows");
             }
-            assert_eq!(vcx.debug_bounds("table-placeholder").is_some(), placeholder, "{mode:?}: Table data arrives in a later version");
+            assert_eq!(vcx.debug_bounds("table-placeholder:Table data arrives in a later version").is_some(), placeholder, "{mode:?}: the placeholder text");
         }
     }
 
