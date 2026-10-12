@@ -3031,4 +3031,24 @@ mod tests {
             assert_eq!(labels(&explorer, &cx), want, "{status:?}");
         }
     }
+
+    #[gpui_kit::test]
+    fn star_where_one_load_fails_shows_an_error_row_under_that_node_and_the_others_still_expand(cx: &mut gpui_kit::TestAppContext) {
+        let error = "Could not load: permission denied";
+        // (load that fails, rows of analytics then app)
+        let cases: [(&str, Vec<&str>, Vec<&str>); 3] = [
+            ("objects app/sibling", EXPANDED_DB.to_vec(), vec!["public", "Tables", "t", "u", "sibling", error]),
+            ("objects app/public", EXPANDED_DB.to_vec(), vec!["public", error, "sibling", "Tables", "t", "u"]),
+            ("schemas analytics", vec![error], EXPANDED_DB.to_vec()),
+        ];
+        for (fail, analytics, app) in cases {
+            let (mut cx, explorer, _, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            connect_answered(&explorer, &fake, &mut cx, &["analytics", "app"]);
+            explorer.update_in(&mut cx, |e, _, cx| e.expand_all_under(0, cx));
+            cx.run_until_parked();
+            answer_all(&fake, &mut cx, fail);
+            let want: Vec<&str> = ["pg", "analytics"].into_iter().chain(analytics).chain(["app"]).chain(app).collect();
+            assert_eq!(labels(&explorer, &cx), want, "{fail}");
+        }
+    }
 }
