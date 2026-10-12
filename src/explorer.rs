@@ -2376,6 +2376,49 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_load_that_finds_its_session_closed_drops_it_and_retry_reconnects(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::{close, session};
+        // (row whose load fails, that load, session closed by the server, the calls Retry makes in turn)
+        let cases = [
+            ("app", "schemas app", true, vec!["connect app", "schemas app"]),
+            ("app", "schemas app", false, vec!["schemas app"]),
+            ("pg", "databases app", true, vec!["connect app", "databases app"]),
+            ("pg", "databases app", false, vec!["databases app"]),
+        ];
+        for (row, call, closed, retry) in cases {
+            let label = format!("{call} closed {closed}");
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            expand_connection(&explorer, &mut cx);
+            let first = session("app");
+            fake.resolve("connect app", Ok(first.clone()));
+            cx.run_until_parked();
+            if row == "app" {
+                fake.resolve("databases app", Ok(strings(&["app"])));
+                cx.run_until_parked();
+                expand(&explorer, &mut cx, "app");
+            }
+            if closed {
+                close(&first);
+            }
+            answer(&fake, call, Err("server closed the connection unexpectedly"));
+            cx.run_until_parked();
+            let error = "Could not load: server closed the connection unexpectedly";
+            assert_eq!(under(&explorer, &cx, row), [error], "{label}: error row");
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connected, "{label}");
+
+            let ix = labels(&explorer, &cx).iter().position(|r| r == error).unwrap();
+            explorer.update_in(&mut cx, |e, _, cx| e.retry(ix, cx));
+            cx.run_until_parked();
+            for call in retry {
+                assert_eq!(fake.pending(), [call], "{label}: Retry");
+                answer(&fake, call, Ok(()));
+                cx.run_until_parked();
+            }
+            assert!(under(&explorer, &cx, row).iter().all(|r| !r.starts_with("Could not")), "{label}: loaded after Retry");
+        }
+    }
+
+    #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
         cx.update(gpui_kit::init);
