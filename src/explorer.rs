@@ -145,7 +145,7 @@ fn status_style(status: &ConnectionStatus) -> (bool, String) {
         ConnectionStatus::Connected => (true, "Connected".into()),
         ConnectionStatus::Disconnected => (false, "Disconnected".into()),
         ConnectionStatus::Connecting => (false, "Connecting…".into()),
-        ConnectionStatus::Error(msg) => (false, format!("Error: {msg}")),
+        ConnectionStatus::Error(msg) => (false, format!("Could not connect: {msg}")),
     }
 }
 
@@ -437,7 +437,7 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
         match &conn.status {
             ConnectionStatus::Connected => {}
             ConnectionStatus::Error(msg) => {
-                push(node(format!("{key}/{ERROR}"), NodeKind::ConnError, msg, 1));
+                push(node(format!("{key}/{ERROR}"), NodeKind::ConnError, &format!("Could not connect: {msg}"), 1));
                 continue;
             }
             ConnectionStatus::Connecting if open => {
@@ -1303,7 +1303,7 @@ mod tests {
 
         ws.connections[ci].status = ConnectionStatus::Error("boom".into());
         let failed = under(&all(&ws));
-        assert_eq!((failed.len(), failed[0].kind, failed[0].label.as_ref()), (1, NodeKind::ConnError, "boom"));
+        assert_eq!((failed.len(), failed[0].kind, failed[0].label.as_ref()), (1, NodeKind::ConnError, "Could not connect: boom"));
     }
 
     #[test]
