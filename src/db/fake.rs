@@ -19,6 +19,12 @@ pub struct FakeSession {
     closed: AtomicBool,
 }
 
+impl FakeSession {
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Relaxed)
+    }
+}
+
 /// A session on `database`, to resolve a connect with.
 pub fn session(database: &str) -> Session {
     Session::Fake(Arc::new(FakeSession { database: database.into(), closed: AtomicBool::new(false) }))

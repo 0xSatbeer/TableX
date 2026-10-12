@@ -795,7 +795,7 @@ impl Explorer {
                     let current = this.update(cx, |this, _| {
                         let current = this.gens.get(&id) == Some(&generation);
                         if current {
-                            this.sessions.entry((id, db)).or_insert_with(|| session.clone());
+                            this.sessions.entry((id, db.clone())).or_insert_with(|| session.clone());
                         }
                         current
                     });
@@ -818,7 +818,14 @@ impl Explorer {
                             cx.notify();
                         });
                     }
-                    Err(reason) => drop(this.loads.insert(key, Load::Failed(reason))),
+                    Err(reason) => {
+                        // A session the server closed is dropped, so Retry opens a new one.
+                        let at = (id, db);
+                        if this.sessions.get(&at).is_some_and(Session::is_closed) {
+                            this.sessions.remove(&at);
+                        }
+                        this.loads.insert(key, Load::Failed(reason));
+                    }
                 }
                 this.refresh(cx);
             })

@@ -28,6 +28,10 @@ pub struct PgSession {
 }
 
 impl PgSession {
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
+    }
+
     async fn query(&self, sql: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<Vec<tokio_postgres::Row>, String> {
         self.statements.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.client.query(sql, params).await.map_err(|e| reason(&e))
