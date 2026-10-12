@@ -1021,7 +1021,7 @@ impl Explorer {
     }
 
     fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {
-        let dialog = ConnectionDialog::open(self.workspace.clone(), editing, window, cx);
+        let dialog = ConnectionDialog::open(self.workspace.clone(), self.driver.clone(), editing, window, cx);
         cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
             if this.workspace.read(cx).connections.iter().any(|c| c.id == *id) {
                 this.reveal(&id.0.to_string(), window, cx);

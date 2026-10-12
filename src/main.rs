@@ -1671,6 +1671,7 @@ mod tests {
             host: "".into(),
             port: "5432".into(),
             user: "".into(),
+            password: "".into(),
             database: "postgres".into(),
             ssl: SslMode::Prefer,
             path: "".into(),
@@ -1727,6 +1728,7 @@ mod tests {
                 "host" => Some(d.host.clone()),
                 "port" => Some(d.port.clone()),
                 "user" => Some(d.user.clone()),
+                "password" => Some(d.password.clone()),
                 "database" => Some(d.database.clone()),
                 "path" => Some(d.path.clone()),
                 _ => None,
@@ -1915,7 +1917,7 @@ mod tests {
     fn right_click_edit_opens_the_dialog_prefilled_with_the_type_locked(cx: &mut gpui_kit::TestAppContext) {
         use crate::connection_dialog::Form;
         use crate::model::{DbKind, SslMode};
-        let blank = Form { name: "".into(), color: 0, is_production: false, kind: DbKind::Postgres, host: "".into(), port: "5432".into(), user: "".into(), database: "postgres".into(), ssl: SslMode::Prefer, path: "".into() };
+        let blank = Form { name: "".into(), color: 0, is_production: false, kind: DbKind::Postgres, host: "".into(), port: "5432".into(), user: "".into(), password: "".into(), database: "postgres".into(), ssl: SslMode::Prefer, path: "".into() };
         // (row, its form, the other type's button)
         let cases = [
             ("prod-pg", Form { name: "prod-pg".into(), color: 0, is_production: true, host: "db.acme.internal".into(), user: "app".into(), database: "app_db".into(), ..blank.clone() }, "kind-sqlite"),

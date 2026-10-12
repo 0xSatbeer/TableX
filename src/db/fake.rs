@@ -43,12 +43,18 @@ pub fn close(session: &Session) {
 #[derive(Default)]
 pub struct Fake {
     pending: Mutex<Vec<(String, oneshot::Sender<Answer>)>>,
+    tested: Mutex<Vec<ConnectionParams>>,
 }
 
 impl Fake {
     /// The labels of the calls still waiting, oldest first.
     pub fn pending(&self) -> Vec<String> {
         self.pending.lock().unwrap().iter().map(|(label, _)| label.clone()).collect()
+    }
+
+    /// The params of every `test` call so far, oldest first.
+    pub fn tested(&self) -> Vec<ConnectionParams> {
+        self.tested.lock().unwrap().clone()
     }
 
     /// Resolves the oldest pending call labelled `label` with `result`.
@@ -88,6 +94,7 @@ impl Driver for Fake {
     }
 
     fn test(&self, params: &ConnectionParams) -> Reply<()> {
+        self.tested.lock().unwrap().push(params.clone());
         self.call(format!("test {}", params.database()))
     }
 

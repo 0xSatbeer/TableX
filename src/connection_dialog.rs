@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IndexPath, Selectable as _, Sizable as _, WindowExt as _,
@@ -17,12 +18,13 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, ParentElement as _, Render, Styled as _, Task, Window, div};
 
+use crate::db::Driver;
 use crate::explorer::validate_rename;
 use crate::model::*;
 use crate::{mock, theme};
 
 /// The text fields, by the name the errors and tests use.
-const TEXT_FIELDS: [&str; 6] = ["name", "host", "port", "user", "database", "path"];
+const TEXT_FIELDS: [&str; 7] = ["name", "host", "port", "user", "password", "database", "path"];
 
 /// SSL choices in the order the select lists them.
 const SSL_MODES: [(SslMode, &str); 3] = [(SslMode::Disable, "Disable"), (SslMode::Prefer, "Prefer"), (SslMode::Require, "Require")];
@@ -30,6 +32,8 @@ const SSL_MODES: [(SslMode, &str); 3] = [(SslMode::Disable, "Disable"), (SslMode
 /// The Add/Edit connection dialog's body. The dialog itself lives in the window's dialog layer.
 pub struct ConnectionDialog {
     workspace: Entity<Workspace>,
+    /// Test connection goes through it.
+    driver: Arc<dyn Driver>,
     /// The connection being edited; `None` adds a new one.
     editing: Option<ConnectionId>,
     color: u8,
@@ -39,6 +43,7 @@ pub struct ConnectionDialog {
     pub host: Entity<InputState>,
     pub port: Entity<InputState>,
     pub user: Entity<InputState>,
+    pub password: Entity<InputState>,
     pub database: Entity<InputState>,
     pub path: Entity<InputState>,
     pub ssl: Entity<SelectState<Vec<&'static str>>>,
@@ -58,8 +63,8 @@ impl EventEmitter<Saved> for ConnectionDialog {}
 impl ConnectionDialog {
     /// Opens the Add connection dialog, or the Edit dialog for `editing`, over `window`, with
     /// the name field focused.
-    pub fn open(workspace: Entity<Workspace>, editing: Option<ConnectionId>, window: &mut Window, cx: &mut App) -> Entity<Self> {
-        let view = cx.new(|cx| Self::new(workspace, editing, window, cx));
+    pub fn open(workspace: Entity<Workspace>, driver: Arc<dyn Driver>, editing: Option<ConnectionId>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        let view = cx.new(|cx| Self::new(workspace, driver, editing, window, cx));
         let body = view.clone();
         let (title, save_label) = if editing.is_some() { ("Edit connection", "Save changes") } else { ("Add connection", "Add connection") };
         window.open_dialog(cx, move |dialog, _, cx| {
@@ -99,7 +104,7 @@ impl ConnectionDialog {
         view
     }
 
-    fn new(workspace: Entity<Workspace>, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(workspace: Entity<Workspace>, driver: Arc<dyn Driver>, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let connections = &workspace.read(cx).connections;
         let form = match connections.iter().find(|c| Some(c.id) == editing) {
             Some(conn) => Form::of(conn),
@@ -111,9 +116,10 @@ impl ConnectionDialog {
         };
         let (name, host, port) = (input(&form.name, "e.g. prod-pg"), input(&form.host, "e.g. localhost"), input(&form.port, ""));
         let (user, database, path) = (input(&form.user, "e.g. postgres"), input(&form.database, ""), input(&form.path, "e.g. /home/me/app.db"));
+        let password = cx.new(|cx| InputState::new(window, cx).masked(true).default_value(form.password.clone()));
         let selected = SSL_MODES.iter().position(|(mode, _)| *mode == form.ssl);
         let ssl = cx.new(|cx| SelectState::new(SSL_MODES.iter().map(|(_, label)| *label).collect(), selected.map(IndexPath::new), window, cx));
-        for (id, input) in TEXT_FIELDS.into_iter().zip([&name, &host, &port, &user, &database, &path]) {
+        for (id, input) in TEXT_FIELDS.into_iter().zip([&name, &host, &port, &user, &password, &database, &path]) {
             cx.subscribe(input, move |this, _, ev: &InputEvent, cx| {
                 if let InputEvent::Change = ev {
                     this.touched.insert(id);
@@ -130,7 +136,7 @@ impl ConnectionDialog {
             cx.notify();
         })
         .detach();
-        Self { workspace, editing, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, database, path, ssl, touched: HashSet::new(), test: None, test_result: None }
+        Self { workspace, driver, editing, color: form.color, is_production: form.is_production, kind: form.kind, name, host, port, user, password, database, path, ssl, touched: HashSet::new(), test: None, test_result: None }
     }
 
     /// The fields as the dialog shows them.
@@ -145,6 +151,7 @@ impl ConnectionDialog {
             host: text(&self.host),
             port: text(&self.port),
             user: text(&self.user),
+            password: text(&self.password),
             database: text(&self.database),
             ssl,
             path: text(&self.path),
@@ -430,6 +437,7 @@ pub struct Form {
     pub host: String,
     pub port: String,
     pub user: String,
+    pub password: String,
     pub database: String,
     pub ssl: SslMode,
     pub path: String,
@@ -455,6 +463,7 @@ impl Form {
             host: String::new(),
             port: "5432".into(),
             user: String::new(),
+            password: String::new(),
             database: "postgres".into(),
             ssl: SslMode::Prefer,
             path: String::new(),
@@ -465,8 +474,8 @@ impl Form {
     pub fn of(conn: &Connection) -> Self {
         let base = Form { name: conn.name.clone(), color: conn.color, is_production: conn.is_production, kind: conn.kind(), ..Form::new(&[]) };
         match &conn.params {
-            ConnectionParams::Postgres { host, port, user, database, ssl, .. } => {
-                Form { host: host.clone(), port: port.to_string(), user: user.clone(), database: database.clone(), ssl: *ssl, ..base }
+            ConnectionParams::Postgres { host, port, user, password, database, ssl } => {
+                Form { host: host.clone(), port: port.to_string(), user: user.clone(), password: password.as_ref().map_or(String::new(), |p| p.expose().to_string()), database: database.clone(), ssl: *ssl, ..base }
             }
             ConnectionParams::Sqlite { path } => Form { path: path.display().to_string(), ..base },
         }
@@ -651,6 +660,7 @@ mod tests {
                 host: "".into(),
                 port: "5432".into(),
                 user: "".into(),
+                password: "".into(),
                 database: "postgres".into(),
                 ssl: SslMode::Prefer,
                 path: "".into(),
