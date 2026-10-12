@@ -44,3 +44,33 @@ impl Driver for Sqlite {
         not_yet()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use std::path::{Path, PathBuf};
+
+    /// A SQLite file at `dir/name` holding `sql`.
+    fn file(dir: &Path, name: &str, sql: &str) -> PathBuf {
+        let path = dir.join(name);
+        rusqlite::Connection::open(&path).unwrap().execute_batch(sql).unwrap();
+        path
+    }
+
+    fn params(path: &Path) -> ConnectionParams {
+        ConnectionParams::Sqlite { path: path.to_path_buf() }
+    }
+
+    #[test]
+    fn a_valid_file_is_one_database_named_after_it_with_schema_main() {
+        let dir = tempfile::tempdir().unwrap();
+        // (file name, database)
+        let cases = [("local.db", "local.db"), ("app.sqlite3", "app.sqlite3"), ("no extension", "no extension")];
+        for (name, want) in cases {
+            let session = block_on(Sqlite.connect(&params(&file(dir.path(), name, "CREATE TABLE t (a)")))).expect(name);
+            assert_eq!(block_on(Sqlite.databases(&session)), Ok(vec![want.to_string()]), "{name}");
+            assert_eq!(block_on(Sqlite.schemas(&session)), Ok(vec!["main".to_string()]), "{name}");
+        }
+    }
+}
