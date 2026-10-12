@@ -596,4 +596,29 @@ mod tests {
             assert_eq!(object.row_estimate, want, "{name}");
         }
     }
+
+    #[test]
+    fn functions_and_procedures_are_named_with_their_argument_types() {
+        let Some(pg) = test_pg() else { return };
+        let schema = Scratch::new(&pg, "SCHEMA", "");
+        admin(&pg, &format!(
+            "SET search_path = {};
+             CREATE FUNCTION add_user(name text) RETURNS int LANGUAGE sql AS 'SELECT 1';
+             CREATE FUNCTION add_user(text, age integer) RETURNS int LANGUAGE sql AS 'SELECT 1';
+             CREATE FUNCTION now_ish() RETURNS int LANGUAGE sql AS 'SELECT 1';
+             CREATE PROCEDURE p(integer) LANGUAGE sql AS '';",
+            schema.name
+        ));
+        use ObjectKind::*;
+        // Argument names are dropped; overloads are separate rows.
+        let want = [
+            (Function, "add_user(text)".to_string()),
+            (Function, "add_user(text, integer)".to_string()),
+            (Function, "now_ish()".to_string()),
+            (Procedure, "p(integer)".to_string()),
+        ];
+        let (objects, _) = objects_of(&pg, &schema.name);
+        let got: Vec<_> = objects.expect("objects").into_iter().map(|o| (o.kind, o.name)).collect();
+        assert_eq!(got, want);
+    }
 }
