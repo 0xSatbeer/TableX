@@ -306,4 +306,65 @@ mod tests {
         assert_eq!(got, Err("timeout expired after 0.2 s".to_string()));
         assert!(took >= Duration::from_millis(200) && took < Duration::from_secs(2), "took {took:?}");
     }
+
+    /// A server without TLS in front of `pg`: it declines the SSLRequest with 'N', the way a
+    /// server with `ssl = off` does, then relays everything else to `pg`.
+    fn without_tls(pg: &ConnectionParams) -> u16 {
+        use std::io::{Read, Write};
+        let ConnectionParams::Postgres { host, port, .. } = pg.clone() else { unreachable!() };
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let local = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for client in listener.incoming() {
+                let (mut client, host) = (client.unwrap(), host.clone());
+                std::thread::spawn(move || {
+                    let mut first = [0; 8];
+                    client.read_exact(&mut first).unwrap();
+                    let mut server = std::net::TcpStream::connect((host.as_str(), port)).unwrap();
+                    if first[4..] == 80877103u32.to_be_bytes() {
+                        client.write_all(b"N").unwrap();
+                    } else {
+                        server.write_all(&first).unwrap();
+                    }
+                    let (mut client_in, mut server_out) = (client.try_clone().unwrap(), server.try_clone().unwrap());
+                    std::thread::spawn(move || std::io::copy(&mut client_in, &mut server_out));
+                    std::io::copy(&mut server, &mut client).ok();
+                });
+            }
+        });
+        local
+    }
+
+    #[test]
+    fn ssl_mode_follows_libpq() {
+        let Some(pg) = test_pg() else { return };
+        let plain = without_tls(&pg);
+        let with_ssl = |ssl, port: Option<u16>| {
+            let ConnectionParams::Postgres { host, port: pg_port, user, password, database, .. } = pg.clone() else { unreachable!() };
+            let host = if port.is_some() { "127.0.0.1".to_string() } else { host };
+            ConnectionParams::Postgres { host, port: port.unwrap_or(pg_port), user, password, database, ssl }
+        };
+        let (tls_server, plain_server) = (None, Some(plain));
+        // (mode, server, Ok(uses TLS) or Err); the compose server's cert is self-signed
+        let cases = [
+            (SslMode::Disable, plain_server, Some(false)),
+            (SslMode::Disable, tls_server, Some(false)),
+            (SslMode::Prefer, tls_server, Some(true)),
+            (SslMode::Prefer, plain_server, Some(false)),
+            (SslMode::Require, tls_server, Some(true)),
+            (SslMode::Require, plain_server, None),
+        ];
+        for (ssl, server, want) in cases {
+            let got = block_on(Postgres::default().connect(&with_ssl(ssl, server))).map(|session| {
+                let Session::Postgres(session) = session else { unreachable!() };
+                let sql = "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()";
+                let rows = super::super::runtime().block_on(session.client.query_one(sql, &[])).unwrap();
+                rows.get::<_, bool>(0)
+            });
+            match want {
+                Some(tls) => assert_eq!(got, Ok(tls), "{ssl:?} via {server:?}"),
+                None => assert!(got.is_err_and(|reason| !reason.is_empty()), "{ssl:?} via {server:?}"),
+            }
+        }
+    }
 }
