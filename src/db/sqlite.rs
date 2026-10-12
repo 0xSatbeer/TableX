@@ -109,4 +109,22 @@ mod tests {
             assert_eq!(path.exists(), existed, "{path:?}");
         }
     }
+
+    #[test]
+    fn a_file_that_is_not_sqlite_fails_at_connect() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_like = format!("SQLite format 3\0{}", "x".repeat(200));
+        // (contents, reason)
+        let cases = [
+            ("hello, I am a text file\n".repeat(100), Err("file is not a database".to_string())),
+            (header_like, Err("file is not a database".to_string())),
+            (String::new(), Ok(())), // SQLite treats an empty file as an empty database
+        ];
+        for (i, (contents, want)) in cases.into_iter().enumerate() {
+            let path = dir.path().join(format!("{i}.db"));
+            std::fs::write(&path, contents).unwrap();
+            assert_eq!(block_on(Sqlite.connect(&params(&path))).map(drop), want, "connect {i}");
+            assert_eq!(block_on(Sqlite.test(&params(&path))), want, "test {i}");
+        }
+    }
 }
