@@ -85,4 +85,22 @@ mod tests {
             assert_eq!(block_on(Sqlite.schemas(&session)), Ok(vec!["main".to_string()]), "{name}");
         }
     }
+
+    #[test]
+    fn a_missing_path_or_a_directory_is_no_file_and_nothing_is_created() {
+        let dir = tempfile::tempdir().unwrap();
+        // (path, created by the test itself)
+        let cases = [
+            (dir.path().join("local.db"), false),
+            (dir.path().join("nested/local.db"), false),
+            (dir.path().to_path_buf(), true),
+            (dir.path().join(""), true),
+        ];
+        for (path, existed) in cases {
+            let want = Err(format!("No file at {}", path.display()));
+            assert_eq!(block_on(Sqlite.connect(&params(&path))).map(drop), want, "connect {path:?}");
+            assert_eq!(block_on(Sqlite.test(&params(&path))), want, "test {path:?}");
+            assert_eq!(path.exists(), existed, "{path:?}");
+        }
+    }
 }
