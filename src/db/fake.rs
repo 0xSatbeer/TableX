@@ -1,51 +1,93 @@
 //! A driver whose calls stay pending until the test resolves them by hand, so UI tests control
 //! timing and never touch tokio.
 
+use std::any::Any;
+use std::sync::Mutex;
+
 use futures::FutureExt;
+use futures::channel::oneshot;
 
 use super::{Driver, Reply, Session};
 use crate::model::{Column, ConnectionParams, DbObject};
 
-#[derive(Default)]
-pub struct Fake;
+type Answer = Result<Box<dyn Any + Send>, String>;
 
-fn not_yet<T: Send + 'static>() -> Reply<T> {
-    futures::future::ready(Err("not implemented".to_string())).boxed()
+/// Each call is labelled `"{call} {database}"`, plus `/{schema}` and `/{object}` where it takes them,
+/// e.g. `"connect app"`, `"objects app/public"`, `"test local.db"`. A connect resolves with a
+/// [`Session::Fake`] naming its database.
+#[derive(Default)]
+pub struct Fake {
+    pending: Mutex<Vec<(String, oneshot::Sender<Answer>)>>,
 }
 
 impl Fake {
     /// The labels of the calls still waiting, oldest first.
     pub fn pending(&self) -> Vec<String> {
-        Vec::new()
+        self.pending.lock().unwrap().iter().map(|(label, _)| label.clone()).collect()
     }
 
     /// Resolves the oldest pending call labelled `label` with `result`.
-    pub fn resolve<T: Send + 'static>(&self, _label: &str, _result: Result<T, String>) {}
+    #[track_caller]
+    pub fn resolve<T: Send + 'static>(&self, label: &str, result: Result<T, String>) {
+        let mut pending = self.pending.lock().unwrap();
+        let Some(ix) = pending.iter().position(|(l, _)| l == label) else {
+            let waiting: Vec<_> = pending.iter().map(|(l, _)| l.clone()).collect();
+            drop(pending); // unlocked first, so the panic doesn't poison the fake
+            panic!("no pending call {label:?}; waiting: {waiting:?}");
+        };
+        let (_, tx) = pending.remove(ix);
+        tx.send(result.map(|value| Box::new(value) as Box<dyn Any + Send>)).ok();
+    }
+
+    fn call<T: Send + 'static>(&self, label: String) -> Reply<T> {
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().push((label.clone(), tx));
+        rx.map(move |answer| match answer {
+            Ok(answer) => answer.map(|value| *value.downcast::<T>().unwrap_or_else(|_| panic!("{label} resolved with the wrong type"))),
+            Err(_) => Err("the database task stopped".into()),
+        })
+        .boxed()
+    }
+}
+
+/// The database a fake session or params name: Postgres's database, or SQLite's file name.
+fn database(params: &ConnectionParams) -> String {
+    match params {
+        ConnectionParams::Postgres { database, .. } => database.clone(),
+        ConnectionParams::Sqlite { path } => path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
+    }
+}
+
+fn on(session: &Session) -> &str {
+    match session {
+        Session::Fake(db) => db,
+        _ => panic!("the fake driver got a real session"),
+    }
 }
 
 impl Driver for Fake {
-    fn connect(&self, _params: &ConnectionParams) -> Reply<Session> {
-        not_yet()
+    fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
+        self.call(format!("connect {}", database(params)))
     }
 
-    fn test(&self, _params: &ConnectionParams) -> Reply<()> {
-        not_yet()
+    fn test(&self, params: &ConnectionParams) -> Reply<()> {
+        self.call(format!("test {}", database(params)))
     }
 
-    fn databases(&self, _session: &Session) -> Reply<Vec<String>> {
-        not_yet()
+    fn databases(&self, session: &Session) -> Reply<Vec<String>> {
+        self.call(format!("databases {}", on(session)))
     }
 
-    fn schemas(&self, _session: &Session) -> Reply<Vec<String>> {
-        not_yet()
+    fn schemas(&self, session: &Session) -> Reply<Vec<String>> {
+        self.call(format!("schemas {}", on(session)))
     }
 
-    fn objects(&self, _session: &Session, _schema: &str) -> Reply<Vec<DbObject>> {
-        not_yet()
+    fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>> {
+        self.call(format!("objects {}/{schema}", on(session)))
     }
 
-    fn columns(&self, _session: &Session, _schema: &str, _object: &str) -> Reply<Vec<Column>> {
-        not_yet()
+    fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
+        self.call(format!("columns {}/{schema}/{object}", on(session)))
     }
 }
 
@@ -77,7 +119,6 @@ mod tests {
         fake.resolve::<()>("test local.db", Err("No file at /x/local.db".into()));
         assert_eq!((&mut test).now_or_never(), Some(Err("No file at /x/local.db".to_string())));
 
-        // (call, label)
         let mut databases = fake.databases(&session);
         let mut first = fake.schemas(&session);
         let mut second = fake.schemas(&session);
@@ -99,5 +140,6 @@ mod tests {
 
         let unknown = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fake.resolve::<()>("connect nope", Ok(()))));
         assert!(unknown.is_err(), "resolving a call nobody made is a test bug");
+        assert_eq!(fake.pending(), ["databases app"], "and leaves the fake usable");
     }
 }
