@@ -675,14 +675,18 @@ impl Explorer {
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
         let node = &self.nodes[ix];
-        if !node.expandable || node.expanded == open {
+        if !node.expandable {
             return;
         }
-        let key = node.key.clone();
+        // Before the already-open check: a failed connection stays open and still connects again.
         if open && matches!(node.kind, NodeKind::Connection(_)) && self.workspace.read(cx).connections[node.conn].status != ConnectionStatus::Connected {
             let ci = node.conn;
             return self.connect(ci, cx);
         }
+        if node.expanded == open {
+            return;
+        }
+        let key = node.key.clone();
         if open && node.unloaded {
             self.load(key.clone(), cx);
         }
@@ -978,6 +982,11 @@ impl Explorer {
         }
     }
 
+    /// Whether `node` is a connection whose connect failed.
+    fn failed(&self, node: &FlatNode, cx: &App) -> bool {
+        matches!(node.kind, NodeKind::Connection(_)) && matches!(self.workspace.read(cx).connections[node.conn].status, ConnectionStatus::Error(_))
+    }
+
     /// A plain (unmodified) press: select the row, then do what `click_action` says.
     fn press(&mut self, ix: usize, hit: Hit, cx: &mut Context<Self>) {
         self.marked.clear();
@@ -1079,7 +1088,7 @@ impl Explorer {
         match ev.keystroke.key.as_str() {
             "up" => self.select(ix.saturating_sub(1), cx),
             "down" => self.select((ix + 1).min(self.nodes.len() - 1), cx),
-            "right" if node.expandable && !node.expanded => self.set_expanded(ix, true, cx),
+            "right" if node.expandable && (!node.expanded || self.failed(node, cx)) => self.set_expanded(ix, true, cx),
             "right" if node.expanded => self.select(ix + 1, cx),
             "left" if node.expanded => self.set_expanded(ix, false, cx),
             "left" => {
