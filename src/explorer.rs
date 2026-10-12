@@ -242,7 +242,7 @@ const LOADING: &str = r"\loading";
 const ERROR: &str = r"\error";
 
 /// Whether the status dot is solid (else a ring), and the tooltip naming the status.
-fn status_style(status: &ConnectionStatus) -> (bool, String) {
+pub(crate) fn status_style(status: &ConnectionStatus) -> (bool, String) {
     match status {
         ConnectionStatus::Connected => (true, "Connected".into()),
         ConnectionStatus::Disconnected => (false, "Disconnected".into()),

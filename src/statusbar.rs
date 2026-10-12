@@ -14,7 +14,7 @@ use gpui_kit::*;
 use gpui_kit::prelude::FluentBuilder as _;
 
 use crate::grid::{Grid, SelectionKey};
-use crate::model::{Value, Workspace};
+use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, Value, Workspace};
 use crate::tabs::Origin;
 use crate::{ToggleBottomPanel, ToggleExplorer, theme};
 
@@ -43,12 +43,47 @@ pub struct StatusBar {
     /// Runs only while the window is active; dropping it stops sampling.
     sampler: Option<Task<()>>,
     _activation: Subscription,
+    _workspace: Subscription,
+}
+
+/// Connect or Retry clicked for connection `.0`: connect it as the tree's Retry does.
+pub struct Connect(pub ConnectionId);
+
+impl EventEmitter<Connect> for StatusBar {}
+
+/// What the bar shows for the active tab's connection.
+struct Readout {
+    /// A solid dot when Connected, else a ring.
+    solid: bool,
+    tip: String,
+    text: Option<&'static str>,
+    danger: bool,
+    button: Option<&'static str>,
+    /// The reason and what to check, on hovering the text.
+    hint: Option<String>,
+}
+
+fn readout(conn: &Connection) -> Readout {
+    let (solid, tip) = crate::explorer::status_style(&conn.status);
+    let (text, button, hint) = match &conn.status {
+        ConnectionStatus::Connected => (None, None, None),
+        ConnectionStatus::Connecting => (Some("Connecting…"), None, None),
+        ConnectionStatus::Disconnected => (Some("Not connected"), Some("Connect"), None),
+        ConnectionStatus::Error(reason) => {
+            let check = match &conn.params {
+                ConnectionParams::Postgres { host, port, .. } => format!("Check that {host}:{port} is reachable (VPN, firewall), then retry."),
+                ConnectionParams::Sqlite { .. } => "Check that the file exists and is readable.".into(),
+            };
+            (Some("Could not connect"), Some("Retry"), Some(format!("{reason}\n{check}")))
+        }
+    };
+    Readout { solid, tip, text, danger: matches!(conn.status, ConnectionStatus::Error(_)), button, hint }
 }
 
 impl StatusBar {
     pub fn new(workspace: Entity<Workspace>, demo: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut this = Self {
-            workspace,
+            workspace: workspace.clone(),
             demo,
             origin: None,
             has_tab: false,
@@ -61,6 +96,7 @@ impl StatusBar {
             _grid: None,
             sampler: None,
             _activation: cx.observe_window_activation(window, Self::sync_sampler),
+            _workspace: cx.observe(&workspace, |_, _, cx| cx.notify()),
         };
         this.sync_sampler(window, cx);
         this
@@ -208,11 +244,27 @@ impl Render for StatusBar {
                 .tooltip_with_action(tip, &*action(), None)
                 .on_click(move |_, window, cx| window.dispatch_action(action(), cx))
         };
+        let readout = self.origin.as_ref().and_then(|o| self.workspace.read(cx).connections.iter().find(|c| c.id == o.connection)).map(readout);
+        let connected = readout.as_ref().is_some_and(|r| r.solid);
+        let tip = |selector: String, text: String| {
+            move |window: &mut Window, cx: &mut App| {
+                let (selector, text) = (selector.clone(), text.clone());
+                Tooltip::element(move |_, _| div().debug_selector(|| selector.clone()).child(text.clone())).build(window, cx)
+            }
+        };
         let context = match &self.origin {
             Some(o) => h_flex()
                 .min_w_0()
                 .gap(theme::space_6())
-                .child(div().size(theme::space_6()).rounded_full().bg(theme::connection_color(o.color, theme)))
+                .child({
+                    let color = theme::connection_color(o.color, theme);
+                    let dot = div().id("status-dot").flex_none().size(theme::space_6()).rounded_full();
+                    match &readout {
+                        Some(r) if !r.solid => dot.debug_selector(|| "status-dot-ring".into()).border_2().border_color(color),
+                        _ => dot.debug_selector(|| "status-dot-solid".into()).bg(color),
+                    }
+                    .when_some(readout.as_ref(), |d, r| d.tooltip(tip(format!("status-tip:{}", r.tip), r.tip.clone())))
+                })
                 .child(
                     div()
                         .debug_selector(|| "status-path".into())
@@ -222,7 +274,29 @@ impl Render for StatusBar {
                         .font_family(theme.mono_font_family.clone())
                         .child(theme::truncating("status-path", StyledText::new(o.path.clone()), o.path.clone())),
                 )
-                .when(o.production, |d| d.child(theme::prod_badge(theme))),
+                .when(o.production, |d| d.child(theme::prod_badge(theme)))
+                .when_some(readout.as_ref().and_then(|r| r.text.map(|t| (t, r))), |d, (text, r)| {
+                    let selector = format!("{}:{text}", if r.danger { "status-text-danger" } else { "status-text" });
+                    d.child(
+                        div()
+                            .id("status-text")
+                            .flex_none()
+                            .whitespace_nowrap()
+                            .debug_selector(|| selector)
+                            .when(r.danger, |d| d.text_color(theme.danger))
+                            .when_some(r.hint.clone(), |d, hint| d.tooltip(tip(format!("status-hint:{hint}"), hint)))
+                            .child(text),
+                    )
+                })
+                .when_some(readout.as_ref().and_then(|r| r.button), |d, label| {
+                    let id = o.connection;
+                    d.child(
+                        div()
+                            .flex_none()
+                            .debug_selector(|| format!("status-button:{label}"))
+                            .child(Button::new("status-connect").xsmall().label(label).on_click(cx.listener(move |_, _, _, cx| cx.emit(Connect(id))))),
+                    )
+                }),
             None if self.has_tab => h_flex().child("Sample data · not from a connection"),
             None => h_flex(),
         };
@@ -246,8 +320,8 @@ impl Render for StatusBar {
                     .child(toggle("toggle-bottom", IconName::PanelBottom, "Toggle bottom panel", || Box::new(ToggleBottomPanel))),
             )
             .child(context)
-            // ponytail: tx state is fixed until QX-012/025 give it a model; hidden without a connection
-            .when(self.origin.is_some(), |d| d.child("AUTO-COMMIT"))
+            // ponytail: tx state is fixed until QX-012/025 give it a model; shown only while Connected
+            .when(connected, |d| d.child(div().flex_none().debug_selector(|| "auto-commit".into()).child("AUTO-COMMIT")))
             .child(div().flex_1())
             .children(self.aggregate_text())
             .children(self.cursor.map(|(line, col, selected)| match selected {
