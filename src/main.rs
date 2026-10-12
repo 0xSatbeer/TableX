@@ -208,14 +208,19 @@ struct Shell {
 
 impl Shell {
     fn new(mode: Mode, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::with_driver(mode, mock::workspaces().remove(0), std::sync::Arc::new(db::Live::default()), window, cx)
+        let workspace = match mode {
+            Mode::Normal => model::Workspace { id: 1, name: "Workspace".into(), connections: Vec::new() },
+            Mode::Demo => mock::workspaces().remove(0),
+        };
+        Self::with_driver(mode, workspace, std::sync::Arc::new(db::Live::default()), window, cx)
     }
 
     /// The Shell started in `mode` on `workspace`, whose explorer reads databases through `driver`.
     fn with_driver(mode: Mode, workspace: model::Workspace, driver: std::sync::Arc<dyn db::Driver>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let _ = mode;
+        let demo = mode == Mode::Demo;
         let workspace = cx.new(|_| workspace);
-        let console_origin = workspace.read(cx).connections.iter().find(|c| c.is_production).map(tabs::Origin::of);
+        // The demo console runs against production, so the tint shows up.
+        let console_origin = workspace.read(cx).connections.iter().find(|c| demo && c.is_production).map(tabs::Origin::of);
         let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), driver, window, cx));
         cx.observe(&workspace, |this, workspace, cx| {
             this.tabs.refresh_origins(workspace.read(cx));
@@ -258,6 +263,25 @@ impl Shell {
             _ => {}
         })
         .detach();
+        let console = tabs::EditorTab {
+            key: "console-1".into(),
+            title: "console-1".into(),
+            origin: console_origin,
+            tooltip: None,
+            preview: false,
+            pinned: false,
+            content: TabContent::Console,
+        };
+        let tabs = match mode {
+            Mode::Normal => vec![console],
+            Mode::Demo => vec![
+                grid_tab("big_events", Rc::new(grid::BigEvents::new()), cx),
+                grid_tab("wide_table", Rc::new(mock::wide_table(2_000)), cx),
+                grid_tab("edge_cases", Rc::new(mock::edge_cases()), cx),
+                console,
+            ],
+        };
+        let log = if demo { mock::mock_query_log(panel::LOG_CAP) } else { Vec::new() };
         let mut this = Self {
             overflow_open: false,
             overflow_search,
@@ -266,24 +290,10 @@ impl Shell {
             editor: cx.new(|cx| {
                 EditorState::new(window, cx)
                     .language("sql")
-                    .default_value("SELECT id, email\nFROM users\nWHERE created_at > now() - interval '7 days';\n")
+                    .default_value(if demo { "SELECT id, email\nFROM users\nWHERE created_at > now() - interval '7 days';\n" } else { "" })
             }),
             tab_scroll: ScrollHandle::new(),
-            tabs: tabs::Tabs::new(vec![
-                grid_tab("big_events", Rc::new(grid::BigEvents::new()), cx),
-                grid_tab("wide_table", Rc::new(mock::wide_table(2_000)), cx),
-                grid_tab("edge_cases", Rc::new(mock::edge_cases()), cx),
-                tabs::EditorTab {
-                    key: "console-1".into(),
-                    title: "console-1".into(),
-                    // The console runs against production, so the tint shows up in the demo.
-                    origin: console_origin,
-                    tooltip: None,
-                    preview: false,
-                    pinned: false,
-                    content: TabContent::Console,
-                },
-            ]),
+            tabs: tabs::Tabs::new(tabs),
             layout: LayoutState {
                 explorer_visible: true,
                 bottom_visible: true,
@@ -294,7 +304,7 @@ impl Shell {
                 dragging: None,
             },
             status_bar: cx.new(|cx| statusbar::StatusBar::new(window, cx)),
-            bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace.clone(), window, cx)),
+            bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace.clone(), log, window, cx)),
             focus_handle: cx.focus_handle(),
             gallery_visible: false,
             focus_content: false,

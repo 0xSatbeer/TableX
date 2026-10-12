@@ -15,7 +15,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::prelude::FluentBuilder as _;
 
 use crate::model::{ConnectionId, QueryLogEntry, QuerySource, QueryStatus, Workspace};
-use crate::{MaximizePanel, ToggleBottomPanel, mock, theme};
+use crate::{MaximizePanel, ToggleBottomPanel, theme};
 
 const TABS: [&str; 3] = ["Results", "Logs", "Messages"];
 const RESULTS: usize = 0;
@@ -43,7 +43,8 @@ pub struct BottomPanel {
 }
 
 impl BottomPanel {
-    pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The panel over `workspace`, its Logs starting with `log` (oldest first).
+    pub fn new(workspace: Entity<Workspace>, log: Vec<QueryLogEntry>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter SQL…"));
         cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
@@ -68,8 +69,10 @@ impl BottomPanel {
             cx.notify();
         })
         .detach();
-        let mut log = Vec::new();
-        mock::mock_query_log(LOG_CAP).into_iter().for_each(|entry| push_log(&mut log, entry));
+        let log = log.into_iter().fold(Vec::new(), |mut log, entry| {
+            push_log(&mut log, entry);
+            log
+        });
         let filter = LogFilter::default();
         let rows = filter_rows(&log, &filter);
         Self {
@@ -292,7 +295,7 @@ impl BottomPanel {
 }
 
 /// Logs keep the newest this many entries.
-const LOG_CAP: usize = 10_000;
+pub const LOG_CAP: usize = 10_000;
 
 /// Appends the newest entry (the list shows the last one first); past `LOG_CAP` the oldest drops.
 fn push_log(log: &mut Vec<QueryLogEntry>, entry: QueryLogEntry) {
@@ -655,7 +658,7 @@ mod tests {
         cx.update(|cx| gpui_kit::init(cx));
         let workspace = crate::mock::workspaces().remove(0);
         let (_, panel) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::BottomPanel::new(cx.new(|_| workspace), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::BottomPanel::new(cx.new(|_| workspace), crate::mock::mock_query_log(super::LOG_CAP), window, cx))).expect("open test window")
         });
         assert_eq!(panel.read_with(cx, |p, _| p.tab), super::RESULTS, "active panel tab at launch");
     }
@@ -781,7 +784,7 @@ mod tests {
             ..Default::default()
         };
         let (window, panel): (_, Entity<super::BottomPanel>) = cx.update(|cx| {
-            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::BottomPanel::new(cx.new(|_| crate::mock::workspaces().remove(0)), window, cx))).expect("open test window")
+            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::BottomPanel::new(cx.new(|_| crate::mock::workspaces().remove(0)), crate::mock::mock_query_log(super::LOG_CAP), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         let long = format!("SELECT {} FROM orders", (0..40).map(|i| format!("column_{i}")).collect::<Vec<_>>().join(", "));
