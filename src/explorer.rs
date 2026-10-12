@@ -169,23 +169,33 @@ fn locate<'a>(ws: &'a mut Workspace, id: ConnectionId, segments: &[String]) -> O
 
 /// Puts `children` in connection `id`'s tree, under the node with `segments`. Returns the key
 /// tails (`name`, or `kind/name` for objects) of that node's children before and after, so the caller can follow what came and went.
-fn store(ws: &mut Workspace, id: ConnectionId, segments: &[String], children: Children) -> (Vec<String>, Vec<String>) {
+/// A child that is still there and that `keep` names by its tail keeps its own loaded children until they are re-read.
+fn store(ws: &mut Workspace, id: ConnectionId, segments: &[String], children: Children, keep: impl Fn(&str) -> bool) -> (Vec<String>, Vec<String>) {
     let db_tail = |d: &Database| seg(&d.name);
     let schema_tail = |s: &Schema| seg(&s.name);
     let object_tail = |o: &DbObject| format!("{}/{}", o.kind.as_str(), seg(&o.name));
     match (locate(ws, id, segments), children) {
         (Some(NodeMut::Connection(conn)), Children::Databases(names)) => {
-            let old = conn.databases.iter().flatten().map(db_tail).collect();
-            let new = names.into_iter().map(|name| Database { name, schemas: None }).collect::<Vec<_>>();
+            let mut old = conn.databases.take().unwrap_or_default();
+            let mut kept = |name: &str| old.iter_mut().find(|d| d.name == name && keep(&db_tail(d))).and_then(|d| d.schemas.take());
+            let new = names.into_iter().map(|name| Database { schemas: kept(&name), name }).collect::<Vec<_>>();
+            let old = old.iter().map(db_tail).collect();
             (old, conn.databases.insert(new).iter().map(db_tail).collect())
         }
         (Some(NodeMut::Database(db)), Children::Schemas(names)) => {
-            let old = db.schemas.iter().flatten().map(schema_tail).collect();
-            let new = names.into_iter().map(|name| Schema { name, objects: None }).collect::<Vec<_>>();
+            let mut old = db.schemas.take().unwrap_or_default();
+            let mut kept = |name: &str| old.iter_mut().find(|s| s.name == name && keep(&schema_tail(s))).and_then(|s| s.objects.take());
+            let new = names.into_iter().map(|name| Schema { objects: kept(&name), name }).collect::<Vec<_>>();
+            let old = old.iter().map(schema_tail).collect();
             (old, db.schemas.insert(new).iter().map(schema_tail).collect())
         }
-        (Some(NodeMut::Schema(schema)), Children::Objects(objects)) => {
-            let old = schema.objects.iter().flatten().map(object_tail).collect();
+        (Some(NodeMut::Schema(schema)), Children::Objects(mut objects)) => {
+            let mut old = schema.objects.take().unwrap_or_default();
+            for object in &mut objects {
+                let tail = object_tail(object);
+                object.columns = old.iter_mut().find(|o| object_tail(o) == tail && keep(&tail)).and_then(|o| o.columns.take());
+            }
+            let old = old.iter().map(object_tail).collect();
             (old, schema.objects.insert(objects).iter().map(object_tail).collect())
         }
         (Some(NodeMut::Object(object)), Children::Columns(columns)) => {
@@ -834,14 +844,22 @@ impl Explorer {
                 match result {
                     Ok(children) => {
                         this.loads.remove(&key);
+                        let expanded = this.expanded.clone();
                         let (old, new) = this.workspace.update(cx, |ws, cx| {
                             cx.notify();
-                            store(ws, id, &segments, children)
+                            store(ws, id, &segments, children, |tail| expanded.contains(&format!("{key}/{tail}")))
                         });
                         // A child that is gone takes its expansion with it, and its descendants'.
                         for tail in old.iter().filter(|t| !new.contains(t)) {
                             let child = format!("{key}/{tail}");
                             this.expanded.retain(|k| *k != child && !k.starts_with(&format!("{child}/")));
+                        }
+                        // Expanded children are re-read in turn, and so on down.
+                        for tail in new {
+                            let child = format!("{key}/{tail}");
+                            if this.expanded.contains(&child) {
+                                this.load(child, cx);
+                            }
                         }
                     }
                     Err(reason) => {
