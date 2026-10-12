@@ -3126,6 +3126,38 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn connect_or_retry_in_the_status_bar_connects_the_active_tabs_connection_as_the_trees_retry_does(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus;
+        // (connection, its status, button, the connect the driver sees)
+        let cases = [("local.db", ConnectionStatus::Disconnected, "Connect", "connect local.db"), ("staging-pg", ConnectionStatus::Error("timeout expired after 10 s".into()), "Retry", "connect app_db")];
+        for (name, status, button, connect) in cases {
+            let fake = std::sync::Arc::new(crate::db::fake::Fake::default());
+            let (window, shell) = open_plain_with(cx, fake.clone());
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            shell.update(&mut cx, |this, cx| {
+                let conn = this.workspace.read(cx).connections.iter().find(|c| c.name == name).unwrap().clone();
+                assert_eq!(conn.status, status, "{name}");
+                this.tabs.open(console_on(&conn, "console-x", false));
+                this.tab_changed(cx);
+            });
+            cx.run_until_parked();
+            let selector: &'static str = format!("status-button:{button}").leak();
+            click(&mut cx, selector);
+            let status_of = |cx: &gpui_kit::VisualTestContext| workspace.read_with(cx, |ws, _| ws.connections.iter().find(|c| c.name == name).unwrap().status.clone());
+            assert_eq!(status_of(&cx), ConnectionStatus::Connecting, "{name}: {button} starts a connect");
+            assert_eq!(fake.pending(), [connect], "{name}");
+            assert!(cx.debug_bounds(format!("status-text:Connecting…").leak()).is_some(), "{name}: the bar follows");
+            // As after the tree's Retry: once connected, the connection opens and lists its databases.
+            fake.resolve(connect, Ok(crate::db::fake::session(connect.trim_start_matches("connect "))));
+            cx.run_until_parked();
+            assert_eq!(status_of(&cx), ConnectionStatus::Connected, "{name}");
+            assert_eq!(fake.pending(), [format!("databases {}", connect.trim_start_matches("connect "))], "{name}");
+            assert!(cx.debug_bounds("auto-commit").is_some(), "{name}: AUTO-COMMIT once connected");
+        }
+    }
+
+    #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
         for filter in ["", "zzz"] {
