@@ -207,13 +207,14 @@ struct Shell {
 }
 
 impl Shell {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::with_driver(std::sync::Arc::new(db::Live::default()), window, cx)
+    fn new(mode: Mode, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_driver(mode, mock::workspaces().remove(0), std::sync::Arc::new(db::Live::default()), window, cx)
     }
 
-    /// The Shell whose explorer reads databases through `driver`.
-    fn with_driver(driver: std::sync::Arc<dyn db::Driver>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let workspace = cx.new(|_| mock::workspaces().remove(0));
+    /// The Shell started in `mode` on `workspace`, whose explorer reads databases through `driver`.
+    fn with_driver(mode: Mode, workspace: model::Workspace, driver: std::sync::Arc<dyn db::Driver>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let _ = mode;
+        let workspace = cx.new(|_| workspace);
         let console_origin = workspace.read(cx).connections.iter().find(|c| c.is_production).map(tabs::Origin::of);
         let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), driver, window, cx));
         cx.observe(&workspace, |this, workspace, cx| {
@@ -991,10 +992,10 @@ fn bind_panel_keys(cx: &mut App) {
 }
 
 /// Opens the main window and starts watching `user_themes` (the user theme dir), if any.
-fn open_shell(options: WindowOptions, user_themes: Option<std::path::PathBuf>, cx: &mut App) -> Result<(AnyWindowHandle, Entity<Shell>)> {
+fn open_shell(mode: Mode, options: WindowOptions, user_themes: Option<std::path::PathBuf>, cx: &mut App) -> Result<(AnyWindowHandle, Entity<Shell>)> {
     gpui_kit::open_window(options, cx, |window, cx| {
         cx.new(|cx| {
-            let mut shell = Shell::new(window, cx);
+            let mut shell = Shell::new(mode, window, cx);
             if let Some(dir) = user_themes {
                 shell.watch_user_themes(dir, window, cx);
             }
@@ -1040,7 +1041,7 @@ fn main() {
             };
             // No home or config dir: built-in themes only.
             let user_themes = theme::UserThemeDir::resolve(|k| std::env::var_os(k));
-            open_shell(options, user_themes.map(|t| t.dir), cx).expect("open window");
+            open_shell(Mode::from_args(std::env::args().skip(1)), options, user_themes.map(|t| t.dir), cx).expect("open window");
             cx.activate(true);
         });
 }
@@ -1050,6 +1051,12 @@ mod tests {
     /// A driver whose calls wait until the test answers them, so no test reaches a real database.
     fn fake() -> std::sync::Arc<dyn crate::db::Driver> {
         std::sync::Arc::new(crate::db::fake::Fake::default())
+    }
+
+    /// The Shell as `--demo` starts it, on the sample workspace with its trees already loaded,
+    /// reading through `driver`.
+    fn demo_shell(driver: std::sync::Arc<dyn crate::db::Driver>, window: &mut gpui_kit::Window, cx: &mut gpui_kit::Context<super::Shell>) -> super::Shell {
+        super::Shell::with_driver(super::Mode::Demo, crate::mock::workspaces().remove(0), driver, window, cx)
     }
 
     use super::{Edge, LayoutState, split};
@@ -1175,7 +1182,7 @@ mod tests {
             super::bind_panel_keys(cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         if logs_focused {
@@ -1259,7 +1266,7 @@ mod tests {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(|cx| gpui_kit::init(cx));
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1281,7 +1288,7 @@ mod tests {
             super::bind_zoom_keys(cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1333,7 +1340,7 @@ mod tests {
             crate::theme::set_ui_scale(130, cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         shell.update(&mut cx, |this, cx| {
@@ -1366,7 +1373,7 @@ mod tests {
             let (window, shell) = cx.update(|cx| {
                 gpui_kit::open_window(Default::default(), cx, |window, cx| {
                     cx.new(|cx| {
-                        let mut shell = super::Shell::with_driver(fake(), window, cx);
+                        let mut shell = demo_shell(fake(), window, cx);
                         shell.watch_user_themes(dir, window, cx);
                         shell
                     })
@@ -1410,7 +1417,7 @@ mod tests {
         std::fs::write(dir.join("nord.json"), nord("#2E3440")).unwrap();
         cx.update(|cx| gpui_kit::init(cx));
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         // After the window exists: notifications need its root.
@@ -1441,7 +1448,7 @@ mod tests {
         let dir = crate::theme::tests::test_dir("startup-bad");
         std::fs::write(dir.join("bad.json"), "not json").unwrap();
         cx.update(|cx| gpui_kit::init(cx));
-        let (window, shell) = cx.update(|cx| super::open_shell(Default::default(), Some(dir), cx)).expect("open test window");
+        let (window, shell) = cx.update(|cx| super::open_shell(super::Mode::Normal, Default::default(), Some(dir), cx)).expect("open test window");
         let mut vcx = gpui_kit::VisualTestContext::from_window(window, cx);
         vcx.run_until_parked();
         assert_eq!(vcx.update(|window, cx| window.notifications(cx).len()), 1, "one notification");
@@ -1457,7 +1464,7 @@ mod tests {
             super::bind_overflow_keys(cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let _ = cx.update_window(window.into(), |_, _, cx| {
             shell.update(cx, |this, cx| {
@@ -1508,7 +1515,7 @@ mod tests {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(gpui_kit::init);
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1562,7 +1569,7 @@ mod tests {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(gpui_kit::init);
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1609,7 +1616,7 @@ mod tests {
             cx.set_reduce_motion(true);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(fake(), window, cx))).expect("open test window")
         });
         let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
@@ -1655,7 +1662,7 @@ mod tests {
             cx.set_reduce_motion(true);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(driver, window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| demo_shell(driver, window, cx))).expect("open test window")
         });
         gpui_kit::VisualTestContext::from_window(window.into(), cx).run_until_parked();
         (window.into(), shell)
