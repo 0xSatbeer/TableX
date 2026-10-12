@@ -621,4 +621,27 @@ mod tests {
         let got: Vec<_> = objects.expect("objects").into_iter().map(|o| (o.kind, o.name)).collect();
         assert_eq!(got, want);
     }
+
+    #[test]
+    fn types_are_enums_composites_domains_and_ranges_but_not_row_or_array_types() {
+        let Some(pg) = test_pg() else { return };
+        let schema = Scratch::new(&pg, "SCHEMA", "");
+        admin(&pg, &format!(
+            "SET search_path = {};
+             CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+             CREATE TYPE pair AS (a int, b int);
+             CREATE DOMAIN posint AS int CHECK (VALUE > 0);
+             CREATE TYPE span AS RANGE (subtype = int);
+             CREATE TABLE t (a int); CREATE VIEW v AS SELECT 1 AS x; CREATE MATERIALIZED VIEW m AS SELECT 1 AS x;
+             CREATE SEQUENCE s;",
+            schema.name
+        ));
+        // Tables, views, materialized views and sequences each have an implicit row type, and
+        // every type an array type (_mood, ...); none of those is listed.
+        let want = ["mood", "pair", "posint", "span", "span_multirange"];
+        let (objects, _) = objects_of(&pg, &schema.name);
+        let objects = objects.expect("objects");
+        let types: Vec<_> = objects.iter().filter(|o| o.kind == ObjectKind::Type).map(|o| o.name.as_str()).collect();
+        assert_eq!(types, want);
+    }
 }
