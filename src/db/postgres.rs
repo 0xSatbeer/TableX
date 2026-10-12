@@ -131,7 +131,8 @@ impl Driver for Postgres {
                          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 \
                        UNION ALL \
                          SELECT 6, t.typname::text, NULL FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
-                         WHERE n.nspname = $1 AND t.typtype = 'e' \
+                         WHERE n.nspname = $1 AND (t.typtype IN ('e', 'd', 'r', 'm') \
+                           OR t.typtype = 'c' AND (SELECT relkind FROM pg_class WHERE oid = t.typrelid) = 'c') \
                        ) o(k, name, estimate) ORDER BY k, name COLLATE \"C\"";
             let rows = session.query(sql, &[&schema]).await?;
             Ok(rows
