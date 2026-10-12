@@ -2027,6 +2027,87 @@ mod tests {
         }
     }
 
+    /// Expands the row labelled `label`.
+    fn expand(explorer: &gpui_kit::Entity<super::Explorer>, cx: &mut gpui_kit::VisualTestContext, label: &str) {
+        explorer.update_in(cx, |e, _, cx| {
+            let ix = e.nodes.iter().position(|n| n.label.as_ref() == label).unwrap_or_else(|| panic!("{label} row"));
+            e.set_expanded(ix, true, cx);
+        });
+    }
+
+    /// The labels of the rows under the row labelled `label`.
+    fn under(explorer: &gpui_kit::Entity<super::Explorer>, cx: &gpui_kit::VisualTestContext, label: &str) -> Vec<String> {
+        explorer.read_with(cx, |e, _| {
+            let ix = e.nodes.iter().position(|n| n.label.as_ref() == label).unwrap_or_else(|| panic!("{label} row"));
+            e.nodes[ix + 1..].iter().take_while(|n| n.depth > e.nodes[ix].depth).map(|n| n.label.to_string()).collect()
+        })
+    }
+
+    fn view(name: &str) -> crate::model::DbObject {
+        crate::model::DbObject { kind: ObjectKind::View, ..table(name) }
+    }
+
+    fn strings(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[gpui_kit::test]
+    fn each_level_loads_only_when_expanded_and_shows_a_loading_row_meanwhile(cx: &mut gpui_kit::TestAppContext) {
+        let (mut cx, explorer, _, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+        connect_answered(&explorer, &fake, &mut cx, &["analytics", "app"]);
+        assert_eq!(fake.pending(), Vec::<String>::new(), "no database loads before it is expanded");
+
+        expand(&explorer, &mut cx, "app");
+        assert_eq!(fake.pending(), ["schemas app"]);
+        assert_eq!(under(&explorer, &cx, "app"), ["Loading…"]);
+        fake.resolve("schemas app", Ok(strings(&["public", "empty"])));
+        cx.run_until_parked();
+        assert_eq!(under(&explorer, &cx, "app"), ["public", "empty"]);
+        assert_eq!(under(&explorer, &cx, "analytics"), Vec::<String>::new(), "a database not expanded stays unloaded");
+        assert_eq!(fake.pending(), Vec::<String>::new(), "no schema loads before it is expanded");
+
+        expand(&explorer, &mut cx, "public");
+        assert_eq!(fake.pending(), ["objects app/public"]);
+        assert_eq!(under(&explorer, &cx, "public"), ["Loading…"]);
+        fake.resolve("objects app/public", Ok(vec![table("t"), view("v")]));
+        cx.run_until_parked();
+        assert_eq!(under(&explorer, &cx, "public"), ["Tables", "Views"]);
+        expand(&explorer, &mut cx, "Tables");
+        assert_eq!(under(&explorer, &cx, "Tables"), ["t"]);
+        assert_eq!(fake.pending(), Vec::<String>::new(), "no column loads before the table is expanded");
+
+        expand(&explorer, &mut cx, "t");
+        assert_eq!(fake.pending(), ["columns app/public/t"]);
+        assert_eq!(under(&explorer, &cx, "t"), ["Loading…"]);
+        fake.resolve("columns app/public/t", Ok(vec![column("id"), column("name")]));
+        cx.run_until_parked();
+        expand(&explorer, &mut cx, "Columns");
+        assert_eq!(under(&explorer, &cx, "t"), ["Columns", "id", "name"]);
+
+        // (row expanded, the load it starts; it brings back nothing)
+        let empty = [("empty", "objects app/empty"), ("analytics", "schemas analytics")];
+        for (row, call) in empty {
+            expand(&explorer, &mut cx, row);
+            if row == "analytics" {
+                // Another database, so it opens a session of its own first.
+                assert_eq!(fake.pending(), ["connect analytics"], "{row}");
+                fake.resolve("connect analytics", Ok(crate::db::fake::session("analytics")));
+                cx.run_until_parked();
+            }
+            assert_eq!(fake.pending(), [call], "{row}");
+            assert_eq!(under(&explorer, &cx, row), ["Loading…"], "{row}");
+            if row == "analytics" {
+                fake.resolve::<Vec<String>>(call, Ok(vec![]));
+            } else {
+                fake.resolve::<Vec<crate::model::DbObject>>(call, Ok(vec![]));
+            }
+            cx.run_until_parked();
+            assert_eq!(under(&explorer, &cx, row), Vec::<String>::new(), "{row}: no children");
+            let chevron = explorer.read_with(&cx, |e, _| e.nodes.iter().find(|n| n.label.as_ref() == row).unwrap().expandable);
+            assert!(!chevron, "{row}: nothing to expand once loaded empty");
+        }
+    }
+
     #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
