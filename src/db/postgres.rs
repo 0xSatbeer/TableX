@@ -8,7 +8,7 @@ use futures::FutureExt;
 
 use super::tls::Tls;
 use super::{Driver, Reply, Session, foreign, reason, spawn, timeout_reason};
-use crate::model::{Column, ConnectionParams, DbObject, SslMode};
+use crate::model::{Column, ConnectionParams, DbObject, ObjectKind, SslMode};
 
 pub struct Postgres {
     /// Wraps the whole connect: TCP, TLS, auth and the first query.
@@ -106,8 +106,24 @@ impl Driver for Postgres {
         })
     }
 
-    fn objects(&self, _session: &Session, _schema: &str) -> Reply<Vec<DbObject>> {
-        not_yet()
+    fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>> {
+        let schema = schema.to_string();
+        read(session, |session| async move {
+            let sql = "SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                       WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') ORDER BY c.relname COLLATE \"C\"";
+            let rows = session.query(sql, &[&schema]).await?;
+            Ok(rows
+                .iter()
+                .map(|row| DbObject {
+                    kind: ObjectKind::Table,
+                    name: row.get(0),
+                    columns: Vec::new(),
+                    keys: Vec::new(),
+                    indexes: Vec::new(),
+                    row_estimate: None,
+                })
+                .collect())
+        })
     }
 
     fn columns(&self, _session: &Session, _schema: &str, _object: &str) -> Reply<Vec<Column>> {
