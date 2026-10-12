@@ -170,3 +170,46 @@ pub(crate) mod testing {
         assert!(!exists(&name), "the guard drops its schema");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::testing::{Scratch, admin, test_pg};
+    use super::*;
+    use crate::model::Secret;
+    use futures::executor::block_on;
+
+    /// `pg` logging in as `user` with `password`.
+    fn as_user(pg: &ConnectionParams, user: &str, password: Option<&str>) -> ConnectionParams {
+        let ConnectionParams::Postgres { host, port, database, ssl, .. } = pg.clone() else { unreachable!() };
+        ConnectionParams::Postgres { host, port, user: user.into(), password: password.map(Secret::new), database, ssl }
+    }
+
+    /// The last query of each server session `user` has open.
+    fn sessions_of(pg: &ConnectionParams, user: &str) -> Vec<String> {
+        admin(pg, &format!("SELECT query FROM pg_stat_activity WHERE usename = '{user}'"))
+    }
+
+    #[test]
+    fn connect_opens_a_session_and_test_runs_select_1_then_closes_it() {
+        let Some(pg) = test_pg() else { return };
+        let role = Scratch::new(&pg, "ROLE", "LOGIN PASSWORD 'pw'");
+        let params = as_user(&pg, &role.name, Some("pw"));
+        let driver = Postgres::default();
+
+        let session = block_on(driver.connect(&params)).expect("connect with valid settings");
+        assert!(matches!(session, Session::Postgres(_)));
+        assert_eq!(sessions_of(&pg, &role.name), ["SELECT 1"], "connect's first query is SELECT 1");
+        drop(session);
+        let closed = |why: &str| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !sessions_of(&pg, &role.name).is_empty() {
+                assert!(std::time::Instant::now() < deadline, "{why}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+        closed("dropping the session closes it");
+
+        assert_eq!(block_on(driver.test(&params)), Ok(()));
+        closed("test closes its session");
+    }
+}
