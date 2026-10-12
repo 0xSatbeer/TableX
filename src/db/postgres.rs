@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use futures::FutureExt;
 
+use super::tls::Tls;
 use super::{Driver, Reply, Session, reason, spawn, timeout_reason};
-use crate::model::{Column, ConnectionParams, DbObject};
+use crate::model::{Column, ConnectionParams, DbObject, SslMode};
 
 pub struct Postgres {
     /// Wraps the whole connect: TCP, TLS, auth and the first query.
@@ -27,16 +28,20 @@ pub struct PgSession {
 
 /// Connects with `params` and runs the first query, all within `timeout`.
 async fn open(params: ConnectionParams, timeout: Duration) -> Result<PgSession, String> {
-    let ConnectionParams::Postgres { host, port, user, password, database, .. } = params else {
+    let ConnectionParams::Postgres { host, port, user, password, database, ssl } = params else {
         return Err("not a Postgres connection".into());
     };
     let mut config = tokio_postgres::Config::new();
-    config.host(&host).port(port).user(&user).dbname(&database);
+    config.host(&host).port(port).user(&user).dbname(&database).ssl_mode(match ssl {
+        SslMode::Disable => tokio_postgres::config::SslMode::Disable,
+        SslMode::Prefer => tokio_postgres::config::SslMode::Prefer,
+        SslMode::Require => tokio_postgres::config::SslMode::Require,
+    });
     if let Some(password) = &password {
         config.password(password.expose());
     }
     let connect = async {
-        let (client, connection) = config.connect(tokio_postgres::NoTls).await.map_err(|e| reason(&e))?;
+        let (client, connection) = config.connect(Tls::get()).await.map_err(|e| reason(&e))?;
         let io = tokio::spawn(async move {
             connection.await.ok();
         });
@@ -206,7 +211,7 @@ pub(crate) mod testing {
 mod tests {
     use super::testing::{Scratch, admin, test_pg};
     use super::*;
-    use crate::model::{Secret, SslMode};
+    use crate::model::Secret;
     use futures::executor::block_on;
 
     /// `pg` logging in as `user` with `password`.

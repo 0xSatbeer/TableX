@@ -15,6 +15,7 @@ use crate::model::{Column, ConnectionParams, DbObject};
 pub mod fake;
 pub mod postgres;
 pub mod sqlite;
+mod tls;
 
 /// A driver call's result, runtime-agnostic: awaiting it never needs tokio. `Err` holds the reason.
 pub type Reply<T> = BoxFuture<'static, Result<T, String>>;
