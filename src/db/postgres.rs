@@ -65,13 +65,27 @@ pub(crate) mod testing {
 
     /// Params for the `postgres://user:pass@host:port/db` URL, or `None` when it is unset or empty.
     pub fn params_from(url: Option<&str>) -> Option<ConnectionParams> {
-        println!("skipped: QUERYX_TEST_PG not set");
-        None
+        let Some(url) = url.map(str::trim).filter(|url| !url.is_empty()) else {
+            println!("skipped: QUERYX_TEST_PG not set");
+            return None;
+        };
+        let config: tokio_postgres::Config = url.parse().expect("QUERYX_TEST_PG is a postgres:// URL");
+        let tokio_postgres::config::Host::Tcp(host) = &config.get_hosts()[0] else { panic!("QUERYX_TEST_PG needs a TCP host") };
+        Some(ConnectionParams::Postgres {
+            host: host.clone(),
+            port: config.get_ports().first().copied().unwrap_or(5432),
+            user: config.get_user().unwrap_or_default().to_string(),
+            password: config.get_password().map(|p| Secret::new(String::from_utf8_lossy(p))),
+            database: config.get_dbname().unwrap_or_default().to_string(),
+            ssl: SslMode::Prefer,
+        })
     }
 
     /// A name no other test, in this run or a parallel one, uses.
     pub fn unique(prefix: &str) -> String {
-        prefix.to_string()
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("{prefix}_{}_{n}", std::process::id())
     }
 
     /// Runs `sql` as the test URL's user and returns the first column of every row.
