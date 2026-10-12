@@ -169,6 +169,16 @@ impl NodeMut<'_> {
             NodeMut::Object(object) => object.columns.is_some(),
         }
     }
+
+    /// Drops its children, so the next expand or Retry loads them afresh.
+    fn unload(self) {
+        match self {
+            NodeMut::Connection(conn) => conn.databases = None,
+            NodeMut::Database(db) => db.schemas = None,
+            NodeMut::Schema(schema) => schema.objects = None,
+            NodeMut::Object(object) => object.columns = None,
+        }
+    }
 }
 
 /// The node with `segments` in connection `id`'s tree.
@@ -884,6 +894,12 @@ impl Explorer {
                         if this.sessions.get(&at).is_some_and(Session::is_closed) {
                             this.sessions.remove(&at);
                         }
+                        this.workspace.update(cx, |ws, cx| {
+                            if let Some(node) = locate(ws, id, &segments) {
+                                node.unload();
+                            }
+                            cx.notify();
+                        });
                         this.loads.insert(key, Load::Failed(reason));
                     }
                 }
