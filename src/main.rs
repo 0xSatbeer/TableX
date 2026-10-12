@@ -173,8 +173,7 @@ enum Mode {
 impl Mode {
     /// The mode for the command-line `args` after the program name. Any other argument is ignored.
     fn from_args(args: impl IntoIterator<Item = String>) -> Self {
-        let _ = args;
-        Mode::Normal
+        if args.into_iter().any(|a| a == "--demo") { Mode::Demo } else { Mode::Normal }
     }
 }
 
