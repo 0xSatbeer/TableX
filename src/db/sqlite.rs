@@ -23,7 +23,12 @@ fn not_yet<T: Send + 'static>() -> Reply<T> {
 /// Opens the file `params` names.
 fn open(params: &ConnectionParams) -> Result<SqliteSession, String> {
     let ConnectionParams::Sqlite { path } = params else { return Err("not a SQLite connection".into()) };
-    let conn = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+    if !path.is_file() {
+        return Err(format!("No file at {}", path.display()));
+    }
+    // Without SQLITE_OPEN_CREATE, so a typo never leaves an empty database behind.
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = rusqlite::Connection::open_with_flags(path, flags).map_err(|e| e.to_string())?;
     let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
     Ok(SqliteSession { name, conn: Mutex::new(conn) })
 }
@@ -34,8 +39,9 @@ impl Driver for Sqlite {
         blocking(move || Ok(Session::Sqlite(Arc::new(open(&params)?))))
     }
 
-    fn test(&self, _params: &ConnectionParams) -> Reply<()> {
-        not_yet()
+    fn test(&self, params: &ConnectionParams) -> Reply<()> {
+        let params = params.clone();
+        blocking(move || open(&params).map(drop))
     }
 
     fn databases(&self, session: &Session) -> Reply<Vec<String>> {
