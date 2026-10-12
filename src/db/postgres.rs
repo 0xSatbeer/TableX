@@ -645,4 +645,27 @@ mod tests {
         let types: Vec<_> = objects.iter().filter(|o| o.kind == ObjectKind::Type).map(|o| o.name.as_str()).collect();
         assert_eq!(types, want);
     }
+
+    #[test]
+    fn objects_owned_by_an_extension_are_hidden_and_an_empty_schema_lists_nothing() {
+        let Some(pg) = test_pg() else { return };
+        // Its own database: an extension can be created once per database.
+        let scratch = Scratch::new(&pg, "DATABASE", "");
+        let db = on(&pg, &scratch.name);
+        // hstore brings a type, its array type and functions; ALTER EXTENSION ADD makes the
+        // extension own a table, view and sequence too, as PostGIS owns spatial_ref_sys.
+        admin(&db, "CREATE SCHEMA app; CREATE SCHEMA empty; CREATE EXTENSION hstore SCHEMA app;
+                    SET search_path = app;
+                    CREATE TABLE spatial_ref_sys (); CREATE VIEW ext_view AS SELECT 1 AS x; CREATE SEQUENCE ext_seq;
+                    ALTER EXTENSION hstore ADD TABLE spatial_ref_sys;
+                    ALTER EXTENSION hstore ADD VIEW ext_view;
+                    ALTER EXTENSION hstore ADD SEQUENCE ext_seq;
+                    CREATE TABLE mine (h hstore);");
+        // (schema, objects)
+        let cases = [("app", vec![(ObjectKind::Table, "mine")]), ("empty", vec![])];
+        for (schema, want) in cases {
+            let (objects, _) = objects_of(&db, schema);
+            assert_eq!(kinds_and_names(&objects.expect("objects")), want, "{schema}");
+        }
+    }
 }
