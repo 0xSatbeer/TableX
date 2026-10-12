@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# The date pickers in gpui-component speak chrono; it is already in the tree through them.
+chrono = { version = "0.4", default-features = false }
+# JSON cells are checked before they are saved; already in the tree through gpui.
+serde_json = "1"
 gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql"] }
 
 [dev-dependencies]

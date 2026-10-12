@@ -576,8 +576,12 @@ impl Shell {
             // Tint and stripe are overlays so they sit on top of the active/hover background.
             .when(production, |d| d.child(div().absolute().inset_0().bg(theme::production_tint(theme))))
             .when_some(t.origin.as_ref(), |d, o| {
-                d.child(div().absolute().top_0().left_0().right_0().h(theme::stripe()).bg(theme::connection_color(o.color, theme)))
+                // A bright top edge reads as "selected", so only the active tab gets it at full strength.
+                let stripe = theme::connection_color(o.color, theme);
+                d.child(div().absolute().top_0().left_0().right_0().h(theme::stripe()).bg(if active { stripe } else { stripe.opacity(0.35) }))
             })
+            // The top edge belongs to the connection color, so selection gets its own mark at the bottom.
+            .when(active, |d| d.child(div().absolute().bottom_0().left_0().right_0().h(theme::stripe()).bg(theme.primary)))
             .tooltip({
                 let text = SharedString::from(tabs::tooltip_text(&t.title, t.origin.as_ref()));
                 move |window, cx| Tooltip::new(text.clone()).build(window, cx)
@@ -1518,7 +1522,7 @@ mod tests {
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
         let ints = ResultSet {
-            columns: vec![ColumnMeta { name: "n".into(), data_type: "int".into(), is_pk: false }],
+            columns: vec![ColumnMeta { name: "n".into(), data_type: "int".into(), is_pk: false, ..Default::default() }],
             rows: vec![[Value::Int(3)].into(), [Value::Int(4)].into()],
         };
         let grid = shell.update(&mut cx, |this, cx| {

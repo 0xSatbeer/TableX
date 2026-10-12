@@ -220,15 +220,18 @@ fn table(name: String, r: u64) -> DbObject {
 // ---------------------------------------------------------------- result sets
 
 fn meta(cols: &[(&str, &str)]) -> Vec<ColumnMeta> {
-    cols.iter().map(|(n, t)| ColumnMeta { name: (*n).into(), data_type: (*t).into(), is_pk: *n == "id" }).collect()
+    cols.iter().map(|(n, t)| ColumnMeta { name: (*n).into(), data_type: (*t).into(), is_pk: *n == "id", ..Default::default() }).collect()
 }
 
+/// Labels of the `event_kind` enum that `big_events.event` is declared with.
+const EVENT_KINDS: [&str; 6] = ["page_view", "signup", "login", "purchase", "logout", "error"];
+
 pub fn big_events_columns() -> Vec<ColumnMeta> {
-    meta(&[
+    let mut columns = meta(&[
         ("id", "bigint"),
         ("occurred_at", "timestamptz"),
         ("user_id", "bigint"),
-        ("event", "text"),
+        ("event", "event_kind"),
         ("amount", "double precision"),
         ("ok", "boolean"),
         ("payload", "jsonb"),
@@ -237,7 +240,9 @@ pub fn big_events_columns() -> Vec<ColumnMeta> {
         ("duration_ms", "integer"),
         ("referrer", "text"),
         ("logged_at", "timestamp"),
-    ])
+    ]);
+    columns[3].enum_values = EVENT_KINDS.map(Arc::from).into();
+    columns
 }
 
 /// Row `ix` of `big_events`, computed on demand from the seed. Never stored.
@@ -249,7 +254,7 @@ pub fn big_events_row(ix: usize) -> Row {
         Value::Int(ix as i64 + 1),
         Value::TimestampTz { micros: at, offset_secs: 0 },
         Value::Int((r(2) % 50_000) as i64 + 1),
-        Value::Text(pick(&["page_view", "signup", "login", "purchase", "logout", "error"], r(3)).into()),
+        Value::Text(pick(&EVENT_KINDS, r(3)).into()),
         null_or(4, Value::Float(((r(4) % 2_000_000) as f64 - 500_000.) / 100.)),
         Value::Bool(r(5) % 10 != 0),
         Value::Json(format!(r#"{{"v":{},"path":"/p/{}"}}"#, r(6) % 4, r(6) % 977).into()),
@@ -264,7 +269,7 @@ pub fn big_events_row(ix: usize) -> Row {
 /// `wide_table`: 300 columns for column-virtualization tests.
 pub fn wide_table(rows: usize) -> ResultSet {
     let columns = (0..WIDE_TABLE_COLS)
-        .map(|c| ColumnMeta { name: format!("col_{c:03}").into(), data_type: "integer".into(), is_pk: false })
+        .map(|c| ColumnMeta { name: format!("col_{c:03}").into(), data_type: "integer".into(), is_pk: false, ..Default::default() })
         .collect();
     let rows = (0..rows)
         .map(|row| (0..WIDE_TABLE_COLS).map(|col| Value::Int((cell_rand(row, col) % 100_000) as i64)).collect())

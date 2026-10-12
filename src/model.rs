@@ -182,11 +182,13 @@ pub enum Key {
     Unique { name: String, columns: Vec<String> },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColumnMeta {
     pub name: Arc<str>,
     pub data_type: Arc<str>,
     pub is_pk: bool,
+    /// The labels of an enum column, in declared order; empty for every other type.
+    pub enum_values: Arc<[Arc<str>]>,
 }
 
 pub type Row = Box<[Value]>;

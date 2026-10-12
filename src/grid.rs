@@ -5,8 +5,13 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::assets::IconName;
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike as _};
+use gpui_kit::component::calendar::{Calendar, CalendarEvent, CalendarState, Date};
+use gpui_kit::component::time_field::{TimeField, TimeFieldState, TimePrecision};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, Icon, Disableable as _, Sizable as _, button::{Button, ButtonVariants as _}, h_flex, input::{Input, InputEvent, InputState}, menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem}, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -354,22 +359,127 @@ fn parse_tsv(text: &str) -> Vec<Vec<String>> {
     rows
 }
 
-/// A typed or pasted cell as a value of column type `data_type`. Empty is NULL, as `tsv` copies it.
-// shortcut: timestamps, bytes and arrays stay text; parse them when edits are submitted to a driver.
-fn parse_value(text: &str, data_type: &str) -> Value {
-    let ty = data_type.to_lowercase();
-    let number = is_numeric_type(&ty);
-    match text {
-        "" => Value::Null,
-        s if number && (ty.starts_with("int") || ty.starts_with("bigint") || ty.starts_with("smallint")) => s.parse().map_or_else(|_| Value::Text(s.into()), Value::Int),
-        s if number => s.parse().map_or_else(|_| Value::Text(s.into()), Value::Float),
-        s if ty.starts_with("bool") => match s.to_lowercase().as_str() {
-            "true" | "t" => Value::Bool(true),
-            "false" | "f" => Value::Bool(false),
-            _ => Value::Text(s.into()),
+/// A typed or pasted cell as a value of `column`, or why it can't be one. Empty is NULL, as `tsv` copies it.
+// shortcut: arrays, time, interval, inet and other types are not checked; the database rejects them on submit.
+fn parse_value(text: &str, column: &ColumnMeta) -> Result<Value, String> {
+    let ty = column.data_type.to_lowercase();
+    let s = text;
+    if s.is_empty() {
+        return Ok(Value::Null);
+    }
+    if !column.enum_values.is_empty() {
+        return match column.enum_values.iter().find(|v| ***v == *s) {
+            Some(v) => Ok(Value::Text(v.clone())),
+            None => Err(format!("Not one of: {}", column.enum_values.join(", "))),
+        };
+    }
+    if ty.ends_with("[]") {
+        return Ok(Value::Text(s.into()));
+    }
+    let int_bits = match ty.as_str() {
+        t if t.starts_with("smallint") || t == "int2" => Some(16),
+        t if t.starts_with("bigint") || t == "int8" => Some(64),
+        t if t.starts_with("int") && !t.starts_with("interval") => Some(32),
+        _ => None,
+    };
+    match () {
+        _ if let Some(bits) = int_bits => {
+            let n: i64 = s.trim().parse().map_err(|_| "Not a whole number".to_string())?;
+            let max = i64::MAX >> (64 - bits);
+            if n > max || n < -max - 1 {
+                return Err(format!("Too big for {ty}: use {} to {max}", -max - 1));
+            }
+            Ok(Value::Int(n))
+        }
+        _ if is_numeric_type(&ty) => s.trim().parse().map(Value::Float).map_err(|_| "Not a number".into()),
+        _ if ty.starts_with("bool") => match s.trim().to_lowercase().as_str() {
+            "true" | "t" | "yes" | "y" | "on" | "1" => Ok(Value::Bool(true)),
+            "false" | "f" | "no" | "n" | "off" | "0" => Ok(Value::Bool(false)),
+            _ => Err("Use true or false".into()),
         },
-        s if ty.starts_with("json") => Value::Json(s.into()),
-        s => Value::Text(s.into()),
+        _ if ty.starts_with("json") => match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(_) => Ok(Value::Json(s.into())),
+            Err(e) => Err(format!("Not valid JSON: {e}")),
+        },
+        _ if ty.starts_with("timestamp") => {
+            parse_timestamp(s, has_zone(&ty)).ok_or_else(|| format!("Not a date and time: use {}", if has_zone(&ty) { "2026-10-12 09:30:00+00" } else { "2026-10-12 09:30:00" }))
+        }
+        _ if ty == "date" => match NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d") {
+            Ok(d) => Ok(Value::Text(d.format("%Y-%m-%d").to_string().into())),
+            Err(_) => Err("Not a date: use 2026-10-12".into()),
+        },
+        _ if ty == "uuid" => {
+            let hex: String = s.trim().chars().filter(|&c| c != '-').collect();
+            let dashes_ok = s.trim().len() == 32 || s.trim().char_indices().filter(|&(_, c)| c == '-').map(|(i, _)| i).eq([8, 13, 18, 23]);
+            if hex.len() == 32 && hex.chars().all(|c| c.is_ascii_hexdigit()) && dashes_ok { Ok(Value::Text(s.trim().to_lowercase().into())) } else { Err("Not a UUID: use 123e4567-e89b-12d3-a456-426614174000".into()) }
+        }
+        _ if ty == "bytea" => {
+            let hex = s.trim().strip_prefix("\\x").ok_or("Use hex bytes like \\x0a1b")?;
+            if hex.len() % 2 != 0 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err("Use hex bytes like \\x0a1b: two hex digits per byte".into());
+            }
+            Ok(Value::Bytes((0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()))
+        }
+        _ => Ok(Value::Text(s.into())),
+    }
+}
+
+/// Whether a timestamp type keeps a zone: `timestamptz`, `timestamp with time zone`.
+fn has_zone(ty: &str) -> bool {
+    ty.starts_with("timestamptz") || ty.contains("with time zone")
+}
+
+/// Timestamp text as the grid shows it (`2026-10-12 09:30:00.5+05:30`), with or without
+/// seconds, a `T`, or a time at all. A zoned column reads text without an offset as UTC.
+fn parse_timestamp(s: &str, zoned: bool) -> Option<Value> {
+    const FORMATS: [&str; 3] = ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M"];
+    let s = s.trim();
+    if zoned && let Some(at) = FORMATS.iter().find_map(|f| DateTime::parse_from_str(s, &format!("{f}%#z")).ok()) {
+        return Some(Value::TimestampTz { micros: at.timestamp_micros(), offset_secs: at.offset().local_minus_utc() });
+    }
+    let at = FORMATS
+        .iter()
+        .find_map(|f| NaiveDateTime::parse_from_str(s, f).ok())
+        .or_else(|| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok().map(|d| d.and_time(NaiveTime::MIN)))?;
+    Some(timestamp_value(at, zoned.then_some(0)))
+}
+
+/// A timestamp cell as the wall-clock time it shows, and the zone offset it shows it in.
+fn wall_time(value: &Value) -> Option<(NaiveDateTime, i32)> {
+    let (micros, offset) = match *value {
+        Value::Timestamp(micros) => (micros, 0),
+        Value::TimestampTz { micros, offset_secs } => (micros, offset_secs),
+        _ => return None,
+    };
+    Some((DateTime::from_timestamp_micros(micros + offset as i64 * 1_000_000)?.naive_utc(), offset))
+}
+
+/// Wall-clock `at` as a cell: `timestamp`, or with `offset` a `timestamptz` shown in that zone.
+fn timestamp_value(at: NaiveDateTime, offset: Option<i32>) -> Value {
+    let micros = at.and_utc().timestamp_micros();
+    offset.map_or(Value::Timestamp(micros), |offset_secs| Value::TimestampTz { micros: micros - offset_secs as i64 * 1_000_000, offset_secs })
+}
+
+/// How a cell of this column is edited.
+#[derive(Debug, PartialEq)]
+enum EditorKind {
+    Text,
+    /// Pick one of these labels: an enum's, or a boolean's true / false.
+    Options(Vec<Arc<str>>),
+    Date,
+    /// Date and time; `zoned` for timestamptz.
+    DateTime { zoned: bool },
+}
+
+fn editor_kind(meta: &ColumnMeta) -> EditorKind {
+    let ty = meta.data_type.to_lowercase();
+    match () {
+        _ if ty.ends_with("[]") => EditorKind::Text,
+        _ if !meta.enum_values.is_empty() => EditorKind::Options(meta.enum_values.to_vec()),
+        _ if ty.starts_with("bool") => EditorKind::Options(vec!["true".into(), "false".into()]),
+        _ if ty == "date" => EditorKind::Date,
+        _ if ty.starts_with("timestamp") => EditorKind::DateTime { zoned: has_zone(&ty) },
+        _ => EditorKind::Text,
     }
 }
 
@@ -675,18 +785,32 @@ pub struct Grid {
     revision: usize,
     /// The in-cell editor, while open (double-click, Enter, F2).
     editing: Option<Editing>,
+    /// A refused paste: the cell that couldn't take its field, and why. Cleared by the next selection.
+    notice: Option<((usize, usize), String)>,
     /// The multi-cell selection a click on one of its cells collapsed, so a double-click can restore it.
     before_click: Option<Selection>,
     /// A left button pressed on a cell is still down, so moving over cells extends the selection.
     drag_selecting: bool,
 }
 
-/// An open in-cell editor: the display cell it sits in and every cell its value goes to.
+/// An open cell editor: the display cell it sits on and every cell its value goes to.
 struct Editing {
-    input: Entity<InputState>,
+    editor: Editor,
     cell: (usize, usize),
     // Fixed at open, since the click that blurs (and commits) it moves the selection first.
     targets: Vec<(usize, usize)>,
+    /// Why the typed text can't be saved, shown under the cell until it is fixed.
+    error: Option<String>,
+}
+
+enum Editor {
+    /// Typed in place of the cell text.
+    Text(Entity<InputState>),
+    /// A list under the cell; `highlighted` is the row Enter picks.
+    Options { values: Vec<Arc<str>>, current: Option<usize>, highlighted: usize },
+    /// A calendar under the cell, with a time field for timestamps. `original` is the cell's
+    /// value, whose sub-second part survives when the time is left as it was.
+    Date { calendar: Entity<CalendarState>, time: Option<(Entity<TimeFieldState>, Option<i32>)>, original: Value },
 }
 
 pub type SelectionKey = (Range<usize>, Vec<usize>, Option<(usize, bool)>, usize);
@@ -720,6 +844,7 @@ impl Grid {
             edits: HashMap::new(),
             revision: 0,
             editing: None,
+            notice: None,
             before_click: None,
             drag_selecting: false,
         };
@@ -766,29 +891,43 @@ impl Grid {
     }
 
     /// Stores `cells` (display row, display column, typed text) as pending edits.
-    fn set_cells(&mut self, cells: Vec<((usize, usize), String)>, cx: &mut Context<Self>) {
-        for ((r, c), text) in cells {
-            let s = self.col_order[c];
-            let value = parse_value(&text, &self.source.columns()[s].data_type);
-            self.edits.insert((self.abs_row(r), s), value);
+    /// Stores `cells` (display row, display column, value) as pending edits.
+    fn set_values(&mut self, cells: Vec<((usize, usize), Value)>, cx: &mut Context<Self>) {
+        self.notice = None;
+        for ((r, c), value) in cells {
+            self.edits.insert((self.abs_row(r), self.col_order[c]), value);
         }
         self.revision += 1;
         cx.notify();
     }
 
     /// Ctrl+V: clipboard TSV into the selection; a multi-cell paste then selects what it wrote.
+    /// One field the column can't hold stops the whole paste, and that cell shows why.
     fn paste(&mut self, cx: &mut Context<Self>) {
         let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else { return };
         let ranges = ranges_in_order(&self.extra, self.selection());
         let (rows, cols) = self.selection();
         let block = parse_tsv(&text);
         let cells = paste_targets(&block, &ranges, (rows.start, cols.start), self.source.row_count(), &self.display_hidden());
+        let values: Result<Vec<_>, _> = cells
+            .iter()
+            .map(|&(cell, ref text)| parse_value(text, &self.source.columns()[self.col_order[cell.1]]).map(|v| (cell, v)).map_err(|why| (cell, why)))
+            .collect();
+        let values = match values {
+            Ok(values) => values,
+            Err((cell, why)) => {
+                self.select(cell, false, cx);
+                self.reveal_head();
+                self.notice = Some((cell, format!("Nothing pasted. {why}")));
+                return;
+            }
+        };
         let fill = matches!(block.as_slice(), [row] if row.len() == 1);
         if !fill && let (Some(first), Some(last)) = (cells.first(), cells.last()) {
             (self.anchor, self.head) = (first.0, last.0);
             self.extra.clear();
         }
-        self.set_cells(cells, cx);
+        self.set_values(values, cx);
     }
 
     /// Selected cells in visible columns, once each.
@@ -796,36 +935,132 @@ impl Grid {
         fill_targets(&ranges_in_order(&self.extra, self.selection()), &self.display_hidden())
     }
 
-    /// Opens the editor in display cell `cell`, prefilled with its value; it writes to every selected cell.
+    /// Opens the editor for display cell `cell`'s type, showing its value; it writes to every selected cell.
     fn start_editing(&mut self, cell: (usize, usize), window: &mut Window, cx: &mut Context<Self>) {
-        let value = &self.row(cell.0)[self.col_order[cell.1]];
-        let text = if *value == Value::Null { String::new() } else { value.to_string() };
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("NULL"));
-        input.update(cx, |input, cx| {
-            input.set_value(text, window, cx);
-            input.focus(window, cx);
-        });
-        cx.subscribe_in(&input, window, |this, _, ev: &InputEvent, window, cx| match ev {
-            // Clicking elsewhere keeps what was typed, as in a spreadsheet.
-            InputEvent::PressEnter { .. } | InputEvent::Blur => this.stop_editing(true, window, cx),
-            _ => {}
-        })
-        .detach();
-        self.editing = Some(Editing { input, cell, targets: self.selected_cells() });
+        let meta = &self.source.columns()[self.col_order[cell.1]];
+        let value = self.row(cell.0)[self.col_order[cell.1]].clone();
+        let text = if value == Value::Null { String::new() } else { value.to_string() };
+        let editor = match editor_kind(meta) {
+            EditorKind::Text => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("NULL"));
+                input.update(cx, |input, cx| {
+                    input.set_value(text, window, cx);
+                    input.focus(window, cx);
+                });
+                cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, window, cx| match ev {
+                    // Clicking elsewhere keeps what was typed, as in a spreadsheet.
+                    InputEvent::PressEnter { .. } | InputEvent::Blur => _ = this.stop_editing(true, window, cx),
+                    // Once a reason shows, it follows the typing, so it goes away when the text is fixed.
+                    InputEvent::Change => {
+                        let text = input.read(cx).value();
+                        if let Some(editing) = &this.editing
+                            && editing.error.is_some()
+                        {
+                            let error = parse_value(&text, &this.source.columns()[this.col_order[editing.cell.1]]).err();
+                            this.editing.as_mut().unwrap().error = error;
+                            cx.notify();
+                        }
+                    }
+                    _ => {}
+                })
+                .detach();
+                Editor::Text(input)
+            }
+            EditorKind::Options(values) => {
+                let current = values.iter().position(|v| **v == *text);
+                Editor::Options { highlighted: current.unwrap_or(0), current, values }
+            }
+            kind => {
+                let zoned = matches!(kind, EditorKind::DateTime { zoned: true });
+                let shown = wall_time(&value).or_else(|| NaiveDate::parse_from_str(&text, "%Y-%m-%d").ok().map(|d| (d.and_time(NaiveTime::MIN), 0)));
+                let calendar = cx.new(|cx| CalendarState::new(window, cx));
+                calendar.update(cx, |c, cx| c.set_date(Date::Single(shown.map(|(at, _)| at.date())), window, cx));
+                let time = (kind != EditorKind::Date).then(|| {
+                    let field = cx.new(|cx| TimeFieldState::new(window, cx).precision(TimePrecision::Second));
+                    field.update(cx, |f, cx| f.set_time(shown.map_or(NaiveTime::MIN, |(at, _)| at.time()), window, cx));
+                    (field, zoned.then(|| shown.map_or(0, |(_, offset)| offset)))
+                });
+                if time.is_none() {
+                    // A date is one click: picking the day is the whole edit.
+                    cx.subscribe_in(&calendar, window, |this, _, CalendarEvent::Selected(_), window, cx| _ = this.stop_editing(true, window, cx)).detach();
+                }
+                Editor::Date { calendar, time, original: value }
+            }
+        };
+        self.notice = None;
+        self.editing = Some(Editing { editor, cell, targets: self.selected_cells(), error: None });
         cx.notify();
     }
 
-    /// Closes the editor, writing its value to its targets when `commit`.
-    fn stop_editing(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Editing { input, targets, .. }) = self.editing.take() else { return };
+    /// The value an editor holds: `Ok(None)` for a calendar with no day picked, `Err` for text
+    /// that isn't a value of the column.
+    fn editor_value(&self, editor: &Editor, column: &ColumnMeta, cx: &App) -> Result<Option<Value>, String> {
+        let day = |calendar: &Entity<CalendarState>| calendar.read(cx).date().start();
+        Ok(Some(match editor {
+            Editor::Text(input) => parse_value(&input.read(cx).value(), column)?,
+            Editor::Options { values, highlighted, .. } => parse_value(&values[*highlighted], column)?,
+            Editor::Date { calendar, time: None, .. } => match day(calendar) {
+                Some(day) => Value::Text(day.format("%Y-%m-%d").to_string().into()),
+                None => return Ok(None),
+            },
+            Editor::Date { calendar, time: Some((field, offset)), original } => {
+                let Some(day) = day(calendar) else { return Ok(None) };
+                let mut at = day.and_time(field.read(cx).time());
+                // The field edits whole seconds; keep the original's fraction if they match.
+                if let Some((was, _)) = wall_time(original).filter(|(was, _)| was.with_nanosecond(0) == Some(at)) {
+                    at = was;
+                }
+                timestamp_value(at, *offset)
+            }
+        }))
+    }
+
+    /// Closes the editor, writing its value to its targets when `commit`. A value the column
+    /// can't hold keeps it open with the reason under the cell; returns whether it closed.
+    fn stop_editing(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(editing) = &self.editing else { return true };
         if commit {
-            let text = input.read(cx).value().to_string();
-            self.set_cells(targets.into_iter().map(|cell| (cell, text.clone())).collect(), cx);
+            let column = &self.source.columns()[self.col_order[editing.cell.1]];
+            match self.editor_value(&editing.editor, column, cx) {
+                Err(why) => {
+                    self.editing.as_mut().unwrap().error = Some(why);
+                    cx.notify();
+                    return false;
+                }
+                Ok(Some(value)) => {
+                    let cells = editing.targets.iter().map(|&cell| (cell, value.clone())).collect();
+                    self.set_values(cells, cx);
+                }
+                Ok(None) => {}
+            }
         }
-        if input.read(cx).focus_handle(cx).is_focused(window) {
+        self.editing = None;
+        // Focus inside the editor goes back to the grid; focus the user moved elsewhere stays.
+        if self.focus.contains_focused(window, cx) {
             window.focus(&self.focus, cx);
         }
         cx.notify();
+        true
+    }
+
+    /// Keys while a list or calendar is open: ↑↓ move through the list, Enter sets, Esc cancels.
+    /// Returns whether the key was the editor's.
+    fn on_picker_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(Editing { editor, .. }) = &mut self.editing else { return false };
+        if matches!(editor, Editor::Text(_)) {
+            return false;
+        }
+        match (key, editor) {
+            ("escape", _) => _ = self.stop_editing(false, window, cx),
+            ("enter", _) => _ = self.stop_editing(true, window, cx),
+            ("up", Editor::Options { highlighted, .. }) => *highlighted = highlighted.saturating_sub(1),
+            ("down", Editor::Options { highlighted, values, .. }) => *highlighted = (*highlighted + 1).min(values.len() - 1),
+            // The grid stays still under an open list; the calendar's own keys still reach it.
+            (_, Editor::Options { .. }) => {}
+            _ => return false,
+        }
+        cx.notify();
+        true
     }
 
     /// Cell mouse-down: click selects (or extends, or adds a range); a double-click edits, keeping
@@ -835,8 +1070,16 @@ impl Grid {
         if self.editing.as_ref().is_some_and(|e| e.cell == cell) {
             return window.prevent_default();
         }
-        // Commit now rather than on the blur, which lands a frame later.
-        self.stop_editing(true, window, cx);
+        // Text commits now rather than on the blur, which lands a frame later; a list or calendar cancels.
+        let typed = match &self.editing {
+            Some(Editing { editor: Editor::Text(input), .. }) => Some(input.clone()),
+            _ => None,
+        };
+        if !self.stop_editing(typed.is_some(), window, cx) {
+            // Invalid text stays in its cell, focused, until it is fixed or Esc drops it.
+            window.prevent_default();
+            return typed.unwrap().update(cx, |input, cx| input.focus(window, cx));
+        }
         window.focus(&self.focus, cx);
         let plain = !ev.modifiers.secondary() && !ev.modifiers.shift;
         if ev.click_count == 2 && plain {
@@ -904,6 +1147,7 @@ impl Grid {
     }
 
     fn select(&mut self, cell: (usize, usize), extend: bool, cx: &mut Context<Self>) {
+        self.notice = None;
         self.head = cell;
         if !extend {
             self.anchor = cell;
@@ -1004,8 +1248,12 @@ impl Grid {
 
     fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let rows = self.source.row_count();
+        if self.on_picker_key(&ev.keystroke.key, window, cx) {
+            return cx.stop_propagation();
+        }
         if self.editing.is_some() && ev.keystroke.key == "escape" {
-            return self.stop_editing(false, window, cx);
+            self.stop_editing(false, window, cx);
+            return;
         }
         // Keys typed into the filter inputs bubble up here; they are not grid navigation.
         if rows == 0 || self.widths.is_empty() || !self.focus.is_focused(window) {
@@ -1131,6 +1379,104 @@ impl Grid {
             .child(div().flex_1().min_w_0().child(Input::new(&order_input).small().bordered(false).prefix(icon(IconName::ArrowDownWideNarrow))))
     }
 
+    /// Why a cell's text can't be saved, under that cell.
+    fn render_problem(&self, why: String, cx: &App) -> AnyElement {
+        let theme = cx.theme();
+        let bubble = div()
+            .debug_selector(|| "cell-problem".into())
+            .occlude()
+            .max_w(px(420.))
+            .px(theme::space_8())
+            .py(theme::space_4())
+            .rounded(theme::radius_md())
+            .border_1()
+            .border_color(theme.danger)
+            .bg(theme.popover)
+            .text_color(theme.danger)
+            .shadow_lg()
+            .font_family(theme.font_family.clone())
+            .text_size(theme::ui_sm())
+            .whitespace_normal()
+            .child(why);
+        div().absolute().top_full().left_0().child(deferred(anchored().snap_to_window_with_margin(theme::space_8()).child(bubble)).with_priority(1)).into_any_element()
+    }
+
+    /// The list or calendar under the cell being edited; `None` for text, which is edited in place.
+    fn render_picker(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let editing = self.editing.as_ref()?;
+        let theme = cx.theme();
+        let n = editing.targets.len();
+        let panel = v_flex()
+            .id("cell-picker")
+            .occlude()
+            .min_w(self.widths[self.col_order[editing.cell.1]])
+            .p(theme::space_4())
+            .gap(theme::space_2())
+            .rounded(theme::radius_md())
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .text_color(theme.popover_foreground)
+            .shadow_lg()
+            .font_family(theme.font_family.clone())
+            .text_size(theme::ui())
+            .whitespace_normal()
+            // Clicking away from a list or calendar picks nothing.
+            .on_mouse_down_out(cx.listener(|this, _, window, cx| _ = this.stop_editing(false, window, cx)))
+            // Say up front that the pick goes to the whole selection, not just this cell.
+            .when(n > 1, |d| d.child(div().px(theme::space_8()).py(theme::space_2()).text_size(theme::ui_sm()).text_color(theme.muted_foreground).child(format!("Set {} cells to", grouped(n)))));
+        let panel = match &editing.editor {
+            Editor::Text(_) => return None,
+            Editor::Options { values, current, highlighted } => panel.max_h(px(280.)).overflow_y_scroll().children(values.iter().enumerate().map(|(i, v)| {
+                h_flex()
+                    .id(("cell-option", i))
+                    .debug_selector(move || format!("cell-option-{i}"))
+                    .gap(theme::space_8())
+                    .px(theme::space_8())
+                    .h(self.row_h())
+                    .rounded(theme::radius_sm())
+                    .cursor_pointer()
+                    .font_family(theme.mono_font_family.clone())
+                    .text_size(self.mono_px())
+                    .hover(|d| d.bg(theme.accent))
+                    .when(i == *highlighted, |d| d.bg(theme.accent).text_color(theme.accent_foreground))
+                    .child(div().flex_none().w(theme::space_12()).when(*current == Some(i), |d| d.child(Icon::new(IconName::Check).xsmall())))
+                    .child(v.to_string())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if let Some(Editing { editor: Editor::Options { highlighted, .. }, .. }) = &mut this.editing {
+                            *highlighted = i;
+                        }
+                        this.stop_editing(true, window, cx);
+                    }))
+            })),
+            Editor::Date { calendar, time, .. } => {
+                let picked = calendar.read(cx).date().start().is_some();
+                panel.child(Calendar::new(calendar).small().border_0().p_0()).when_some(time.clone(), |d, (field, _)| {
+                    d.child(
+                        h_flex()
+                            .gap(theme::space_8())
+                            .pt(theme::space_4())
+                            .border_t_1()
+                            .border_color(theme.border)
+                            .child(div().text_color(theme.muted_foreground).child("Time"))
+                            .child(TimeField::new(&field).small())
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("cell-picker-set")
+                                    .primary()
+                                    .small()
+                                    .label(if n > 1 { format!("Set {} cells", grouped(n)) } else { "Set".into() })
+                                    .disabled(!picked)
+                                    .tooltip(if picked { "Enter" } else { "Pick a day first" })
+                                    .on_click(cx.listener(|this, _, window, cx| _ = this.stop_editing(true, window, cx))),
+                            ),
+                    )
+                })
+            }
+        };
+        Some(div().absolute().top_full().left_0().child(deferred(anchored().snap_to_window_with_margin(theme::space_8()).child(panel)).with_priority(1)).into_any_element())
+    }
+
     /// Horizontal scroll position and viewport width of the cell area.
     fn viewport(&self, window: &Window) -> (Pixels, Pixels) {
         let base = self.scroll.0.borrow().base_handle.clone();
@@ -1141,6 +1487,8 @@ impl Grid {
     }
 
     fn render_rows(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Div> {
+        let mut picker = self.render_picker(cx);
+        let mut problem = self.editing.as_ref().and_then(|e| Some((e.cell, e.error.clone()?))).or_else(|| self.notice.clone());
         let theme = cx.theme();
         // Unfocused, the selection dims and loses its cursor, so only one pane looks "live".
         let focused = self.focus.is_focused(window);
@@ -1153,7 +1501,11 @@ impl Grid {
         let (scroll_x, view) = self.viewport(window);
         let cols = visible_cols(&offsets, scroll_x, view, OVERSCAN);
         let total = *offsets.last().unwrap_or(&Pixels::ZERO);
-        let (editor, editing_cell) = (self.editing.as_ref().map(|e| e.input.clone()), self.editing.as_ref().map(|e| e.cell));
+        let editing_cell = self.editing.as_ref().map(|e| e.cell);
+        let text_editor = match self.editing.as_ref().map(|e| &e.editor) {
+            Some(Editor::Text(input)) => Some(input.clone()),
+            _ => None,
+        };
         range
             .map(|r| {
                 let (row, at) = (self.row(r), self.abs_row(r));
@@ -1186,10 +1538,12 @@ impl Grid {
                                 this.select((r, c), true, cx);
                             }
                         }))
-                        .when_some(editor.clone().filter(|_| editing_cell == Some((r, c))), |d, input| {
+                        .when_some(text_editor.clone().filter(|_| editing_cell == Some((r, c))), |d, input| {
                             d.px_0().child(Input::new(&input).small().bordered(false).w_full().h_full().font_family(theme.mono_font_family.clone()).text_size(self.mono_px()))
                         })
-                        .when(editing_cell != Some((r, c)), |d| d.child(if kind == CellKind::Null {
+                        .when_some(picker.take_if(|_| editing_cell == Some((r, c))), |d, picker| d.child(picker))
+                        .when_some(problem.take_if(|(at, _)| *at == (r, c)), |d, (_, why)| d.border_1().border_color(theme.danger).child(self.render_problem(why, cx)))
+                        .when(editing_cell != Some((r, c)) || text_editor.is_none(), |d| d.child(if kind == CellKind::Null {
                             div()
                                 .px(theme::space_4())
                                 .rounded(theme::radius_sm())
@@ -1507,12 +1861,14 @@ impl Render for Grid {
             .when(!self.record, |d| d.child(self.render_header(window, cx)))
             .when(self.record && self.source.row_count() > 0, |d| d.child(self.render_record(cx)))
             .when(!self.record, |d| d.child(
-                div().id("grid-body").debug_selector(|| "grid-body".into()).flex_1().min_h_0().child(
+                div().id("grid-body").debug_selector(|| "grid-body".into()).relative().flex_1().min_h_0().child(
                     uniform_list("grid-rows", self.source.row_count(), cx.processor(Self::render_rows))
                         .track_scroll(&self.scroll)
                         .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
                         .size_full(),
                 )
+                // Always shown: where you are in the rows and columns is worth seeing at rest.
+                .child(Scrollbar::new(&self.scroll).id("grid-scrollbar").mode(ScrollbarMode::Always))
                 .context_menu({
                     let focus = self.focus.clone();
                     move |menu, _, _| {
@@ -1538,7 +1894,7 @@ mod tests {
 
     #[test]
     fn parse_tsv_reads_back_what_tsv_copies() {
-        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into(), is_pk: false }];
+        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into(), is_pk: false, ..Default::default() }];
         let rows = vec![vec![Value::Text("x\ty".into()), Value::Null], vec![Value::Text("say \"hi\"\nbye".into()), Value::Int(3)]];
         let parsed = super::parse_tsv(&tsv(&cols, &rows));
         assert_eq!(parsed, [vec!["x\ty", ""], vec!["say \"hi\"\nbye", "3"]]);
@@ -1548,14 +1904,42 @@ mod tests {
 
     #[test]
     fn parse_value_follows_the_column_type() {
-        use super::parse_value;
-        assert_eq!(parse_value("", "text"), Value::Null);
-        assert_eq!(parse_value("42", "integer"), Value::Int(42));
-        assert_eq!(parse_value("4.5", "numeric(10,2)"), Value::Float(4.5));
-        assert_eq!(parse_value("abc", "bigint"), Value::Text("abc".into()), "unparsable stays as typed");
-        assert_eq!(parse_value("TRUE", "boolean"), Value::Bool(true));
-        assert_eq!(parse_value("{}", "jsonb"), Value::Json("{}".into()));
-        assert_eq!(parse_value("42", "text"), Value::Text("42".into()));
+        let col = |ty: &str| ColumnMeta { name: "c".into(), data_type: ty.into(), ..Default::default() };
+        let ok = |text: &str, ty: &str| super::parse_value(text, &col(ty)).unwrap_or_else(|e| panic!("{text:?} as {ty}: {e}"));
+        let err = |text: &str, ty: &str| super::parse_value(text, &col(ty)).expect_err(&format!("{text:?} as {ty} should be refused"));
+        assert_eq!(ok("", "integer"), Value::Null, "empty is NULL in any column");
+        assert_eq!(ok("42", "integer"), Value::Int(42));
+        assert_eq!(ok("4.5", "numeric(10,2)"), Value::Float(4.5));
+        assert_eq!(ok("TRUE", "boolean"), Value::Bool(true));
+        assert_eq!(ok("0", "boolean"), Value::Bool(false));
+        assert_eq!(ok("{\"a\": [1, 2]}", "jsonb"), Value::Json("{\"a\": [1, 2]}".into()));
+        assert_eq!(ok("42", "text"), Value::Text("42".into()));
+        assert_eq!(ok("2026-10-12", "date"), Value::Text("2026-10-12".into()));
+        assert_eq!(ok("\\x0aFF", "bytea"), Value::Bytes([0x0a, 0xff][..].into()));
+        assert_eq!(ok("123E4567-e89b-12d3-a456-426614174000", "uuid"), Value::Text("123e4567-e89b-12d3-a456-426614174000".into()));
+        assert_eq!(ok("32767", "smallint"), Value::Int(32_767));
+        for (text, ty, why) in [
+            ("abc", "bigint", "Not a whole number"),
+            ("4.5", "integer", "Not a whole number"),
+            ("32768", "smallint", "Too big for smallint"),
+            ("2147483648", "integer", "Too big for integer"),
+            ("12,5", "double precision", "Not a number"),
+            ("maybe", "boolean", "Use true or false"),
+            ("{\"a\": }", "jsonb", "Not valid JSON"),
+            ("{'a': 1}", "json", "Not valid JSON"),
+            ("soon", "timestamptz", "Not a date and time"),
+            ("2026-02-30", "date", "Not a date"),
+            ("123e4567e89b12d3a456", "uuid", "Not a UUID"),
+            ("123e4567-e89b12d3-a456-426614174000-", "uuid", "Not a UUID"),
+            ("0aff", "bytea", "Use hex bytes"),
+            ("\\x0af", "bytea", "two hex digits"),
+        ] {
+            let got = err(text, ty);
+            assert!(got.contains(why), "{text:?} as {ty}: {got:?}, want {why:?}");
+        }
+        let status = ColumnMeta { enum_values: ["open", "paid"].map(std::sync::Arc::from).into(), ..col("order_status") };
+        assert_eq!(super::parse_value("paid", &status), Ok(Value::Text("paid".into())));
+        assert_eq!(super::parse_value("Paid", &status), Err("Not one of: open, paid".into()));
     }
 
     #[test]
@@ -1568,6 +1952,184 @@ mod tests {
         let grid = paste_targets(&block(&[&["a", "b", "c"], &["d", "e", "f"], &["g", "h", "i"]]), &[(1..2, 0..1)], (1, 0), 3, &[false, true, false, false]);
         let got: Vec<_> = grid.iter().map(|((r, c), v)| (*r, *c, v.as_str())).collect();
         assert_eq!(got, [(1, 0, "a"), (1, 2, "b"), (1, 3, "c"), (2, 0, "d"), (2, 2, "e"), (2, 3, "f")], "skips hidden column 1, clipped at the last row");
+    }
+
+    /// The open in-cell text input.
+    fn text_input(g: &super::Grid) -> gpui_kit::Entity<gpui_kit::component::input::InputState> {
+        match &g.editing.as_ref().expect("an editor is open").editor {
+            super::Editor::Text(input) => input.clone(),
+            _ => panic!("expected the text editor"),
+        }
+    }
+
+    #[test]
+    fn each_type_gets_its_editor() {
+        use super::{editor_kind, EditorKind};
+        let meta = |ty: &str| ColumnMeta { name: "c".into(), data_type: ty.into(), ..Default::default() };
+        let cases = [
+            ("boolean", EditorKind::Options(vec!["true".into(), "false".into()])),
+            ("date", EditorKind::Date),
+            ("timestamp", EditorKind::DateTime { zoned: false }),
+            ("timestamp without time zone", EditorKind::DateTime { zoned: false }),
+            ("timestamptz", EditorKind::DateTime { zoned: true }),
+            ("timestamp with time zone", EditorKind::DateTime { zoned: true }),
+            ("timestamptz[]", EditorKind::Text),
+            ("text", EditorKind::Text),
+            ("integer", EditorKind::Text),
+        ];
+        for (ty, kind) in cases {
+            assert_eq!(editor_kind(&meta(ty)), kind, "{ty}");
+        }
+        let status = ColumnMeta { enum_values: ["open", "paid"].map(std::sync::Arc::from).into(), ..meta("order_status") };
+        assert_eq!(editor_kind(&status), EditorKind::Options(vec!["open".into(), "paid".into()]));
+    }
+
+    #[test]
+    fn timestamps_read_back_what_the_grid_shows() {
+        use super::{parse_value, timestamp_value, wall_time};
+        let values = [
+            Value::Timestamp(1_760_000_000_123_456),
+            Value::TimestampTz { micros: 1_760_000_000_000_000, offset_secs: 19_800 },
+            Value::TimestampTz { micros: 1_760_000_000_000_000, offset_secs: -3_600 },
+        ];
+        for v in values {
+            let ty = if matches!(v, Value::Timestamp(_)) { "timestamp" } else { "timestamptz" };
+            let column = ColumnMeta { data_type: ty.into(), ..Default::default() };
+            assert_eq!(parse_value(&v.to_string(), &column), Ok(v.clone()), "{v}");
+            let (at, offset) = wall_time(&v).unwrap();
+            assert_eq!(timestamp_value(at, (ty == "timestamptz").then_some(offset)), v, "wall time round trip of {v}");
+        }
+        let at = |text: &str, ty: &str| parse_value(text, &ColumnMeta { data_type: ty.into(), ..Default::default() }).unwrap().to_string();
+        assert_eq!(at("2026-10-12", "timestamp"), "2026-10-12 00:00:00", "a bare date is midnight");
+        assert_eq!(at("2026-10-12 09:30", "timestamptz"), "2026-10-12 09:30:00+00", "no offset reads as UTC");
+    }
+
+    #[gpui_kit::test]
+    fn lists_and_calendars_edit_booleans_enums_and_timestamps(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use super::Editor;
+        cx.update(gpui_kit::init);
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(super::BigEvents::new()), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        let cell = |cx: &mut gpui_kit::VisualTestContext, r: usize, c: usize| grid.read_with(cx, |g, _| g.row(r)[c].clone());
+        let open_at = |cx: &mut gpui_kit::VisualTestContext, cell: (usize, usize)| {
+            grid.update_in(cx, |g, window, cx| {
+                window.focus(&g.focus, cx);
+                (g.anchor, g.head) = (cell, cell);
+            });
+            cx.simulate_keystrokes("enter");
+            cx.run_until_parked();
+        };
+        let (ok, event, occurred, logged) = (5, 3, 1, 11);
+
+        // Boolean: a true/false list; ↓ then Enter flips it.
+        let was = cell(&mut cx, 0, ok);
+        open_at(&mut cx, (0, ok));
+        assert!(matches!(grid.read_with(&cx, |g, _| g.editing.as_ref().map(|e| matches!(e.editor, Editor::Options { .. }))), Some(true)), "booleans open a list");
+        assert!(cx.debug_bounds("cell-option-1").is_some(), "the list is drawn");
+        let key = if was == Value::Bool(true) { "down" } else { "up" };
+        cx.simulate_keystrokes(&format!("{key} enter"));
+        assert_eq!(cell(&mut cx, 0, ok), Value::Bool(was != Value::Bool(true)), "↑↓ Enter picks the other value");
+        assert_eq!(grid.read_with(&cx, |g, _| g.head), (0, ok), "the arrows moved the list, not the grid");
+
+        // Enum: clicking a label sets it, on every selected cell.
+        grid.update(&mut cx, |g, _| (g.anchor, g.head) = ((0, event), (2, event)));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        let purchase = cx.debug_bounds("cell-option-3").expect("enum labels listed").center();
+        cx.simulate_click(purchase, Default::default());
+        for r in 0..3 {
+            assert_eq!(cell(&mut cx, r, event), Value::Text("purchase".into()), "row {r}");
+        }
+
+        // Esc closes a list without writing.
+        open_at(&mut cx, (5, event));
+        let before = cell(&mut cx, 5, event);
+        cx.simulate_keystrokes("down escape");
+        assert!(grid.read_with(&cx, |g, _| g.editing.is_none()));
+        assert_eq!(cell(&mut cx, 5, event), before);
+
+        // Timestamps: a calendar opened on the cell's day; Enter keeps the exact value, sub-seconds included.
+        for col in [occurred, logged] {
+            let was = cell(&mut cx, 4, col);
+            open_at(&mut cx, (4, col));
+            let day = grid.read_with(&cx, |g, cx| match &g.editing.as_ref().unwrap().editor {
+                Editor::Date { calendar, time, .. } => {
+                    assert!(time.is_some(), "timestamps also edit the time");
+                    calendar.read(cx).date().start()
+                }
+                _ => panic!("timestamps open a calendar"),
+            });
+            assert_eq!(day, super::wall_time(&was).map(|(at, _)| at.date()));
+            cx.simulate_keystrokes("enter");
+            assert_eq!(cell(&mut cx, 4, col), was, "column {col}");
+        }
+
+        // A changed time is written in the cell's own zone.
+        open_at(&mut cx, (6, occurred));
+        grid.update_in(&mut cx, |g, window, cx| {
+            let Editor::Date { time: Some((field, _)), .. } = &g.editing.as_ref().unwrap().editor else { unreachable!() };
+            field.update(cx, |f, cx| f.set_time(chrono::NaiveTime::from_hms_opt(9, 30, 0).unwrap(), window, cx));
+        });
+        cx.simulate_keystrokes("enter");
+        let written = cell(&mut cx, 6, occurred);
+        assert!(matches!(written, Value::TimestampTz { offset_secs: 0, .. }) && written.to_string().ends_with(" 09:30:00+00"), "{written}");
+    }
+
+    #[gpui_kit::test]
+    fn invalid_values_are_never_saved(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(super::BigEvents::new()), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        let cell = |cx: &mut gpui_kit::VisualTestContext, r: usize, c: usize| grid.read_with(cx, |g, _| g.row(r)[c].clone());
+        let error = |cx: &mut gpui_kit::VisualTestContext| grid.read_with(cx, |g, _| g.editing.as_ref().and_then(|e| e.error.clone()));
+        let (amount, payload) = (4, 6);
+        let type_in = |cx: &mut gpui_kit::VisualTestContext, text: &str| grid.update_in(cx, |g, window, cx| text_input(g).update(cx, |i, cx| i.set_value(text.to_string(), window, cx)));
+        grid.update_in(&mut cx, |g, window, cx| {
+            window.focus(&g.focus, cx);
+            (g.anchor, g.head) = ((2, payload), (2, payload));
+        });
+        let was = cell(&mut cx, 2, payload);
+
+        cx.simulate_keystrokes("enter");
+        type_in(&mut cx, "{\"v\": ");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert!(error(&mut cx).is_some_and(|e| e.starts_with("Not valid JSON")), "Enter on broken JSON says why: {:?}", error(&mut cx));
+        assert!(cx.debug_bounds("cell-problem").is_some(), "the reason shows under the cell");
+        assert_eq!(cell(&mut cx, 2, payload), was, "and nothing is saved");
+        let elsewhere = grid.read_with(&cx, |g, _| g.gutter() + g.offsets()[0] + px(5.));
+        let body = cx.debug_bounds("grid-body").unwrap().origin;
+        cx.simulate_click(gpui_kit::point(body.x + elsewhere, body.y + grid.read_with(&cx, |g, _| g.row_h()) * 8.5), Default::default());
+        assert!(grid.read_with(&cx, |g, _| g.editing.is_some() && g.head == (2, payload)), "clicking another cell can't leave it either");
+        cx.simulate_input("1}");
+        assert_eq!(error(&mut cx), None, "typing the fix clears the reason");
+        cx.simulate_keystrokes("enter");
+        assert_eq!(cell(&mut cx, 2, payload), Value::Json("{\"v\": 1}".into()));
+
+        // Esc always leaves, dropping the bad text.
+        grid.update(&mut cx, |g, _| (g.anchor, g.head) = ((3, amount), (3, amount)));
+        let was = cell(&mut cx, 3, amount);
+        cx.simulate_keystrokes("enter");
+        type_in(&mut cx, "12,5");
+        cx.simulate_keystrokes("enter");
+        assert!(error(&mut cx).is_some());
+        cx.simulate_keystrokes("escape");
+        assert!(grid.read_with(&cx, |g, _| g.editing.is_none()));
+        assert_eq!(cell(&mut cx, 3, amount), was);
+
+        // A paste with one bad field writes nothing and points at that field.
+        let before: Vec<_> = (0..2).map(|r| cell(&mut cx, r, amount)).collect();
+        grid.update(&mut cx, |g, _| (g.anchor, g.head) = ((0, amount), (0, amount)));
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("1.5\nlots\n".into()));
+        cx.simulate_keystrokes("ctrl-v");
+        assert_eq!((0..2).map(|r| cell(&mut cx, r, amount)).collect::<Vec<_>>(), before, "nothing pasted");
+        assert_eq!(grid.read_with(&cx, |g, _| (g.head, g.notice.clone())), ((1, amount), Some(((1, amount), "Nothing pasted. Not a number".into()))));
     }
 
     #[gpui_kit::test]
@@ -1598,7 +2160,7 @@ mod tests {
         assert!(grid.read_with(&cx, |g, _| g.editing.is_none()), "Esc closes the input");
         assert_eq!(cell(&mut cx, 5, 2), Value::Int(1), "Esc applies nothing");
         cx.simulate_keystrokes("enter");
-        grid.update_in(&mut cx, |g, window, cx| g.editing.as_ref().unwrap().input.clone().update(cx, |i, cx| i.set_value("", window, cx)));
+        grid.update_in(&mut cx, |g, window, cx| text_input(g).update(cx, |i, cx| i.set_value("", window, cx)));
         cx.simulate_keystrokes("enter");
         assert!(grid.read_with(&cx, |g, _| g.editing.is_none()), "Enter applies and closes");
         assert_eq!([cell(&mut cx, 5, 2), cell(&mut cx, 5, 3), cell(&mut cx, 6, 2), cell(&mut cx, 6, 3)], [Value::Null, Value::Null, Value::Null, Value::Null], "empty sets every selected cell NULL");
@@ -1648,7 +2210,7 @@ mod tests {
         grid.update(&mut cx, |g, _| (g.anchor, g.head) = ((0, 0), (1, 1)));
         double_click(&mut cx, 1, 0);
         assert_eq!(grid.read_with(&cx, |g, _| (g.selection(), g.editing.as_ref().map(|e| e.cell))), ((0..2, 0..2), Some((1, 0))), "double-click inside keeps the selection and edits that cell");
-        grid.update_in(&mut cx, |g, window, cx| g.editing.as_ref().unwrap().input.clone().update(cx, |i, cx| i.set_value("5", window, cx)));
+        grid.update_in(&mut cx, |g, window, cx| text_input(g).update(cx, |i, cx| i.set_value("5", window, cx)));
         cx.simulate_keystrokes("enter");
         assert_eq!([0, 1].map(|r| [0, 1].map(|c| cell(&mut cx, r, c))), [[Value::Int(5), Value::Int(5)], [Value::Int(5), Value::Int(5)]], "the typed value fills every selected cell");
 
@@ -1742,7 +2304,7 @@ mod tests {
     }
 
     fn abc() -> (Vec<ColumnMeta>, Vec<Vec<Value>>) {
-        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false, ..Default::default() }).to_vec();
         (cols, vec![["a0", "b0", "c0"].map(|v| Value::Text(v.into())).to_vec()])
     }
 
@@ -1965,7 +2527,7 @@ mod tests {
 
     #[test]
     fn copy_formats_escape_their_syntax() {
-        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into(), is_pk: false }, ColumnMeta { name: "b".into(), data_type: "int".into(), is_pk: false }];
+        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into(), is_pk: false, ..Default::default() }, ColumnMeta { name: "b".into(), data_type: "int".into(), is_pk: false, ..Default::default() }];
         let rows = vec![vec![Value::Text("it's, \"x\"|".into()), Value::Null], vec![Value::Text("y".into()), Value::Int(2)]];
         assert_eq!(csv(&cols, &rows), "a,b\n\"it's, \"\"x\"\"|\",\ny,2\n");
         assert_eq!(json(&cols, &rows), "[\n  {\"a\": \"it's, \\\"x\\\"|\", \"b\": null},\n  {\"a\": \"y\", \"b\": 2}\n]\n");
@@ -1984,7 +2546,7 @@ mod tests {
     }
 
     fn col(name: &str, ty: &str, pk: bool) -> ColumnMeta {
-        ColumnMeta { name: name.into(), data_type: ty.into(), is_pk: pk }
+        ColumnMeta { name: name.into(), data_type: ty.into(), is_pk: pk, ..Default::default() }
     }
 
     #[test]
@@ -2032,7 +2594,7 @@ mod tests {
 
     /// Row r, column c holds "v{r}{c}"; columns a, b, c.
     fn vgrid() -> (Vec<ColumnMeta>, impl Fn(usize) -> Vec<Value>) {
-        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false, ..Default::default() }).to_vec();
         (cols, |r| (0..3).map(|c| Value::Text(format!("v{r}{c}").into())).collect())
     }
 
@@ -2085,7 +2647,7 @@ mod tests {
 
     #[test]
     fn in_list_merges_every_range_into_one_list() {
-        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false }).to_vec();
+        let cols = ["a", "b", "c"].map(|n| ColumnMeta { name: n.into(), data_type: "text".into(), is_pk: false, ..Default::default() }).to_vec();
         let rows: Vec<Vec<Value>> = vec![
             vec![Value::Int(1), Value::Text("x".into()), Value::Null],
             vec![Value::Int(2), Value::Text("it's".into()), Value::Text("z".into())],
@@ -2116,7 +2678,7 @@ mod tests {
         use crate::theme::tests::hover_shows_truncation_tip;
         cx.update(gpui_kit::init);
         let long = "shipment_line_item_carrier_tracking_events_archive_partitioned_by_month_2026_q3x";
-        let col = |name: &str, data_type: &str| ColumnMeta { name: name.into(), data_type: data_type.into(), is_pk: false };
+        let col = |name: &str, data_type: &str| ColumnMeta { name: name.into(), data_type: data_type.into(), is_pk: false, ..Default::default() };
         let source = ResultSet {
             columns: vec![col("id", "bigint"), col(long, "text"), col("created_at", "timestamp with time zone")],
             rows: vec![vec![Value::Int(1), Value::Text("a".into()), Value::Text("2026-10-10".into())].into()],
