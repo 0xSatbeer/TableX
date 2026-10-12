@@ -774,6 +774,8 @@ impl Explorer {
         });
         let Some((id, params)) = started else { return self.refresh(cx) };
         let generation = self.next_gen(id);
+        // Loads from before carry the old generation and will be dropped, so none stays in flight.
+        self.loads.retain(|k, _| !of_connection(k, id));
         let reply = self.driver.connect(&params);
         cx.spawn(async move |this, cx| {
             let result = reply.await;
@@ -893,6 +895,12 @@ impl Explorer {
                         let at = (id, db);
                         if this.sessions.get(&at).is_some_and(Session::is_closed) {
                             this.sessions.remove(&at);
+                        }
+                        // A connection whose databases can no longer be listed has failed as a whole.
+                        if refreshing && segments.len() == 1 {
+                            this.loads.remove(&key);
+                            this.set_status(id, ConnectionStatus::Error(reason), cx);
+                            return this.refresh(cx);
                         }
                         this.workspace.update(cx, |ws, cx| {
                             if let Some(node) = locate(ws, id, &segments) {
