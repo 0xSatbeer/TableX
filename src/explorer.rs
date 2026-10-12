@@ -661,10 +661,13 @@ impl Explorer {
                 if this.gens.get(&id) != Some(&generation) || !connecting {
                     return;
                 }
-                if let Ok(session) = result {
-                    this.sessions.insert((id, database_of(&params)), session);
-                    this.set_status(id, ConnectionStatus::Connected, cx);
-                    this.load(key, cx);
+                match result {
+                    Ok(session) => {
+                        this.sessions.insert((id, database_of(&params)), session);
+                        this.set_status(id, ConnectionStatus::Connected, cx);
+                        this.load(key, cx);
+                    }
+                    Err(reason) => this.set_status(id, ConnectionStatus::Error(reason), cx),
                 }
                 this.refresh(cx);
             })
