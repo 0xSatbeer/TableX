@@ -2957,6 +2957,23 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_demo_start_shows_the_acme_workspace_the_sample_tabs_and_the_mock_log(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_started(cx, super::Mode::Demo);
+        let cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (name, connections) = shell.read_with(&cx, |this, cx| {
+            let ws = this.workspace.read(cx);
+            (ws.name.clone(), ws.connections.iter().map(|c| c.name.clone()).collect::<Vec<_>>())
+        });
+        assert_eq!((name.as_str(), connections), ("Acme", vec!["prod-pg".to_string(), "staging-pg".into(), "local.db".into()]));
+        let tabs = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().map(|t| t.title.to_string()).collect::<Vec<_>>());
+        assert_eq!(tabs, ["big_events", "wide_table", "edge_cases", "console-1"]);
+        let console = shell.read_with(&cx, |this, _| this.tabs.tabs[3].origin.as_ref().map(|o| o.connection));
+        assert_eq!(console, Some(crate::model::ConnectionId(1)), "the console runs on prod-pg");
+        let logged = shell.read_with(&cx, |this, cx| this.bottom_panel.read(cx).logged_connections());
+        assert!(!logged.is_empty(), "the mock query log");
+    }
+
+    #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
         for filter in ["", "zzz"] {
