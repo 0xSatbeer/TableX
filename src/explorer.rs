@@ -701,6 +701,9 @@ impl Explorer {
     /// Connects connection `ci`, then lists its databases. Expanding a connection that is not
     /// connected and Retry on a failed one both come here.
     fn connect(&mut self, ci: usize, cx: &mut Context<Self>) {
+        let key = self.workspace.read(cx).connections[ci].id.0.to_string();
+        // Opened even when a connect is already running, so an expand while Connecting isn't lost.
+        self.expanded.insert(key.clone());
         let started = self.workspace.update(cx, |ws, cx| {
             let conn = &mut ws.connections[ci];
             if matches!(conn.status, ConnectionStatus::Connected | ConnectionStatus::Connecting) {
@@ -710,10 +713,8 @@ impl Explorer {
             cx.notify();
             Some((conn.id, conn.params.clone()))
         });
-        let Some((id, params)) = started else { return };
+        let Some((id, params)) = started else { return self.refresh(cx) };
         let generation = self.next_gen(id);
-        let key = id.0.to_string();
-        self.expanded.insert(key.clone());
         let reply = self.driver.connect(&params);
         cx.spawn(async move |this, cx| {
             let result = reply.await;
