@@ -29,7 +29,7 @@ mod statusbar;
 mod tabs;
 mod theme;
 
-actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme, AddConnection, EditConnection, DeleteConnection]);
+actions!(queryx, [Quit, ToggleExplorer, ToggleBottomPanel, MaximizeEditor, MaximizePanel, RestorePanel, ToggleGallery, FocusExplorer, CloseTab, ReopenTab, NextTab, PrevTab, CloseOtherTabs, CloseTabsToRight, CloseAllTabs, TogglePinTab, CopyTabName, RevealTab, CycleTheme, AddConnection, EditConnection, DeleteConnection, RefreshNode]);
 
 enum TabContent {
     Grid(Entity<grid::Grid>),

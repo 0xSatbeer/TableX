@@ -845,6 +845,12 @@ impl Explorer {
         }
     }
 
+    /// Refresh in row `ix`'s menu: re-reads that node's subtree.
+    fn refresh_row(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(key) = self.nodes.get(ix).map(|n| n.key.clone()) else { return };
+        self.load(key, cx);
+    }
+
     /// Opens every ancestor of `key`, selects it and focuses the tree.
     pub fn reveal(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.expanded.extend(ancestors(key).into_iter().map(String::from));
@@ -1112,7 +1118,16 @@ impl Explorer {
         let theme = cx.theme();
         let focused = self.focus.contains_focused(window, cx);
         let ws = self.workspace.read(cx);
-        let range_kinds: Vec<bool> = range.clone().map(|ix| matches!(self.nodes[ix].kind, NodeKind::Connection(_))).collect();
+        // Each row's menu: Some(true) for a connection's, Some(false) for Refresh alone, None for no menu.
+        let menus: Vec<Option<bool>> = range
+            .clone()
+            .map(|ix| match self.nodes[ix].kind {
+                NodeKind::Connection(_) => Some(true),
+                NodeKind::Database | NodeKind::Schema => Some(false),
+                kind if opens_tab(kind) => Some(false),
+                _ => None,
+            })
+            .collect();
         range
             .map(|ix| {
                 let node = &self.nodes[ix];
@@ -1258,12 +1273,22 @@ impl Explorer {
                         d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
-            .zip(range_kinds)
-            .map(|(row, is_conn)| if is_conn { row.context_menu(|menu, _, _| {
-                    menu.menu("Edit…", Box::new(crate::EditConnection)).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
-                        div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
+            .zip(menus)
+            .map(|(row, menu)| match menu {
+                Some(is_conn) => row
+                    .context_menu(move |menu, _, _| {
+                        let menu = if is_conn {
+                            menu.menu("Edit…", Box::new(crate::EditConnection)).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                                div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
+                            })
+                        } else {
+                            menu
+                        };
+                        menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
                     })
-                }).into_any_element() } else { row.into_any_element() })
+                    .into_any_element(),
+                None => row.into_any_element(),
+            })
             .collect()
     }
 }
@@ -1281,6 +1306,7 @@ impl Render for Explorer {
             .size_full()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .on_action(cx.listener(|this, _: &crate::RefreshNode, _, cx| this.refresh_row(this.selected, cx)))
             .child(
                 h_flex()
                     .flex_none()
