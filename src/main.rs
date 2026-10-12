@@ -1017,8 +1017,7 @@ fn open_shell(mode: Mode, options: WindowOptions, user_themes: Option<std::path:
 /// Sets the mock round-trip time for every connect and load from `value`
 /// (`QUERYX_MOCK_LATENCY_MS`), to see loading states.
 fn apply_mock_latency(mode: Mode, value: Option<String>) {
-    let _ = mode;
-    if let Some(ms) = value {
+    if let (Mode::Demo, Some(ms)) = (mode, value) {
         match ms.parse() {
             Ok(ms) => mock::set_latency(ms),
             Err(_) => eprintln!("QUERYX_MOCK_LATENCY_MS={ms:?} is not a whole number of milliseconds; using 0"),
