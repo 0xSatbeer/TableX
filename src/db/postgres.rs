@@ -433,4 +433,26 @@ mod tests {
         sorted.sort();
         assert_eq!(got, sorted, "sorted by name");
     }
+
+    #[test]
+    fn schemas_are_sorted_without_system_or_pg_prefixed_ones() {
+        let Some(pg) = test_pg() else { return };
+        let (full, empty) = (Scratch::new(&pg, "DATABASE", ""), Scratch::new(&pg, "DATABASE", ""));
+        let (full_db, empty_db) = (on(&pg, &full.name), on(&pg, &empty.name));
+        admin(&full_db, "CREATE SCHEMA app");
+        // The pg_ prefix is reserved, so only this setting lets a user create pg_custom.
+        admin(&full_db, "SET allow_system_table_mods = on; CREATE SCHEMA pg_custom");
+        // Leaves pg_temp_N and pg_toast_temp_N behind.
+        admin(&full_db, "CREATE TEMP TABLE scratch (a text)");
+        admin(&empty_db, "DROP SCHEMA public");
+        let all = admin(&full_db, "SELECT nspname FROM pg_namespace ORDER BY nspname");
+        for hidden in ["pg_catalog", "information_schema", "pg_toast", "pg_custom", "pg_temp_", "pg_toast_temp_"] {
+            assert!(all.iter().any(|s| s.starts_with(hidden)), "the server has {hidden}: {all:?}");
+        }
+        // (database, schemas)
+        let cases = [(&full_db, vec!["app", "public"]), (&empty_db, vec![])];
+        for (db, want) in cases {
+            assert_eq!(block_on(Postgres::default().schemas(&session(db))), Ok(want.iter().map(|s| s.to_string()).collect()), "{db:?}");
+        }
+    }
 }
