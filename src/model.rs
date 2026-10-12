@@ -348,6 +348,40 @@ mod tests {
     }
 
     #[test]
+    fn secret_debug_is_masked_and_a_password_only_edit_disconnects() {
+        assert_eq!(format!("{:?}", Secret::new("hunter2")), "***");
+        let pg = |password: Option<&str>| ConnectionParams::Postgres {
+            host: "h".into(),
+            port: 5432,
+            user: "u".into(),
+            password: password.map(Secret::new),
+            database: "d".into(),
+            ssl: SslMode::Prefer,
+        };
+        assert!(!format!("{:?}", pg(Some("hunter2"))).contains("hunter2"), "params Debug hides the password");
+        // (old password, new password, disconnected by the edit)
+        let cases = [
+            (None, Some("a"), true),
+            (Some("a"), Some("b"), true),
+            (Some("a"), None, true),
+            (Some("a"), Some(""), true),
+            (Some("a"), Some("a"), false),
+            (None, None, false),
+        ];
+        for (old, new, disconnects) in cases {
+            let mut ws = Workspace { id: 1, name: "w".into(), connections: Vec::new() };
+            let id = ws.add("c".into(), 0, false, pg(old));
+            ws.connections[0].status = ConnectionStatus::Connected;
+            ws.connections[0].databases = vec![Database { name: "d".into(), schemas: Vec::new() }];
+            ws.edit(id, "c".into(), 0, false, pg(new));
+            let conn = &ws.connections[0];
+            assert_eq!(conn.status == ConnectionStatus::Disconnected, disconnects, "{old:?} -> {new:?}");
+            assert_eq!(conn.databases.is_empty(), disconnects, "{old:?} -> {new:?}");
+            assert_eq!(conn.params, pg(new), "{old:?} -> {new:?}");
+        }
+    }
+
+    #[test]
     fn value_stays_compact() {
         assert_eq!(size_of::<Value>(), 24);
     }
