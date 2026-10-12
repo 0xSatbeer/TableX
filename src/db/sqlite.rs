@@ -16,10 +16,6 @@ pub struct SqliteSession {
     conn: Mutex<rusqlite::Connection>,
 }
 
-fn not_yet<T: Send + 'static>() -> Reply<T> {
-    futures::future::ready(Err("not implemented".to_string())).boxed()
-}
-
 /// `ident` as a quoted SQLite identifier.
 fn quote(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
@@ -82,8 +78,26 @@ impl Driver for Sqlite {
         })
     }
 
-    fn columns(&self, _session: &Session, _schema: &str, _object: &str) -> Reply<Vec<Column>> {
-        not_yet()
+    fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
+        let Session::Sqlite(session) = session else { return foreign() };
+        let (session, schema, object) = (session.clone(), schema.to_string(), object.to_string());
+        blocking(move || {
+            // table_xinfo also lists generated columns; hidden = 1 marks a virtual table's hidden ones.
+            let sql = "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_xinfo(?1, ?2) WHERE hidden <> 1 ORDER BY cid";
+            let conn = session.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([&object, &schema], |row| {
+                Ok(Column {
+                    name: row.get(0)?,
+                    data_type: row.get(1)?,
+                    nullable: row.get::<_, i64>(2)? == 0,
+                    default: row.get(3)?,
+                    is_pk: row.get::<_, i64>(4)? > 0,
+                    enum_values: Vec::new(),
+                })
+            });
+            rows.and_then(Iterator::collect).map_err(|e| e.to_string())
+        })
     }
 }
 
