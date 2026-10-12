@@ -123,3 +123,12 @@ impl ServerCertVerifier for AnyCertificate {
         self.0.signature_verification_algorithms.supported_schemes()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tls_is_ring_only() {
+        let lock = include_str!("../../Cargo.lock");
+        assert!(!lock.contains("aws-lc"), "Cargo.lock pulls in aws-lc; keep rustls and tokio-rustls on ring");
+    }
+}
