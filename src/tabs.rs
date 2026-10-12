@@ -237,6 +237,31 @@ impl<C> Tabs<C> {
 mod tests {
     use super::{tooltip_text, EditorTab, Origin, Tabs};
 
+    #[test]
+    fn a_console_origin_uses_the_dialog_database_or_the_sqlite_file_name() {
+        use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, Database, Schema, SslMode};
+        let pg = |database: &str| ConnectionParams::Postgres { host: "h".into(), port: 5432, user: "u".into(), password: None, database: database.into(), ssl: SslMode::Prefer };
+        let sqlite = |path: &str| ConnectionParams::Sqlite { path: path.into() };
+        let listed = |names: &[&str]| Some(names.iter().map(|n| Database { name: n.to_string(), schemas: Some(vec![Schema { name: "public".into(), objects: None }]) }).collect());
+        // (params, databases listed, origin database)
+        let cases = [
+            (pg("app"), listed(&["analytics", "app"]), "app"),
+            (pg("app"), None, "app"),
+            (pg("app"), listed(&[]), "app"),
+            (pg("app"), listed(&["analytics"]), "app"),
+            (sqlite("/x/local.db"), listed(&["local.db"]), "local.db"),
+            (sqlite("/x/local.db"), listed(&["main"]), "local.db"),
+            (sqlite("/x/local.db"), None, "local.db"),
+            (sqlite("notes"), None, "notes"),
+        ];
+        for (params, databases, want) in cases {
+            let label = format!("{params:?} {databases:?}");
+            let conn = Connection { id: ConnectionId(1), name: "c".into(), color: 0, is_production: false, status: ConnectionStatus::Connected, params, databases };
+            let origin = Origin::of(&conn);
+            assert_eq!((origin.tail.as_ref(), origin.path.as_ref()), (want, format!("c › {want}").as_str()), "{label}");
+        }
+    }
+
     fn tab(key: &'static str, preview: bool) -> EditorTab<()> {
         EditorTab { key: key.into(), title: key.into(), origin: None, tooltip: None, preview, pinned: false, content: () }
     }
