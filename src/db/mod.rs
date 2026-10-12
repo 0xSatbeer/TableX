@@ -46,6 +46,13 @@ pub trait Driver: Send + Sync {
 /// The reason we show for a failure: a server's own message without severity or prefixes,
 /// otherwise the innermost error's text.
 pub fn reason(err: &(dyn StdError + 'static)) -> String {
+    let mut inner = Some(err);
+    while let Some(e) = inner {
+        if let Some(server) = e.downcast_ref::<tokio_postgres::error::DbError>() {
+            return server.message().to_string();
+        }
+        inner = e.source();
+    }
     err.to_string()
 }
 
