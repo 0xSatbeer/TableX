@@ -1419,7 +1419,8 @@ mod tests {
         let cases = [
             (ConnectionStatus::Connected, true, "Connected"),
             (ConnectionStatus::Disconnected, false, "Disconnected"),
-            (ConnectionStatus::Error("timeout".into()), false, "Error: timeout"),
+            (ConnectionStatus::Error("timeout".into()), false, "Could not connect: timeout"),
+            (ConnectionStatus::Error("".into()), false, "Could not connect: "),
             (ConnectionStatus::Connecting, false, "Connecting…"),
         ];
         for (status, solid, tip) in cases {
@@ -1893,6 +1894,21 @@ mod tests {
             cx.run_until_parked();
             assert_eq!(fake.pending(), ["connect app"], "{keys}");
             assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connecting, "{keys}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_connect_shows_could_not_connect_in_the_error_row_and_the_dot_tooltip(cx: &mut gpui_kit::TestAppContext) {
+        // (reason the connect fails with)
+        let cases = ["password authentication failed for user \"u\"", "timeout expired after 10 s", "No file at /x/local.db"];
+        for reason in cases {
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            expand_connection(&explorer, &mut cx);
+            fake.resolve::<crate::db::Session>("connect app", Err(reason.into()));
+            cx.run_until_parked();
+            let want = format!("Could not connect: {reason}");
+            assert_eq!(labels(&explorer, &cx), ["pg".to_string(), want.clone()], "tree error row");
+            assert_eq!(status_style(&status_of(&workspace, &cx)), (false, want), "ring dot and its tooltip");
         }
     }
 
