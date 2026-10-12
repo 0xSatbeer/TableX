@@ -1706,6 +1706,50 @@ mod tests {
         assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some("t".into()), "the tab highlights t, not a");
     }
 
+    /// A SQLite connection `id` named `name` on the file `path`, with nothing loaded.
+    fn sqlite(id: u32, name: &str, path: &str) -> crate::model::Connection {
+        crate::model::Connection { params: crate::model::ConnectionParams::Sqlite { path: path.into() }, ..pg(id, name, "") }
+    }
+
+    fn status_of(workspace: &gpui_kit::Entity<crate::model::Workspace>, cx: &gpui_kit::VisualTestContext) -> ConnectionStatus {
+        workspace.read_with(cx, |ws, _| ws.connections[0].status.clone())
+    }
+
+    fn labels(explorer: &gpui_kit::Entity<super::Explorer>, cx: &gpui_kit::VisualTestContext) -> Vec<String> {
+        explorer.read_with(cx, |e, _| e.row_labels().iter().map(|l| l.to_string()).collect())
+    }
+
+    /// Expands the first row, the connection.
+    fn expand_connection(explorer: &gpui_kit::Entity<super::Explorer>, cx: &mut gpui_kit::VisualTestContext) {
+        explorer.update_in(cx, |e, _, cx| e.set_expanded(0, true, cx));
+    }
+
+    #[gpui_kit::test]
+    fn expanding_a_disconnected_connection_connects_then_lists_its_databases(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::session;
+        // (connection, database the connect opens, databases listed)
+        let cases = [
+            (pg(1, "pg", "app"), "app", vec!["analytics", "app"]),
+            (sqlite(1, "lite", "/x/local.db"), "local.db", vec!["local.db"]),
+        ];
+        for (conn, db, databases) in cases {
+            let name = conn.name.clone();
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![conn]);
+            expand_connection(&explorer, &mut cx);
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connecting, "{name}");
+            assert_eq!(fake.pending(), [format!("connect {db}")], "{name}");
+            fake.resolve(&format!("connect {db}"), Ok(session(db)));
+            cx.run_until_parked();
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connected, "{name}");
+            assert_eq!(fake.pending(), [format!("databases {db}")], "{name}");
+            fake.resolve(&format!("databases {db}"), Ok(databases.iter().map(|d| d.to_string()).collect::<Vec<_>>()));
+            cx.run_until_parked();
+            let mut want = vec![name.clone()];
+            want.extend(databases.iter().map(|d| d.to_string()));
+            assert_eq!(labels(&explorer, &cx), want, "{name}: the child rows are the databases");
+        }
+    }
+
     #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
