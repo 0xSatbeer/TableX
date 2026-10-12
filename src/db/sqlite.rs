@@ -129,4 +129,18 @@ mod tests {
             assert_eq!(block_on(Sqlite.test(&params(&path))), want, "test {i}");
         }
     }
+
+    #[test]
+    fn an_exclusively_locked_file_is_locked_after_the_busy_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(dir.path(), "local.db", "CREATE TABLE t (a)");
+        let holder = rusqlite::Connection::open(&path).unwrap();
+        holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let started = std::time::Instant::now();
+        let got = block_on(Sqlite.connect(&params(&path))).map(drop);
+        let took = started.elapsed();
+        assert_eq!(got, Err("database is locked".to_string()));
+        let busy = std::time::Duration::from_secs(5);
+        assert!(took >= busy && took < busy * 2, "took {took:?}");
+    }
 }
