@@ -70,6 +70,17 @@ async fn open(params: ConnectionParams, timeout: Duration) -> Result<PgSession, 
     tokio::time::timeout(timeout, connect).await.unwrap_or_else(|_| Err(timeout_reason(timeout)))
 }
 
+/// The kinds the objects query numbers 0 to 6, in listing order.
+const KINDS: [ObjectKind; 7] = [
+    ObjectKind::Table,
+    ObjectKind::View,
+    ObjectKind::MaterializedView,
+    ObjectKind::Sequence,
+    ObjectKind::Function,
+    ObjectKind::Procedure,
+    ObjectKind::Type,
+];
+
 fn not_yet<T: Send + 'static>() -> Reply<T> {
     futures::future::ready(Err("not implemented".to_string())).boxed()
 }
@@ -109,14 +120,24 @@ impl Driver for Postgres {
     fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>> {
         let schema = schema.to_string();
         read(session, |session| async move {
-            let sql = "SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-                       WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') ORDER BY c.relname COLLATE \"C\"";
+            // One statement for every kind, so a schema of any size costs one round trip.
+            let sql = "SELECT k, name FROM ( \
+                         SELECT CASE c.relkind WHEN 'v' THEN 1 WHEN 'm' THEN 2 WHEN 'S' THEN 3 ELSE 0 END, c.relname::text \
+                         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                         WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm', 'S') \
+                       UNION ALL \
+                         SELECT CASE p.prokind WHEN 'p' THEN 5 ELSE 4 END, p.proname::text \
+                         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 \
+                       UNION ALL \
+                         SELECT 6, t.typname::text FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+                         WHERE n.nspname = $1 AND t.typtype = 'e' \
+                       ) o(k, name) ORDER BY k, name COLLATE \"C\"";
             let rows = session.query(sql, &[&schema]).await?;
             Ok(rows
                 .iter()
                 .map(|row| DbObject {
-                    kind: ObjectKind::Table,
-                    name: row.get(0),
+                    kind: KINDS[row.get::<_, i32>(0) as usize],
+                    name: row.get(1),
                     columns: Vec::new(),
                     keys: Vec::new(),
                     indexes: Vec::new(),
