@@ -628,6 +628,27 @@ mod tests {
     }
 
     #[test]
+    fn a_partitioned_table_lists_as_a_table_with_its_estimate_once_analyzed() {
+        let Some(pg) = test_pg() else { return };
+        let schema = Scratch::new(&pg, "SCHEMA", "");
+        admin(&pg, &format!(
+            "SET search_path = {};
+             CREATE TABLE ev (d date) PARTITION BY RANGE (d);
+             CREATE TABLE ev_2024 PARTITION OF ev FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+             INSERT INTO ev SELECT '2024-01-01'::date + i % 300 FROM generate_series(1, 1200) i;",
+            schema.name
+        ));
+        let ev = || {
+            let (objects, _) = objects_of(&pg, &schema.name);
+            objects.expect("objects").into_iter().find(|o| o.name == "ev").expect("ev listed")
+        };
+        let before = ev();
+        assert_eq!((before.kind, before.row_estimate), (ObjectKind::Table, None), "never analyzed");
+        admin(&pg, &format!("ANALYZE {}.ev", schema.name));
+        assert_eq!(ev().row_estimate, Some(1200), "analyzed");
+    }
+
+    #[test]
     fn functions_and_procedures_are_named_with_their_argument_types() {
         let Some(pg) = test_pg() else { return };
         let schema = Scratch::new(&pg, "SCHEMA", "");
