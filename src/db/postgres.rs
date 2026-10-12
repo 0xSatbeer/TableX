@@ -243,4 +243,29 @@ mod tests {
         assert_eq!(block_on(driver.test(&params)), Ok(()));
         closed("test closes its session");
     }
+
+    #[test]
+    fn connect_logs_in_with_the_password_and_reports_a_wrong_one() {
+        let Some(pg) = test_pg() else { return };
+        let role = Scratch::new(&pg, "ROLE", "LOGIN PASSWORD 'pw'");
+        let failed = format!("password authentication failed for user \"{}\"", role.name);
+        // (user, password, Ok or the reason; "" means any non-empty reason)
+        let cases = [
+            (role.name.as_str(), Some("pw"), Ok(())),
+            (role.name.as_str(), Some("wrong"), Err(failed.as_str())),
+            (role.name.as_str(), Some("PW"), Err(failed.as_str())),
+            (role.name.as_str(), None, Err("")),
+            (role.name.as_str(), Some(""), Err("")),
+            // compose.yaml's init script makes the server trust this role.
+            ("queryx_trust", None, Ok(())),
+        ];
+        for (user, password, want) in cases {
+            let got = block_on(Postgres::default().connect(&as_user(&pg, user, password))).map(drop);
+            match (got, want) {
+                (Ok(()), Ok(())) => {}
+                (Err(got), Err("")) => assert!(!got.is_empty(), "{user} {password:?}"),
+                (got, want) => assert_eq!(got, want.map_err(String::from), "{user} {password:?}"),
+            }
+        }
+    }
 }
