@@ -40,6 +40,23 @@ enum NodeKind {
     Loading,
     /// A failed connection's message, shown under it whether or not it is expanded.
     ConnError,
+    /// A failed load's message, in place of the children it was loading.
+    LoadError,
+}
+
+/// Where the load of a node's children stands.
+#[derive(Clone, Debug, PartialEq)]
+enum Load {
+    Loading,
+    Failed(String),
+}
+
+/// The row shown in place of `key`'s children while they load or after their load failed.
+fn load_row(loads: &HashMap<String, Load>, key: &str) -> Option<(String, NodeKind, String)> {
+    match loads.get(key)? {
+        Load::Loading => Some((format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…".into())),
+        Load::Failed(reason) => Some((format!("{key}/{ERROR}"), NodeKind::LoadError, format!("Could not load: {reason}"))),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -185,11 +202,11 @@ fn status_style(status: &ConnectionStatus) -> (bool, String) {
 }
 
 /// The nodes to show: the expanded tree, or the filtered full tree while a filter is typed.
-fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>, filter: &str) -> Vec<FlatNode> {
+fn tree_nodes(ws: &Workspace, expanded: &HashSet<String>, loads: &HashMap<String, Load>, filter: &str) -> Vec<FlatNode> {
     if filter.is_empty() {
-        flatten(ws, expanded, loading, false)
+        flatten(ws, expanded, loads, false)
     } else {
-        filter_nodes(flatten(ws, expanded, &HashSet::new(), true), filter)
+        filter_nodes(flatten(ws, expanded, &HashMap::new(), true), filter)
     }
 }
 
@@ -443,8 +460,8 @@ fn target(conn: &Connection) -> String {
 }
 
 /// Visible nodes in preorder. `all` opens every node (used while filtering). Expanded schemas
-/// in `loading` show a single loading row instead of their objects.
-fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>, all: bool) -> Vec<FlatNode> {
+/// in `loads` show a single loading or error row instead of their children.
+fn flatten(ws: &Workspace, expanded: &HashSet<String>, loads: &HashMap<String, Load>, all: bool) -> Vec<FlatNode> {
     let mut out = Vec::new();
     let mut push = |mut node: FlatNode| {
         // Filtering opens everything but structure, so a query doesn't list every table's columns.
@@ -488,9 +505,9 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
         if !open {
             continue;
         }
-        // While a level loads, one row says so in place of its children.
-        if loading.contains(&key) {
-            push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 1));
+        // While a level loads, or once its load failed, one row says so in place of its children.
+        if let Some((key, kind, label)) = load_row(loads, &key) {
+            push(node(key, kind, &label, 1));
             continue;
         }
         for db in conn.databases.iter().flatten() {
@@ -499,8 +516,8 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
             if !push(FlatNode { expandable, unloaded, ..node(key.clone(), NodeKind::Database, &db.name, 1) }) {
                 continue;
             }
-            if loading.contains(&key) {
-                push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 2));
+            if let Some((key, kind, label)) = load_row(loads, &key) {
+                push(node(key, kind, &label, 2));
                 continue;
             }
             for schema in db.schemas.iter().flatten() {
@@ -509,8 +526,8 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                 if !push(FlatNode { expandable, unloaded, ..node(key.clone(), NodeKind::Schema, &schema.name, 2) }) {
                     continue;
                 }
-                if loading.contains(&key) {
-                    push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 3));
+                if let Some((key, kind, label)) = load_row(loads, &key) {
+                    push(node(key, kind, &label, 3));
                     continue;
                 }
                 let mut groups: BTreeMap<ObjectKind, Vec<&DbObject>> = BTreeMap::new();
@@ -534,8 +551,8 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                         if !push(FlatNode { expandable, unloaded, suffix, ..node(key.clone(), kind, &obj.name, 4) }) {
                             continue;
                         }
-                        if loading.contains(&key) {
-                            push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 5));
+                        if let Some((key, kind, label)) = load_row(loads, &key) {
+                            push(node(key, kind, &label, 5));
                             continue;
                         }
                         for (part, n) in parts {
@@ -619,8 +636,8 @@ pub struct Explorer {
     workspace: Entity<Workspace>,
     driver: Arc<dyn Driver>,
     expanded: HashSet<String>,
-    /// Nodes whose children are loading.
-    loading: HashSet<String>,
+    /// Nodes whose children are loading or failed to.
+    loads: HashMap<String, Load>,
     /// Each connection's generation: every connect bumps it, and a result carrying an older one is dropped.
     gens: HashMap<ConnectionId, u64>,
     /// Open sessions by connection and database.
@@ -646,7 +663,7 @@ impl Explorer {
     pub fn new(workspace: Entity<Workspace>, driver: Arc<dyn Driver>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // ponytail: starts collapsed; QX-020 restores the last session's expanded nodes
         let expanded = HashSet::new();
-        let nodes = flatten(workspace.read(cx), &expanded, &HashSet::new(), false);
+        let nodes = flatten(workspace.read(cx), &expanded, &HashMap::new(), false);
         // Edits made elsewhere (rename, recolor, connect, new params, delete) rebuild the rows.
         cx.observe(&workspace, |this, _, cx| {
             this.forget_changed(cx);
@@ -662,7 +679,7 @@ impl Explorer {
             }
         })
         .detach();
-        Self { field, workspace, driver, expanded, loading: HashSet::new(), gens: HashMap::new(), sessions: HashMap::new(), params, filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { field, workspace, driver, expanded, loads: HashMap::new(), gens: HashMap::new(), sessions: HashMap::new(), params, filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -733,9 +750,8 @@ impl Explorer {
         for id in changed {
             self.next_gen(id);
             self.sessions.retain(|(conn, _), _| *conn != id);
-            for keys in [&mut self.expanded, &mut self.loading] {
-                keys.retain(|k| !of_connection(k, id));
-            }
+            self.expanded.retain(|k| !of_connection(k, id));
+            self.loads.retain(|k, _| !of_connection(k, id));
         }
         self.params = now;
     }
@@ -768,7 +784,7 @@ impl Explorer {
             Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
             None => self.driver.connect(&on_database(&conn.params, &db)),
         };
-        if !self.loading.insert(key.clone()) {
+        if matches!(self.loads.insert(key.clone(), Load::Loading), Some(Load::Loading)) {
             return;
         }
         let generation = self.gens.get(&id).copied().unwrap_or_default();
@@ -794,12 +810,15 @@ impl Explorer {
                 if this.gens.get(&id) != Some(&generation) {
                     return;
                 }
-                this.loading.remove(&key);
-                if let Ok(children) = result {
-                    this.workspace.update(cx, |ws, cx| {
-                        store(ws, id, &segments, children);
-                        cx.notify();
-                    });
+                match result {
+                    Ok(children) => {
+                        this.loads.remove(&key);
+                        this.workspace.update(cx, |ws, cx| {
+                            store(ws, id, &segments, children);
+                            cx.notify();
+                        });
+                    }
+                    Err(reason) => drop(this.loads.insert(key, Load::Failed(reason))),
                 }
                 this.refresh(cx);
             })
@@ -807,6 +826,19 @@ impl Explorer {
         })
         .detach();
         self.refresh(cx);
+    }
+
+    /// Retry on error row `ix`: connects again, or reloads the node the row sits under.
+    fn retry(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let node = &self.nodes[ix];
+        match node.kind {
+            NodeKind::ConnError => self.connect(node.conn, cx),
+            NodeKind::LoadError => {
+                let parent = node.key[..node.key.len() - ERROR.len() - 1].to_string();
+                self.load(parent, cx);
+            }
+            _ => {}
+        }
     }
 
     /// Opens every ancestor of `key`, selects it and focuses the tree.
@@ -823,7 +855,7 @@ impl Explorer {
     fn expand_all_under(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(root) = self.nodes.get(ix).map(|n| n.key.clone()) else { return };
         let prefix = format!("{root}/");
-        let all = flatten(self.workspace.read(cx), &HashSet::new(), &HashSet::new(), true);
+        let all = flatten(self.workspace.read(cx), &HashSet::new(), &HashMap::new(), true);
         for n in all.into_iter().filter(|n| n.expandable && (n.key.starts_with(&prefix) || n.key == root)) {
             self.expanded.insert(n.key);
         }
@@ -907,14 +939,14 @@ impl Explorer {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loading, &self.filter);
+        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loads, &self.filter);
         self.selected = self.selected.min(self.nodes.len().saturating_sub(1));
         cx.notify();
     }
 
     fn set_filter(&mut self, filter: String, cx: &mut Context<Self>) {
         self.filter = filter;
-        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loading, &self.filter);
+        self.nodes = tree_nodes(self.workspace.read(cx), &self.expanded, &self.loads, &self.filter);
         // First match, or the top when clearing.
         let first = first_match(&self.nodes, &self.filter);
         self.select(first.unwrap_or(0), cx);
@@ -1057,7 +1089,7 @@ impl Explorer {
                     self.select(parent, cx);
                 }
             }
-            "enter" | "space" if node.kind == NodeKind::ConnError => self.connect(node.conn, cx),
+            "enter" | "space" if matches!(node.kind, NodeKind::ConnError | NodeKind::LoadError) => self.retry(ix, cx),
             "enter" if opens_tab(node.kind) => self.open(ix, false, cx),
             "enter" if matches!(node.kind, NodeKind::Connection(_)) => self.set_expanded(ix, true, cx),
             "space" if opens_tab(node.kind) => self.open(ix, true, cx),
@@ -1098,7 +1130,7 @@ impl Explorer {
                         theme.muted_foreground,
                     ),
                     NodeKind::Loading => (Icon::new(Lucide::LoaderCircle), theme.muted_foreground),
-                    NodeKind::ConnError => (Icon::new(Lucide::CircleAlert), theme.danger),
+                    NodeKind::ConnError | NodeKind::LoadError => (Icon::new(Lucide::CircleAlert), theme.danger),
                 };
                 let conn = &ws.connections[node.conn];
                 let is_conn = matches!(node.kind, NodeKind::Connection(_));
@@ -1189,7 +1221,7 @@ impl Explorer {
                         let text = StyledText::new(node.label.clone()).with_highlights(ranges.collect::<Vec<_>>());
                         theme::truncating(("tree-label", ix), text, node.label.clone()).into_any_element()
                         }
-                    }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError), |d| d.text_size(theme::ui_sm()).text_color(theme.muted_foreground)))
+                    }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError | NodeKind::LoadError), |d| d.text_size(theme::ui_sm()).text_color(theme.muted_foreground)))
                     .when(node.kind == NodeKind::ConnError, |d| {
                         let help: SharedString = format!(
                             "{}\nCheck that {} is reachable (VPN, firewall), then retry. Ctrl+C copies this message.",
@@ -1197,13 +1229,13 @@ impl Explorer {
                             target(conn)
                         )
                         .into();
-                        let ci = node.conn;
-                        d.tooltip(move |window, cx| Tooltip::new(help.clone()).build(window, cx)).child(
-                            Button::new(("retry", ix))
-                                .ghost()
-                                .small()
-                                .label("Retry")
-                                .on_click(cx.listener(move |this, _, _, cx| this.connect(ci, cx))),
+                        d.tooltip(move |window, cx| Tooltip::new(help.clone()).build(window, cx))
+                    })
+                    .when(matches!(node.kind, NodeKind::ConnError | NodeKind::LoadError), |d| {
+                        d.child(
+                            div().debug_selector(move || format!("retry-{ix}")).child(
+                                Button::new(("retry", ix)).ghost().small().label("Retry").on_click(cx.listener(move |this, _, _, cx| this.retry(ix, cx))),
+                            ),
                         )
                     })
                     .when_some(node.suffix.clone(), |d, suffix| {
@@ -1342,7 +1374,7 @@ mod tests {
         assert_eq!(parent_of(&nodes, tables + 1), Some(tables));
 
         let schema = &nodes[parent_of(&nodes, tables).unwrap()].key;
-        let loading = flatten(ws, &open, &[schema.clone()].into(), false);
+        let loading = flatten(ws, &open, &[(schema.clone(), super::Load::Loading)].into(), false);
         assert_eq!(loading.iter().filter(|n| n.kind == NodeKind::Loading).count(), 1, "loading schema shows one placeholder");
         assert!(loading.iter().all(|n| n.kind != NodeKind::Group(ObjectKind::Table) || !n.key.starts_with(schema.as_str())));
 
