@@ -2298,6 +2298,56 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_load_from_before_an_edit_and_reconnect_is_dropped_when_it_lands(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::session;
+        // (the old load's answer, whether the new load of the same schema has started when it lands)
+        let cases = [(Ok(()), true), (Ok(()), false), (Err("server closed the connection"), true), (Err("server closed the connection"), false)];
+        for (old, new_started) in cases {
+            let label = format!("old {old:?}, new load started {new_started}");
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            connect_answered(&explorer, &fake, &mut cx, &["app"]);
+            expand(&explorer, &mut cx, "app");
+            fake.resolve("schemas app", Ok(strings(&["public"])));
+            cx.run_until_parked();
+            expand(&explorer, &mut cx, "public");
+            assert_eq!(fake.pending(), ["objects app/public"], "{label}: the old server's load in flight");
+
+            workspace.update(&mut cx, |ws, cx| {
+                ws.edit(crate::model::ConnectionId(1), "pg".into(), 0, false, pg_params(Some("new"), "app"));
+                cx.notify();
+            });
+            cx.run_until_parked();
+            expand_connection(&explorer, &mut cx);
+            fake.resolve("connect app", Ok(session("app")));
+            cx.run_until_parked();
+            fake.resolve("databases app", Ok(strings(&["app"])));
+            cx.run_until_parked();
+            expand(&explorer, &mut cx, "app");
+            fake.resolve("schemas app", Ok(strings(&["public"])));
+            cx.run_until_parked();
+            if new_started {
+                expand(&explorer, &mut cx, "public");
+            }
+
+            // FIFO: the oldest "objects app/public" is the old server's.
+            match old {
+                Ok(()) => fake.resolve("objects app/public", Ok(vec![table("old_t")])),
+                Err(reason) => fake.resolve::<Vec<crate::model::DbObject>>("objects app/public", Err(reason.into())),
+            }
+            cx.run_until_parked();
+            let want: Vec<String> = if new_started { strings(&["Loading…"]) } else { vec![] };
+            assert_eq!(under(&explorer, &cx, "public"), want, "{label}: the old result is dropped");
+            if !new_started {
+                expand(&explorer, &mut cx, "public");
+            }
+            fake.resolve("objects app/public", Ok(vec![table("new_t")]));
+            cx.run_until_parked();
+            expand(&explorer, &mut cx, "Tables");
+            assert_eq!(labels(&explorer, &cx), ["pg", "app", "public", "Tables", "new_t"], "{label}: only the new server's data");
+        }
+    }
+
+    #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
         cx.update(gpui_kit::init);
