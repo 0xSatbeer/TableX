@@ -571,6 +571,8 @@ pub struct Explorer {
     gens: HashMap<ConnectionId, u64>,
     /// Open sessions by connection and database.
     sessions: HashMap<(ConnectionId, String), Session>,
+    /// Each connection's params at the last workspace change, to spot edits and deletes made anywhere.
+    params: HashMap<ConnectionId, ConnectionParams>,
     /// Mirror of the field's text; non-empty shows only matches and their ancestors.
     filter: String,
     field: Entity<InputState>,
@@ -592,8 +594,13 @@ impl Explorer {
         let expanded = HashSet::new();
         let nodes = flatten(workspace.read(cx), &expanded, &HashSet::new(), false);
         let loaded = HashSet::new();
-        // Edits made elsewhere (rename, recolor, connect) rebuild the rows.
-        cx.observe(&workspace, |this, _, cx| this.refresh(cx)).detach();
+        // Edits made elsewhere (rename, recolor, connect, new params, delete) rebuild the rows.
+        cx.observe(&workspace, |this, _, cx| {
+            this.forget_changed(cx);
+            this.refresh(cx);
+        })
+        .detach();
+        let params = workspace.read(cx).connections.iter().map(|c| (c.id, c.params.clone())).collect();
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("Filter objects…"));
         cx.subscribe(&field, |this, field, ev: &InputEvent, cx| {
             if let InputEvent::Change = ev {
@@ -602,7 +609,7 @@ impl Explorer {
             }
         })
         .detach();
-        Self { field, workspace, driver, expanded, loaded, loading: HashSet::new(), gens: HashMap::new(), sessions: HashMap::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { field, workspace, driver, expanded, loaded, loading: HashSet::new(), gens: HashMap::new(), sessions: HashMap::new(), params, filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -656,9 +663,7 @@ impl Explorer {
         cx.spawn(async move |this, cx| {
             let result = reply.await;
             this.update(cx, |this, cx| {
-                // An edit of the params disconnects it, so Connecting means none happened since this connect began.
-                let connecting = this.workspace.read(cx).connections.iter().any(|c| c.id == id && c.status == ConnectionStatus::Connecting);
-                if this.gens.get(&id) != Some(&generation) || !connecting {
+                if this.gens.get(&id) != Some(&generation) {
                     return;
                 }
                 match result {
@@ -675,6 +680,21 @@ impl Explorer {
         })
         .detach();
         self.refresh(cx);
+    }
+
+    /// Closes the sessions of every connection whose params changed or that was deleted, drops
+    /// what it was loading and collapses it, so nothing from its old server lands or stays.
+    fn forget_changed(&mut self, cx: &mut Context<Self>) {
+        let now: HashMap<_, _> = self.workspace.read(cx).connections.iter().map(|c| (c.id, c.params.clone())).collect();
+        let changed: Vec<ConnectionId> = self.params.iter().filter(|(id, params)| now.get(id) != Some(params)).map(|(id, _)| *id).collect();
+        for id in changed {
+            self.next_gen(id);
+            self.sessions.retain(|(conn, _), _| *conn != id);
+            for keys in [&mut self.expanded, &mut self.loaded, &mut self.loading] {
+                keys.retain(|k| !of_connection(k, id));
+            }
+        }
+        self.params = now;
     }
 
     /// Bumps connection `id`'s generation, so every result started before is dropped.
@@ -783,9 +803,6 @@ impl Explorer {
             ws.delete(id)
         });
         let Some(ix) = removed else { return };
-        for keys in [&mut self.expanded, &mut self.loaded, &mut self.loading] {
-            keys.retain(|k| !of_connection(k, id));
-        }
         // A rename holds a position; the delete ends it and the marked rows.
         self.rename = None;
         self.marked.clear();
@@ -802,13 +819,9 @@ impl Explorer {
     fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {
         let dialog = ConnectionDialog::open(self.workspace.clone(), editing, window, cx);
         cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
-            let Some(conn) = this.workspace.read(cx).connections.iter().find(|c| c.id == *id) else { return };
-            let (key, disconnected) = (id.0.to_string(), conn.status == ConnectionStatus::Disconnected);
-            // Collapse a connection the edit disconnected, so expanding it connects again.
-            if disconnected {
-                this.expanded.remove(&key);
+            if this.workspace.read(cx).connections.iter().any(|c| c.id == *id) {
+                this.reveal(&id.0.to_string(), window, cx);
             }
-            this.reveal(&key, window, cx);
         })
         .detach();
     }
