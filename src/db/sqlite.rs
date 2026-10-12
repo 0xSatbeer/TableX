@@ -72,7 +72,7 @@ impl Driver for Sqlite {
             let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
             let rows = stmt.query_map([], |row| {
                 let kind = if row.get::<_, String>(0)? == "view" { ObjectKind::View } else { ObjectKind::Table };
-                Ok(DbObject { kind, name: row.get(1)?, columns: Vec::new(), keys: Vec::new(), indexes: Vec::new(), row_estimate: None })
+                Ok(DbObject { kind, name: row.get(1)?, columns: None, keys: Vec::new(), indexes: Vec::new(), row_estimate: None })
             });
             rows.and_then(Iterator::collect).map_err(|e| e.to_string())
         })
@@ -203,7 +203,7 @@ mod tests {
             let objects = block_on(Sqlite.objects(&session, "main")).expect(sql);
             let got: Vec<_> = objects.iter().map(|o| (o.kind, o.name.as_str())).collect();
             assert_eq!(got, want, "{sql}");
-            assert!(objects.iter().all(|o| o.columns.is_empty() && o.row_estimate.is_none()), "{sql}");
+            assert!(objects.iter().all(|o| o.columns.is_none() && o.row_estimate.is_none()), "{sql}");
         }
     }
 

@@ -69,7 +69,7 @@ pub fn workspaces() -> Vec<Workspace> {
             is_production: prod,
             status,
             params,
-            databases,
+            databases: Some(databases),
         }
     };
     let pg = |host: &str, db: &str| ConnectionParams::Postgres {
@@ -134,7 +134,7 @@ fn pg_databases() -> Vec<Database> {
 }
 
 fn database(name: &str, schemas: Vec<Schema>) -> Database {
-    Database { name: name.into(), schemas }
+    Database { name: name.into(), schemas: Some(schemas) }
 }
 
 const NOUNS: &[&str] = &[
@@ -153,7 +153,7 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
     let plain = |kind, name: &str| DbObject {
         kind,
         name: name.into(),
-        columns: vec![],
+        columns: Some(vec![]),
         keys: vec![],
         indexes: vec![],
         row_estimate: None,
@@ -164,7 +164,7 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
         v.keys.clear();
         v.indexes.clear();
         v.row_estimate = None;
-        v.columns.iter_mut().for_each(|c| c.is_pk = false);
+        v.columns.iter_mut().flatten().for_each(|c| c.is_pk = false);
         objects.push(v);
     }
     objects.push(plain(ObjectKind::MaterializedView, "revenue_by_month"));
@@ -176,7 +176,7 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
     }
     objects.push(plain(ObjectKind::Procedure, "archive_old_orders(interval)"));
     objects.push(plain(ObjectKind::Type, "order_status"));
-    Schema { name: name.into(), objects }
+    Schema { name: name.into(), objects: Some(objects) }
 }
 
 fn table(name: String, r: u64) -> DbObject {
@@ -216,7 +216,7 @@ fn table(name: String, r: u64) -> DbObject {
         });
         indexes.push(Index { name: format!("{name}_owner_id_idx"), columns: vec!["owner_id".into()], unique: false });
     }
-    DbObject { kind: ObjectKind::Table, name, columns, keys, indexes, row_estimate: Some(mix(r) % 3_000_000) }
+    DbObject { kind: ObjectKind::Table, name, columns: Some(columns), keys, indexes, row_estimate: Some(mix(r) % 3_000_000) }
 }
 
 // ---------------------------------------------------------------- result sets
@@ -408,11 +408,12 @@ mod tests {
 
         let prod = conns.iter().find(|c| c.is_production).unwrap();
         assert_eq!(prod.kind(), DbKind::Postgres);
-        assert_eq!(prod.databases.len(), 3);
-        assert!(prod.databases.iter().all(|d| d.schemas.len() == 4));
-        let tables = |s: &Schema| s.objects.iter().filter(|o| o.kind == ObjectKind::Table).count();
-        assert_eq!(tables(&prod.databases[0].schemas[0]), 2000);
-        assert!(conns.iter().any(|c| c.kind() == DbKind::Sqlite && c.databases.len() == 1));
+        let databases = prod.databases.as_ref().unwrap();
+        assert_eq!(databases.len(), 3);
+        assert!(databases.iter().all(|d| d.schemas.as_ref().unwrap().len() == 4));
+        let tables = |s: &Schema| s.objects.iter().flatten().filter(|o| o.kind == ObjectKind::Table).count();
+        assert_eq!(tables(&databases[0].schemas.as_ref().unwrap()[0]), 2000);
+        assert!(conns.iter().any(|c| c.kind() == DbKind::Sqlite && c.databases.as_ref().unwrap().len() == 1));
 
         assert_eq!(wide_table(1).columns.len(), 300);
         assert!(edge_cases().rows.iter().any(|r| r[1] == Value::Null));
@@ -422,9 +423,9 @@ mod tests {
         workspaces()
             .into_iter()
             .flat_map(|w| w.connections)
-            .flat_map(|c| c.databases)
-            .flat_map(|d| d.schemas)
-            .flat_map(|s| s.objects)
+            .flat_map(|c| c.databases.unwrap())
+            .flat_map(|d| d.schemas.unwrap())
+            .flat_map(|s| s.objects.unwrap())
             .collect()
     }
 
@@ -439,7 +440,7 @@ mod tests {
     #[test]
     fn only_id_columns_are_primary_keys() {
         for o in all_objects() {
-            for c in &o.columns {
+            for c in o.columns.iter().flatten() {
                 let want = o.kind == ObjectKind::Table && c.name == "id";
                 assert_eq!(c.is_pk, want, "{}.{}: is_pk", o.name, c.name);
             }

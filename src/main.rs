@@ -193,9 +193,14 @@ struct Shell {
 
 impl Shell {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_driver(std::sync::Arc::new(db::Live::default()), window, cx)
+    }
+
+    /// The Shell whose explorer reads databases through `driver`.
+    fn with_driver(driver: std::sync::Arc<dyn db::Driver>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let workspace = cx.new(|_| mock::workspaces().remove(0));
         let console_origin = workspace.read(cx).connections.iter().find(|c| c.is_production).map(tabs::Origin::of);
-        let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), window, cx));
+        let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), driver, window, cx));
         cx.observe(&workspace, |this, workspace, cx| {
             this.tabs.refresh_origins(workspace.read(cx));
             let (origin, has_tab) = (this.tabs.active().and_then(|t| t.origin.clone()), this.tabs.active().is_some());
@@ -1814,7 +1819,7 @@ mod tests {
             assert_eq!(after[..before.len()], before[..], "{name}: the others unchanged, in order");
             let added = after.last().unwrap();
             assert!(!before.iter().any(|c| c.id == added.id), "{name}: fresh id {:?}", added.id);
-            let want = Connection { id: added.id, name: name.into(), color, is_production: production, status: ConnectionStatus::Disconnected, params, databases: vec![] };
+            let want = Connection { id: added.id, name: name.into(), color, is_production: production, status: ConnectionStatus::Disconnected, params, databases: None };
             assert_eq!(added, &want, "{name}: trimmed values, Disconnected, no databases");
             assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels().last().cloned()), Some(name.into()), "{name}: last tree row");
             assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(name.into()), "{name}: new row selected");
@@ -2020,7 +2025,7 @@ mod tests {
                 ci
             });
             let id = workspace.read_with(&cx, |ws, _| ws.connections[ci].id);
-            let had_databases = workspace.read_with(&cx, |ws, _| ws.connections[ci].databases.len());
+            let had_databases = workspace.read_with(&cx, |ws, _| ws.connections[ci].databases.as_ref().map_or(0, Vec::len));
             assert!(had_databases > 0, "{label}: fixture has databases");
             let before = tab_origins(&shell, &cx);
             let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
@@ -2044,7 +2049,7 @@ mod tests {
             let conn = workspace.read_with(&cx, |ws, _| ws.connections[ci].clone());
             assert_eq!((conn.name.as_str(), conn.color, conn.is_production), (name, color, production), "{label}: saved in place");
             let (status, databases) = if stays { (ConnectionStatus::Connected, had_databases) } else { (ConnectionStatus::Disconnected, 0) };
-            assert_eq!((conn.status, conn.databases.len()), (status, databases), "{label}: status and databases");
+            assert_eq!((conn.status, conn.databases.as_ref().map_or(0, Vec::len)), (status, databases), "{label}: status and databases");
             let after = tab_origins(&shell, &cx);
             assert_eq!(after.len(), before.len(), "{label}: tab count unchanged");
             for ((key, b), (_, a)) in before.iter().zip(&after) {

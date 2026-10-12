@@ -17,6 +17,9 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use std::sync::Arc;
+
+use crate::db::Driver;
 use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
 use crate::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
 use crate::tabs::Origin;
@@ -202,7 +205,7 @@ fn row_estimate_label(rows: Option<u64>) -> Option<String> {
 /// The rows under a structure part: label, muted suffix, primary key.
 fn part_rows(obj: &DbObject, part: Part) -> Vec<(&str, Option<&str>, bool)> {
     match part {
-        Part::Columns => obj.columns.iter().map(|c| (c.name.as_str(), Some(c.data_type.as_str()), c.is_pk)).collect(),
+        Part::Columns => obj.columns.iter().flatten().map(|c| (c.name.as_str(), Some(c.data_type.as_str()), c.is_pk)).collect(),
         Part::Keys => obj
             .keys
             .iter()
@@ -314,10 +317,10 @@ fn default_expanded(ws: &Workspace) -> HashSet<String> {
     let mut set = HashSet::new();
     for (ci, conn) in ws.connections.iter().enumerate().filter(|(_, c)| c.is_production) {
         set.insert(format!("{ci}"));
-        if let Some(schema) = conn.databases.first().and_then(|db| db.schemas.first()) {
+        if let Some(schema) = conn.databases.iter().flatten().next().and_then(|db| db.schemas.iter().flatten().next()) {
             set.insert(format!("{ci}/0"));
             set.insert(format!("{ci}/0/0"));
-            if schema.objects.iter().any(|o| o.kind == ObjectKind::Table) {
+            if schema.objects.iter().flatten().any(|o| o.kind == ObjectKind::Table) {
                 set.insert(format!("{ci}/0/0/{}", ObjectKind::Table.as_str()));
             }
         }
@@ -360,7 +363,7 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
         };
         let key = format!("{ci}");
         // Expanding a connection that isn't connected connects it, even with no databases yet.
-        let expandable = !conn.databases.is_empty() || conn.status != ConnectionStatus::Connected;
+        let expandable = conn.databases.as_ref().is_some_and(|d| !d.is_empty()) || conn.status != ConnectionStatus::Connected;
         let open = push(FlatNode { expandable, ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
         match &conn.status {
             ConnectionStatus::Connected => {}
@@ -377,14 +380,14 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
         if !open {
             continue;
         }
-        for (di, db) in conn.databases.iter().enumerate() {
+        for (di, db) in conn.databases.iter().flatten().enumerate() {
             let key = format!("{key}/{di}");
-            if !push(FlatNode { expandable: !db.schemas.is_empty(), ..node(key.clone(), NodeKind::Database, &db.name, 1) }) {
+            if !push(FlatNode { expandable: db.schemas.as_ref().is_some_and(|s| !s.is_empty()), ..node(key.clone(), NodeKind::Database, &db.name, 1) }) {
                 continue;
             }
-            for (si, schema) in db.schemas.iter().enumerate() {
+            for (si, schema) in db.schemas.iter().flatten().enumerate() {
                 let key = format!("{key}/{si}");
-                if !push(FlatNode { expandable: !schema.objects.is_empty(), ..node(key.clone(), NodeKind::Schema, &schema.name, 2) }) {
+                if !push(FlatNode { expandable: schema.objects.as_ref().is_some_and(|o| !o.is_empty()), ..node(key.clone(), NodeKind::Schema, &schema.name, 2) }) {
                     continue;
                 }
                 if loading.contains(&key) {
@@ -392,7 +395,7 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                     continue;
                 }
                 let mut groups: BTreeMap<ObjectKind, Vec<&DbObject>> = BTreeMap::new();
-                for obj in &schema.objects {
+                for obj in schema.objects.iter().flatten() {
                     groups.entry(obj.kind).or_default().push(obj);
                 }
                 for (kind, objects) in groups {
@@ -405,7 +408,7 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                         let key = format!("{key}/{oi}");
                         let kind = NodeKind::Object(kind);
                         let suffix = row_estimate_label(obj.row_estimate).map(Into::into);
-                        let parts = [(Part::Columns, obj.columns.len()), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
+                        let parts = [(Part::Columns, obj.columns.as_ref().map_or(0, Vec::len)), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
                         let parts: Vec<_> = parts.into_iter().filter(|(_, n)| *n > 0).collect();
                         let expandable = opens_tab(kind) && !parts.is_empty();
                         if !push(FlatNode { expandable, suffix, ..node(key.clone(), kind, &obj.name, 4) }) {
@@ -492,6 +495,7 @@ impl EventEmitter<ConnectionDeleted> for Explorer {}
 
 pub struct Explorer {
     workspace: Entity<Workspace>,
+    driver: Arc<dyn Driver>,
     expanded: HashSet<String>,
     /// Schema keys whose objects have "arrived", and those still waiting on mock latency.
     loaded: HashSet<String>,
@@ -514,7 +518,7 @@ pub struct Explorer {
 }
 
 impl Explorer {
-    pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(workspace: Entity<Workspace>, driver: Arc<dyn Driver>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // ponytail: starts collapsed; QX-020 restores the last session's expanded nodes
         let expanded = HashSet::new();
         let nodes = flatten(workspace.read(cx), &expanded, &HashSet::new(), false);
@@ -529,7 +533,7 @@ impl Explorer {
             }
         })
         .detach();
-        Self { field, workspace, expanded, loaded, loading: HashSet::new(), connects: HashMap::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { field, workspace, driver, expanded, loaded, loading: HashSet::new(), connects: HashMap::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -1160,6 +1164,7 @@ mod tests {
         }
     }
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
+    use std::sync::Arc;
 
     #[test]
     fn flatten_follows_expanded_set() {
@@ -1422,7 +1427,7 @@ mod tests {
         let first = |kind| nodes.iter().find(|n| n.kind == NodeKind::Object(kind)).unwrap();
         let table = first(ObjectKind::Table);
         let conn = ws.connections.iter().find(|c| c.status == ConnectionStatus::Connected).unwrap();
-        let obj = conn.databases[0].schemas[0].objects.iter().find(|o| o.kind == ObjectKind::Table).unwrap();
+        let obj = conn.databases.as_ref().unwrap()[0].schemas.as_ref().unwrap()[0].objects.iter().flatten().find(|o| o.kind == ObjectKind::Table).unwrap();
         assert_eq!(obj.name, table.label.as_ref());
         let estimate = obj.row_estimate;
         assert_eq!(table.suffix.as_deref(), row_estimate_label(estimate).as_deref(), "table row shows its estimate");
@@ -1434,8 +1439,8 @@ mod tests {
     fn structure_omits_empty_parts() {
         let mut ws = mock::workspaces()[0].clone();
         let conn = ws.connections.iter_mut().find(|c| c.status == ConnectionStatus::Connected).unwrap();
-        let obj = conn.databases[0].schemas[0].objects.iter_mut().find(|o| o.kind == ObjectKind::Table).unwrap();
-        obj.columns.truncate(3);
+        let obj = conn.databases.as_mut().unwrap()[0].schemas.as_mut().unwrap()[0].objects.iter_mut().flatten().find(|o| o.kind == ObjectKind::Table).unwrap();
+        obj.columns.as_mut().unwrap().truncate(3);
         obj.keys.truncate(1);
         obj.indexes.clear();
         let name = obj.name.clone();
@@ -1448,8 +1453,8 @@ mod tests {
         assert_eq!(children, [("Columns".to_string(), Some(3)), ("Keys".to_string(), Some(1))]);
 
         let conn = ws.connections.iter_mut().find(|c| c.status == ConnectionStatus::Connected).unwrap();
-        let obj = conn.databases[0].schemas[0].objects.iter_mut().find(|o| o.name == name).unwrap();
-        (obj.columns.clear(), obj.keys.clear());
+        let obj = conn.databases.as_mut().unwrap()[0].schemas.as_mut().unwrap()[0].objects.iter_mut().flatten().find(|o| o.name == name).unwrap();
+        (obj.columns.as_mut().unwrap().clear(), obj.keys.clear());
         let nodes = flatten(&ws, &[table.key.clone()].into(), &Default::default(), true);
         let empty = nodes.iter().find(|n| n.key == table.key).unwrap();
         assert!(!empty.expandable, "nothing to show, no chevron");
@@ -1459,7 +1464,7 @@ mod tests {
     fn column_rows_show_type_and_pk() {
         let ws = &mock::workspaces()[0];
         let conn = ws.connections.iter().find(|c| c.status == ConnectionStatus::Connected).unwrap();
-        let obj = conn.databases[0].schemas[0].objects.iter().find(|o| o.kind == ObjectKind::Table).unwrap();
+        let obj = conn.databases.as_ref().unwrap()[0].schemas.as_ref().unwrap()[0].objects.iter().flatten().find(|o| o.kind == ObjectKind::Table).unwrap();
         let table = flatten(ws, &Default::default(), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == obj.name).unwrap();
         let open = ["", "/Columns", "/Keys", "/Indexes"].map(|part| format!("{}{part}", table.key)).into();
         let nodes = flatten(ws, &open, &Default::default(), true);
@@ -1467,7 +1472,7 @@ mod tests {
 
         let columns = items(Part::Columns);
         let got: Vec<_> = columns.iter().map(|n| (n.label.to_string(), n.suffix.as_ref().map(|s| s.to_string()), n.pk)).collect();
-        let want: Vec<_> = obj.columns.iter().map(|c| (c.name.clone(), Some(c.data_type.clone()), c.is_pk)).collect();
+        let want: Vec<_> = obj.columns.iter().flatten().map(|c| (c.name.clone(), Some(c.data_type.clone()), c.is_pk)).collect();
         assert_eq!(got, want);
         assert_eq!(got[0], ("id".to_string(), Some("bigint".to_string()), true), "id bigint PK");
         assert!(got[1..].iter().all(|(_, _, pk)| !pk), "only id is a PK");
@@ -1598,7 +1603,7 @@ mod tests {
         let ws = mock::workspaces().remove(0);
         let key = flatten(&ws, &default_expanded(&ws), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == "orders").expect("orders").key;
         let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), Arc::new(crate::db::Live::default()), window, cx))).expect("open test window")
         });
         cx.update_window(window.into(), |_, window, cx| {
             explorer.update(cx, |e, cx| {
@@ -1621,7 +1626,7 @@ mod tests {
         let cases = [(260., long, true), (260., "orders", false), (1200., long, false)];
         for (width, name, tip) in cases {
             let mut ws = mock::workspaces().remove(0);
-            let table = ws.connections[0].databases[0].schemas[0].objects.iter_mut().find(|o| o.name == "orders").expect("orders");
+            let table = ws.connections[0].databases.as_mut().unwrap()[0].schemas.as_mut().unwrap()[0].objects.iter_mut().flatten().find(|o| o.name == "orders").expect("orders");
             table.name = name.to_string();
             let key = flatten(&ws, &default_expanded(&ws), &Default::default(), true).into_iter().find(|n| n.label.as_ref() == name).expect("table row").key;
             let options = WindowOptions {
@@ -1629,7 +1634,7 @@ mod tests {
                 ..Default::default()
             };
             let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
-                gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), window, cx))).expect("open test window")
+                gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::Explorer::new(cx.new(|_| ws), Arc::new(crate::db::Live::default()), window, cx))).expect("open test window")
             });
             let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
             explorer.update_in(&mut cx, |e, window, cx| e.reveal(&key, window, cx));

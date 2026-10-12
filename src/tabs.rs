@@ -19,8 +19,8 @@ pub struct Origin {
 impl Origin {
     /// The connection's first database and schema: where a console starts out.
     pub fn of(conn: &crate::model::Connection) -> Self {
-        let db = conn.databases.first();
-        let schema = db.and_then(|d| d.schemas.first());
+        let db = conn.databases.iter().flatten().next();
+        let schema = db.and_then(|d| d.schemas.iter().flatten().next());
         let tail = [db.map(|d| d.name.as_str()), schema.map(|s| s.name.as_str())].into_iter().flatten().collect::<Vec<_>>().join(" › ");
         Self { connection: conn.id, color: conn.color, production: conn.is_production, path: join_path(&conn.name, &tail), tail: tail.into() }
     }
@@ -614,7 +614,7 @@ mod tests {
             ("recolor", edit(|c| c.color = 3), Some(prod.clone()), Some(with(3, true, &prod.path))),
             ("production off", edit(|c| c.is_production = false), Some(prod.clone()), Some(with(0, false, &prod.path))),
             ("rename, recolor and production off", edit(|c| (c.name, c.color, c.is_production) = ("live".into(), 7, false)), Some(prod.clone()), Some(with(7, false, &format!("live{tail}")))),
-            ("path is only the connection name", edit(|c| c.name = "live".into()), Some(Origin::of(&Connection { databases: vec![], ..ws.connections[0].clone() })), Some(Origin { tail: "".into(), ..with(0, true, "live") })),
+            ("path is only the connection name", edit(|c| c.name = "live".into()), Some(Origin::of(&Connection { databases: None, ..ws.connections[0].clone() })), Some(Origin { tail: "".into(), ..with(0, true, "live") })),
             ("old name contains the separator", edit(|c| c.name = "c".into()), Some(Origin::of(&Connection { name: "a › b".into(), ..ws.connections[0].clone() })), Some(with(0, true, &format!("c{tail}")))),
             ("new name contains the old one", edit(|c| c.name = "prod-pg-2".into()), Some(prod.clone()), Some(with(0, true, &format!("prod-pg-2{tail}")))),
             ("another connection's tab", edit(|c| (c.name, c.color) = ("live".into(), 7)), Some(local.clone()), Some(local.clone())),

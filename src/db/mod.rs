@@ -25,9 +25,8 @@ pub type Reply<T> = BoxFuture<'static, Result<T, String>>;
 pub enum Session {
     Postgres(Arc<postgres::PgSession>),
     Sqlite(Arc<sqlite::SqliteSession>),
-    /// The fake driver's session: the database it was opened on.
     #[cfg(test)]
-    Fake(String),
+    Fake(Arc<fake::FakeSession>),
 }
 
 pub trait Driver: Send + Sync {
@@ -42,6 +41,54 @@ pub trait Driver: Send + Sync {
     fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>>;
     /// The columns of table or view `object`, in ordinal order.
     fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>>;
+}
+
+/// The real drivers: Postgres or SQLite, picked by the params or the session.
+#[derive(Default)]
+pub struct Live {
+    postgres: postgres::Postgres,
+}
+
+impl Live {
+    fn on(&self, session: &Session) -> &dyn Driver {
+        match session {
+            Session::Sqlite(_) => &sqlite::Sqlite,
+            _ => &self.postgres,
+        }
+    }
+
+    fn by(&self, params: &ConnectionParams) -> &dyn Driver {
+        match params {
+            ConnectionParams::Postgres { .. } => &self.postgres,
+            ConnectionParams::Sqlite { .. } => &sqlite::Sqlite,
+        }
+    }
+}
+
+impl Driver for Live {
+    fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
+        self.by(params).connect(params)
+    }
+
+    fn test(&self, params: &ConnectionParams) -> Reply<()> {
+        self.by(params).test(params)
+    }
+
+    fn databases(&self, session: &Session) -> Reply<Vec<String>> {
+        self.on(session).databases(session)
+    }
+
+    fn schemas(&self, session: &Session) -> Reply<Vec<String>> {
+        self.on(session).schemas(session)
+    }
+
+    fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>> {
+        self.on(session).objects(session, schema)
+    }
+
+    fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
+        self.on(session).columns(session, schema, object)
+    }
 }
 
 /// The reason we show for a failure: a server's own message without severity or prefixes,

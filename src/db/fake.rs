@@ -2,7 +2,8 @@
 //! timing and never touch tokio.
 
 use std::any::Any;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use futures::FutureExt;
 use futures::channel::oneshot;
@@ -12,9 +13,27 @@ use crate::model::{Column, ConnectionParams, DbObject};
 
 type Answer = Result<Box<dyn Any + Send>, String>;
 
+/// A fake session: the database it was opened on, and whether the server has dropped it.
+pub struct FakeSession {
+    pub database: String,
+    closed: AtomicBool,
+}
+
+/// A session on `database`, to resolve a connect with.
+pub fn session(database: &str) -> Session {
+    Session::Fake(Arc::new(FakeSession { database: database.into(), closed: AtomicBool::new(false) }))
+}
+
+/// Closes `session` from the server's side, as a server restart would.
+pub fn close(session: &Session) {
+    if let Session::Fake(fake) = session {
+        fake.closed.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Each call is labelled `"{call} {database}"`, plus `/{schema}` and `/{object}` where it takes them,
 /// e.g. `"connect app"`, `"objects app/public"`, `"test local.db"`. A connect resolves with a
-/// [`Session::Fake`] naming its database.
+/// [`session`] naming its database.
 #[derive(Default)]
 pub struct Fake {
     pending: Mutex<Vec<(String, oneshot::Sender<Answer>)>>,
@@ -60,7 +79,7 @@ fn database(params: &ConnectionParams) -> String {
 
 fn on(session: &Session) -> &str {
     match session {
-        Session::Fake(db) => db,
+        Session::Fake(fake) => &fake.database,
         _ => panic!("the fake driver got a real session"),
     }
 }
@@ -102,7 +121,7 @@ mod tests {
     }
 
     fn table(name: &str) -> DbObject {
-        DbObject { kind: ObjectKind::Table, name: name.into(), columns: Vec::new(), keys: Vec::new(), indexes: Vec::new(), row_estimate: None }
+        DbObject { kind: ObjectKind::Table, name: name.into(), columns: None, keys: Vec::new(), indexes: Vec::new(), row_estimate: None }
     }
 
     #[test]
@@ -113,9 +132,9 @@ mod tests {
         assert!((&mut connect).now_or_never().is_none(), "connect waits for the test");
         assert_eq!(fake.pending(), ["connect app", "test local.db"]);
 
-        fake.resolve("connect app", Ok(Session::Fake("app".into())));
+        fake.resolve("connect app", Ok(session("app")));
         let session = (&mut connect).now_or_never().expect("resolved").expect("Ok");
-        assert!(matches!(&session, Session::Fake(db) if db == "app"));
+        assert!(matches!(&session, Session::Fake(fake) if fake.database == "app"));
         fake.resolve::<()>("test local.db", Err("No file at /x/local.db".into()));
         assert_eq!((&mut test).now_or_never(), Some(Err("No file at /x/local.db".to_string())));
 

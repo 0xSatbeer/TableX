@@ -146,7 +146,7 @@ impl Driver for Postgres {
                 .map(|row| DbObject {
                     kind: KINDS[row.get::<_, i32>(0) as usize],
                     name: row.get(1),
-                    columns: Vec::new(),
+                    columns: None,
                     keys: Vec::new(),
                     indexes: Vec::new(),
                     // reltuples is -1 until the table is first analyzed or vacuumed.

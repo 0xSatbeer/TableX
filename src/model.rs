@@ -18,7 +18,7 @@ impl Workspace {
     /// Appends a new, disconnected connection with an id no current connection has.
     pub fn add(&mut self, name: String, color: u8, is_production: bool, params: ConnectionParams) -> ConnectionId {
         let id = ConnectionId(self.connections.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
-        self.connections.push(Connection { id, name, color, is_production, status: ConnectionStatus::Disconnected, params, databases: Vec::new() });
+        self.connections.push(Connection { id, name, color, is_production, status: ConnectionStatus::Disconnected, params, databases: None });
         id
     }
 
@@ -35,7 +35,7 @@ impl Workspace {
     pub fn edit(&mut self, id: ConnectionId, name: String, color: u8, is_production: bool, params: ConnectionParams) {
         let Some(conn) = self.connections.iter_mut().find(|c| c.id == id) else { return };
         if conn.params != params {
-            (conn.status, conn.databases) = (ConnectionStatus::Disconnected, Vec::new());
+            (conn.status, conn.databases) = (ConnectionStatus::Disconnected, None);
         }
         (conn.name, conn.color, conn.is_production, conn.params) = (name, color, is_production, params);
     }
@@ -100,7 +100,8 @@ pub struct Connection {
     pub is_production: bool,
     pub status: ConnectionStatus,
     pub params: ConnectionParams,
-    pub databases: Vec<Database>,
+    /// `None` until listed; each tree level below is loaded the same way, when first expanded.
+    pub databases: Option<Vec<Database>>,
 }
 
 impl Connection {
@@ -116,13 +117,13 @@ impl Connection {
 pub struct Database {
     pub name: String,
     /// SQLite has one implicit `main` schema.
-    pub schemas: Vec<Schema>,
+    pub schemas: Option<Vec<Schema>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schema {
     pub name: String,
-    pub objects: Vec<DbObject>,
+    pub objects: Option<Vec<DbObject>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -171,8 +172,8 @@ impl ObjectKind {
 pub struct DbObject {
     pub kind: ObjectKind,
     pub name: String,
-    /// Tables and views; empty for other kinds.
-    pub columns: Vec<Column>,
+    /// Tables and views, `None` until loaded; empty for other kinds.
+    pub columns: Option<Vec<Column>>,
     pub keys: Vec<Key>,
     pub indexes: Vec<Index>,
     /// Tables only; views and other kinds have none.
@@ -378,11 +379,11 @@ mod tests {
             let mut ws = Workspace { id: 1, name: "w".into(), connections: Vec::new() };
             let id = ws.add("c".into(), 0, false, pg(old));
             ws.connections[0].status = ConnectionStatus::Connected;
-            ws.connections[0].databases = vec![Database { name: "d".into(), schemas: Vec::new() }];
+            ws.connections[0].databases = Some(vec![Database { name: "d".into(), schemas: None }]);
             ws.edit(id, "c".into(), 0, false, pg(new));
             let conn = &ws.connections[0];
             assert_eq!(conn.status == ConnectionStatus::Disconnected, disconnects, "{old:?} -> {new:?}");
-            assert_eq!(conn.databases.is_empty(), disconnects, "{old:?} -> {new:?}");
+            assert_eq!(conn.databases.is_none(), disconnects, "{old:?} -> {new:?}");
             assert_eq!(conn.params, pg(new), "{old:?} -> {new:?}");
         }
     }
