@@ -1596,6 +1596,128 @@ mod tests {
         assert_eq!(no_match_text("a b"), "No objects match \"a b\"");
     }
 
+    /// A Postgres connection `id` named `name` on database `database`, with nothing loaded.
+    fn pg(id: u32, name: &str, database: &str) -> crate::model::Connection {
+        use crate::model::{Connection, ConnectionId, ConnectionParams, SslMode};
+        let params = ConnectionParams::Postgres { host: "h".into(), port: 5432, user: "u".into(), password: None, database: database.into(), ssl: SslMode::Prefer };
+        Connection { id: ConnectionId(id), name: name.into(), color: 0, is_production: false, status: ConnectionStatus::Disconnected, params, databases: None }
+    }
+
+    /// A table `name` whose columns are not loaded yet.
+    fn table(name: &str) -> crate::model::DbObject {
+        crate::model::DbObject { kind: ObjectKind::Table, name: name.into(), columns: None, keys: vec![], indexes: vec![], row_estimate: None }
+    }
+
+    /// A column `name int`.
+    fn column(name: &str) -> crate::model::Column {
+        crate::model::Column { name: name.into(), data_type: "int".into(), nullable: true, default: None, is_pk: false, enum_values: vec![] }
+    }
+
+    /// A connected `conn` holding one database `db` with one schema `schema` of `objects`.
+    fn loaded(mut conn: crate::model::Connection, db: &str, schema: &str, objects: Vec<crate::model::DbObject>) -> crate::model::Connection {
+        use crate::model::{Database, Schema};
+        let schemas = Some(vec![Schema { name: schema.into(), objects: Some(objects) }]);
+        (conn.status, conn.databases) = (ConnectionStatus::Connected, Some(vec![Database { name: db.into(), schemas }]));
+        conn
+    }
+
+    /// An explorer on a workspace of `connections`, reading through a fake driver the test answers.
+    fn open_explorer(
+        cx: &mut gpui_kit::TestAppContext,
+        connections: Vec<crate::model::Connection>,
+    ) -> (gpui_kit::VisualTestContext, gpui_kit::Entity<super::Explorer>, gpui_kit::Entity<crate::model::Workspace>, Arc<crate::db::fake::Fake>) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let fake = Arc::new(crate::db::fake::Fake::default());
+        let driver: Arc<dyn crate::db::Driver> = fake.clone();
+        let workspace = cx.update(|cx| cx.new(|_| crate::model::Workspace { id: 1, name: "w".into(), connections }));
+        let ws = workspace.clone();
+        let (window, explorer) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, driver, window, cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        (cx, explorer, workspace, fake)
+    }
+
+    /// Every row's key, in tree order.
+    fn row_keys(explorer: &gpui_kit::Entity<super::Explorer>, cx: &gpui_kit::VisualTestContext) -> Vec<String> {
+        explorer.read_with(cx, |e, _| e.nodes.iter().map(|n| n.key.clone()).collect())
+    }
+
+    #[gpui_kit::test]
+    fn keys_are_name_paths_with_slash_and_backslash_escaped(cx: &mut gpui_kit::TestAppContext) {
+        let mut users = table("users");
+        users.columns = Some(vec![column("id"), column("a/b")]);
+        let objects = vec![users, table("a/b"), table("a\\b"), table("\\/"), table("x\\"), table("")];
+        let conn = loaded(pg(7, "pg", "app"), "my/db", "s\\1", objects);
+        let (mut cx, explorer, _, _) = open_explorer(cx, vec![conn]);
+        explorer.update_in(&mut cx, |e, _, cx| {
+            e.expand_all_under(0, cx);
+            let columns = e.nodes.iter().position(|n| n.label.as_ref() == "Columns").expect("Columns row");
+            e.set_expanded(columns, true, cx);
+        });
+        // (row, key): segments are connection id, database, schema, kind, object, then the structure tail
+        let cases = [
+            ("pg", r"7"),
+            ("my/db", r"7/my\/db"),
+            ("s\\1", r"7/my\/db/s\\1"),
+            ("Tables", r"7/my\/db/s\\1/table"),
+            ("users", r"7/my\/db/s\\1/table/users"),
+            ("Columns", r"7/my\/db/s\\1/table/users/Columns"),
+            ("id", r"7/my\/db/s\\1/table/users/Columns/0"),
+            ("a/b", r"7/my\/db/s\\1/table/users/Columns/1"),
+            ("a/b", r"7/my\/db/s\\1/table/a\/b"),
+            ("a\\b", r"7/my\/db/s\\1/table/a\\b"),
+            ("\\/", r"7/my\/db/s\\1/table/\\\/"),
+            ("x\\", r"7/my\/db/s\\1/table/x\\"),
+            ("", r"7/my\/db/s\\1/table/"),
+        ];
+        let rows: Vec<(String, String)> = explorer.read_with(&cx, |e, _| e.nodes.iter().map(|n| (n.label.to_string(), n.key.clone())).collect());
+        let want: Vec<(String, String)> = cases.iter().map(|(label, key)| (label.to_string(), key.to_string())).collect();
+        assert_eq!(rows, want);
+        // Each key reveals its own row from a collapsed tree: the escapes keep names whole.
+        for (label, key) in cases {
+            explorer.update_in(&mut cx, |e, window, cx| {
+                e.expanded.clear();
+                e.refresh(cx);
+                e.reveal(key, window, cx);
+            });
+            let selected = explorer.read_with(&cx, |e, _| e.nodes.get(e.selected).map(|n| (n.label.to_string(), n.key.clone())));
+            assert_eq!(selected, Some((label.to_string(), key.to_string())), "reveal {key}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_tab_on_t_keeps_opening_and_highlighting_t_after_a_table_is_inserted_before_it(cx: &mut gpui_kit::TestAppContext) {
+        use std::{cell::RefCell, rc::Rc};
+        let conn = loaded(pg(1, "pg", "app"), "app", "public", vec![table("t"), table("u")]);
+        let (mut cx, explorer, workspace, _) = open_explorer(cx, vec![conn]);
+        let opened = Rc::new(RefCell::new(Vec::new()));
+        let sink = opened.clone();
+        let _sub = cx.update(|_, cx| cx.subscribe(&explorer, move |_, ev: &super::OpenObject, _| sink.borrow_mut().push(ev.key.to_string())));
+        let open_t = |cx: &mut gpui_kit::VisualTestContext| {
+            explorer.update_in(cx, |e, _, cx| {
+                e.expand_all_under(0, cx);
+                let ix = e.nodes.iter().position(|n| n.label.as_ref() == "t").expect("t row");
+                e.open(ix, false, cx);
+            });
+        };
+        open_t(&mut cx);
+        workspace.update(&mut cx, |ws, cx| {
+            let schema = &mut ws.connections[0].databases.as_mut().unwrap()[0].schemas.as_mut().unwrap()[0];
+            schema.objects.as_mut().unwrap().insert(0, table("a"));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        open_t(&mut cx);
+        let keys = opened.borrow().clone();
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0], keys[1], "opening t again gives the same tab key, so the same tab");
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal(&keys[0], window, cx));
+        assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some("t".into()), "the tab highlights t, not a");
+    }
+
     #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
