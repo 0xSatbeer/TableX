@@ -180,6 +180,52 @@ mod tests {
         assert!(took >= busy && took < busy * 2, "took {took:?}");
     }
 
+    /// Makes every read of the open SQLite file at `path` fail with EISDIR, as a vanished drive would
+    /// fail with EIO: a directory is put under its file descriptor.
+    fn break_reads_of(path: &Path) {
+        unsafe extern "C" {
+            fn dup2(old: i32, new: i32) -> i32;
+        }
+        use std::os::fd::AsRawFd;
+        let path = path.canonicalize().unwrap();
+        let fd = std::fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .find(|entry| std::fs::read_link(entry.path()).is_ok_and(|target| target == path))
+            .and_then(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+            .expect("the session's file is open");
+        let dir = std::fs::File::open(path.parent().unwrap()).unwrap();
+        assert_eq!(unsafe { dup2(dir.as_raw_fd(), fd) }, fd);
+    }
+
+    #[test]
+    fn a_session_whose_file_fails_with_an_io_error_reports_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        // (reads broken, call, fails, closed after)
+        let cases = [
+            (false, "objects main", false, false),
+            (false, "objects nope", true, false), // an unknown schema is not an I/O error
+            (false, "columns main/t", false, false),
+            (true, "objects main", true, true),
+            (true, "columns main/t", true, true),
+        ];
+        for (i, (broken, call, fails, closed)) in cases.into_iter().enumerate() {
+            let path = file(dir.path(), &format!("{i}.db"), "CREATE TABLE t (a)");
+            let session = block_on(Sqlite.connect(&params(&path))).unwrap();
+            assert!(!session.is_closed(), "{call}: open after connect");
+            if broken {
+                break_reads_of(&path);
+            }
+            let got = match call {
+                "objects main" => block_on(Sqlite.objects(&session, "main")).map(drop),
+                "objects nope" => block_on(Sqlite.objects(&session, "nope")).map(drop),
+                _ => block_on(Sqlite.columns(&session, "main", "t")).map(drop),
+            };
+            assert_eq!(got.is_err(), fails, "broken {broken} {call}: {got:?}");
+            assert_eq!(session.is_closed(), closed, "broken {broken} {call}: {got:?}");
+        }
+    }
+
     #[test]
     fn objects_are_tables_and_views_sorted_by_name_without_internal_tables() {
         use crate::model::ObjectKind::{Table, View};
