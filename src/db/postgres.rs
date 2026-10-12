@@ -121,17 +121,18 @@ impl Driver for Postgres {
         let schema = schema.to_string();
         read(session, |session| async move {
             // One statement for every kind, so a schema of any size costs one round trip.
-            let sql = "SELECT k, name FROM ( \
-                         SELECT CASE c.relkind WHEN 'v' THEN 1 WHEN 'm' THEN 2 WHEN 'S' THEN 3 ELSE 0 END, c.relname::text \
+            let sql = "SELECT k, name, estimate FROM ( \
+                         SELECT CASE c.relkind WHEN 'v' THEN 1 WHEN 'm' THEN 2 WHEN 'S' THEN 3 ELSE 0 END, c.relname::text, \
+                           CASE WHEN c.relkind IN ('r', 'p') AND c.reltuples >= 0 THEN c.reltuples::int8 END \
                          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
                          WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm', 'S') \
                        UNION ALL \
-                         SELECT CASE p.prokind WHEN 'p' THEN 5 ELSE 4 END, p.proname::text \
+                         SELECT CASE p.prokind WHEN 'p' THEN 5 ELSE 4 END, p.proname::text, NULL \
                          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 \
                        UNION ALL \
-                         SELECT 6, t.typname::text FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+                         SELECT 6, t.typname::text, NULL FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
                          WHERE n.nspname = $1 AND t.typtype = 'e' \
-                       ) o(k, name) ORDER BY k, name COLLATE \"C\"";
+                       ) o(k, name, estimate) ORDER BY k, name COLLATE \"C\"";
             let rows = session.query(sql, &[&schema]).await?;
             Ok(rows
                 .iter()
@@ -141,7 +142,8 @@ impl Driver for Postgres {
                     columns: Vec::new(),
                     keys: Vec::new(),
                     indexes: Vec::new(),
-                    row_estimate: None,
+                    // reltuples is -1 until the table is first analyzed or vacuumed.
+                    row_estimate: row.get::<_, Option<i64>>(2).map(|n| n as u64),
                 })
                 .collect())
         })
