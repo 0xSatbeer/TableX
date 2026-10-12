@@ -62,16 +62,35 @@ pub(crate) fn validate_rename(input: &str, others: &[&str]) -> Result<String, St
     }
 }
 
-/// `key` once the connection at position `removed` is deleted: `None` for its own rows, one position
-/// up for the rows of the connections below it. Keys that are not tree keys stay as they are.
-pub(crate) fn shift_key(key: &str, removed: usize) -> Option<String> {
-    let head = key.split('/').next().unwrap_or(key);
-    match head.parse::<usize>() {
-        Ok(ci) if ci == removed => None,
-        Ok(ci) if ci > removed => Some(format!("{}{}", ci - 1, &key[head.len()..])),
-        _ => Some(key.to_string()),
-    }
+/// `name` as one tree-key segment: `\` and `/` escaped, so a name never splits or merges segments.
+fn seg(name: &str) -> String {
+    name.replace('\\', r"\\").replace('/', r"\/")
 }
+
+/// The keys of `key`'s ancestors, outermost first: its prefixes up to each unescaped `/`.
+fn ancestors(key: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut escaped = false;
+    for (i, c) in key.char_indices() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '/' => out.push(&key[..i]),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Whether `key` is connection `id`'s row or one under it. The id segment is a plain number.
+fn of_connection(key: &str, id: ConnectionId) -> bool {
+    key.split('/').next() == Some(id.0.to_string().as_str())
+}
+
+/// The last segment of a status row's key. A backslash never starts an escaped name's segment, so
+/// these never clash with a database or schema named "loading" or "error".
+const LOADING: &str = r"\loading";
+const ERROR: &str = r"\error";
 
 /// Whether the status dot is solid (else a ring), and the tooltip naming the status.
 fn status_style(status: &ConnectionStatus) -> (bool, String) {
@@ -315,14 +334,17 @@ fn group_label(kind: ObjectKind) -> &'static str {
 #[cfg(test)]
 fn default_expanded(ws: &Workspace) -> HashSet<String> {
     let mut set = HashSet::new();
-    for (ci, conn) in ws.connections.iter().enumerate().filter(|(_, c)| c.is_production) {
-        set.insert(format!("{ci}"));
-        if let Some(schema) = conn.databases.iter().flatten().next().and_then(|db| db.schemas.iter().flatten().next()) {
-            set.insert(format!("{ci}/0"));
-            set.insert(format!("{ci}/0/0"));
+    for conn in ws.connections.iter().filter(|c| c.is_production) {
+        let key = conn.id.0.to_string();
+        set.insert(key.clone());
+        let db = conn.databases.iter().flatten().next();
+        if let Some((db, schema)) = db.and_then(|db| Some((db, db.schemas.iter().flatten().next()?))) {
+            let db = format!("{key}/{}", seg(&db.name));
+            let schema_key = format!("{db}/{}", seg(&schema.name));
             if schema.objects.iter().flatten().any(|o| o.kind == ObjectKind::Table) {
-                set.insert(format!("{ci}/0/0/{}", ObjectKind::Table.as_str()));
+                set.insert(format!("{schema_key}/{}", ObjectKind::Table.as_str()));
             }
+            set.extend([db, schema_key]);
         }
     }
     set
@@ -361,18 +383,18 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
             suffix: None,
             pk: false,
         };
-        let key = format!("{ci}");
+        let key = conn.id.0.to_string();
         // Expanding a connection that isn't connected connects it, even with no databases yet.
         let expandable = conn.databases.as_ref().is_some_and(|d| !d.is_empty()) || conn.status != ConnectionStatus::Connected;
         let open = push(FlatNode { expandable, ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
         match &conn.status {
             ConnectionStatus::Connected => {}
             ConnectionStatus::Error(msg) => {
-                push(node(format!("{key}/error"), NodeKind::ConnError, msg, 1));
+                push(node(format!("{key}/{ERROR}"), NodeKind::ConnError, msg, 1));
                 continue;
             }
             ConnectionStatus::Connecting if open => {
-                push(node(format!("{key}/loading"), NodeKind::Loading, &format!("Connecting to {}…", target(conn)), 1));
+                push(node(format!("{key}/{LOADING}"), NodeKind::Loading, &format!("Connecting to {}…", target(conn)), 1));
                 continue;
             }
             ConnectionStatus::Connecting | ConnectionStatus::Disconnected => continue,
@@ -380,18 +402,18 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
         if !open {
             continue;
         }
-        for (di, db) in conn.databases.iter().flatten().enumerate() {
-            let key = format!("{key}/{di}");
+        for db in conn.databases.iter().flatten() {
+            let key = format!("{key}/{}", seg(&db.name));
             if !push(FlatNode { expandable: db.schemas.as_ref().is_some_and(|s| !s.is_empty()), ..node(key.clone(), NodeKind::Database, &db.name, 1) }) {
                 continue;
             }
-            for (si, schema) in db.schemas.iter().flatten().enumerate() {
-                let key = format!("{key}/{si}");
+            for schema in db.schemas.iter().flatten() {
+                let key = format!("{key}/{}", seg(&schema.name));
                 if !push(FlatNode { expandable: schema.objects.as_ref().is_some_and(|o| !o.is_empty()), ..node(key.clone(), NodeKind::Schema, &schema.name, 2) }) {
                     continue;
                 }
                 if loading.contains(&key) {
-                    push(node(format!("{key}/loading"), NodeKind::Loading, "Loading objects…", 3));
+                    push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading objects…", 3));
                     continue;
                 }
                 let mut groups: BTreeMap<ObjectKind, Vec<&DbObject>> = BTreeMap::new();
@@ -404,8 +426,8 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                     if !push(FlatNode { count: Some(objects.len()), expandable: true, ..group }) {
                         continue;
                     }
-                    for (oi, obj) in objects.into_iter().enumerate() {
-                        let key = format!("{key}/{oi}");
+                    for obj in objects {
+                        let key = format!("{key}/{}", seg(&obj.name));
                         let kind = NodeKind::Object(kind);
                         let suffix = row_estimate_label(obj.row_estimate).map(Into::into);
                         let parts = [(Part::Columns, obj.columns.as_ref().map_or(0, Vec::len)), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
@@ -484,11 +506,9 @@ pub struct OpenObject {
 
 impl EventEmitter<OpenObject> for Explorer {}
 
-/// Emitted after connection `id` was deleted from position `ix`, so the Shell can close its tabs
-/// and move the tree keys of the tabs below it.
+/// Emitted after connection `id` was deleted, so the Shell can close its tabs.
 pub struct ConnectionDeleted {
     pub id: ConnectionId,
-    pub ix: usize,
 }
 
 impl EventEmitter<ConnectionDeleted> for Explorer {}
@@ -547,14 +567,10 @@ impl Explorer {
             return self.connect(ci, cx);
         }
         if open && node.kind == NodeKind::Schema && !self.loaded.contains(&key) && self.loading.insert(key.clone()) {
-            // A delete can move the connection while this runs, so the key is rebuilt from its id at the end.
-            let id = self.workspace.read(cx).connections[node.conn].id;
-            let path = key[key.find('/').unwrap_or(key.len())..].to_string();
+            let key = key.clone();
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(mock::latency()).await;
                 this.update(cx, |this, cx| {
-                    let Some(ci) = this.workspace.read(cx).connections.iter().position(|c| c.id == id) else { return };
-                    let key = format!("{ci}{path}");
                     this.loading.remove(&key);
                     this.loaded.insert(key);
                     this.refresh(cx);
@@ -587,7 +603,7 @@ impl Explorer {
         let token = self.connects.entry(id).or_default();
         *token += 1;
         let token = *token;
-        self.expanded.insert(format!("{ci}"));
+        self.expanded.insert(id.0.to_string());
         // ponytail: every mock connect succeeds, including retries; drivers report real failures (QX-023)
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(mock::latency()).await;
@@ -613,13 +629,11 @@ impl Explorer {
 
     /// Opens every ancestor of `key`, selects it and focuses the tree.
     pub fn reveal(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let parts: Vec<&str> = key.split('/').collect();
-        for depth in 1..parts.len() {
-            let ancestor = parts[..depth].join("/");
-            if depth == 3 {
-                self.loaded.insert(ancestor.clone());
+        for (depth, ancestor) in ancestors(key).into_iter().enumerate() {
+            if depth == 2 {
+                self.loaded.insert(ancestor.to_string());
             }
-            self.expanded.insert(ancestor);
+            self.expanded.insert(ancestor.to_string());
         }
         self.put_filter(String::new(), window, cx);
         if let Some(ix) = self.nodes.iter().position(|n| n.key == key) {
@@ -669,18 +683,18 @@ impl Explorer {
             ws.delete(id)
         });
         let Some(ix) = removed else { return };
-        // Tree keys start with the connection's position, which moves up for those below it.
         for keys in [&mut self.expanded, &mut self.loaded, &mut self.loading] {
-            *keys = std::mem::take(keys).into_iter().filter_map(|k| shift_key(&k, ix)).collect();
+            keys.retain(|k| !of_connection(k, id));
         }
-        // A rename and the marked rows hold positions too; the delete ends them.
+        // A rename holds a position; the delete ends it and the marked rows.
         self.rename = None;
         self.marked.clear();
-        cx.emit(ConnectionDeleted { id, ix });
+        cx.emit(ConnectionDeleted { id });
         self.refresh(cx);
         // The connection that took its place, or the previous one when it was last.
-        let next = ix.min(self.workspace.read(cx).connections.len().saturating_sub(1)).to_string();
-        if let Some(row) = self.nodes.iter().position(|n| n.key == next) {
+        let connections = &self.workspace.read(cx).connections;
+        let next = connections.get(ix.min(connections.len().saturating_sub(1))).map(|c| c.id.0.to_string());
+        if let Some(row) = self.nodes.iter().position(|n| Some(&n.key) == next.as_ref()) {
             self.select(row, cx);
         }
     }
@@ -688,14 +702,13 @@ impl Explorer {
     fn open_dialog(&mut self, editing: Option<ConnectionId>, window: &mut Window, cx: &mut Context<Self>) {
         let dialog = ConnectionDialog::open(self.workspace.clone(), editing, window, cx);
         cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
-            let connections = &this.workspace.read(cx).connections;
-            if let Some(ix) = connections.iter().position(|c| c.id == *id) {
-                // Collapse a connection the edit disconnected, so expanding it connects again.
-                if connections[ix].status == ConnectionStatus::Disconnected {
-                    this.expanded.remove(&ix.to_string());
-                }
-                this.reveal(&ix.to_string(), window, cx);
+            let Some(conn) = this.workspace.read(cx).connections.iter().find(|c| c.id == *id) else { return };
+            let (key, disconnected) = (id.0.to_string(), conn.status == ConnectionStatus::Disconnected);
+            // Collapse a connection the edit disconnected, so expanding it connects again.
+            if disconnected {
+                this.expanded.remove(&key);
             }
+            this.reveal(&key, window, cx);
         })
         .detach();
     }
@@ -1140,29 +1153,8 @@ impl Render for Explorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute, no_match_text, shift_key};
+    use super::{row_estimate_label, Part, Click, Hit, click_action, NodeKind, default_expanded, filter_nodes, flatten, fuzzy_match, parent_of, validate_rename, Rename, RenameKey, can_rename, status_style, tree_nodes, rename_swallows, highlight_ranges, first_match, route_key, Focus, KeyRoute, no_match_text};
 
-    #[test]
-    fn shift_key_cases() {
-        // (key, position deleted, key after)
-        let cases = [
-            ("1", 1, None),
-            ("1/0/0/table/2", 1, None),
-            ("0", 1, Some("0")),
-            ("0/0/0", 1, Some("0/0/0")),
-            ("2", 1, Some("1")),
-            ("2/0/0/table/0", 1, Some("1/0/0/table/0")),
-            ("10/3", 1, Some("9/3")),
-            ("1", 0, Some("0")),
-            ("0", 0, None),
-            ("console-1", 0, Some("console-1")),
-            ("big_events", 0, Some("big_events")),
-            ("", 0, Some("")),
-        ];
-        for (key, removed, want) in cases {
-            assert_eq!(shift_key(key, removed).as_deref(), want, "{key:?} after deleting {removed}");
-        }
-    }
     use crate::{mock, model::{ConnectionStatus, DbKind, ObjectKind}};
     use std::sync::Arc;
 
@@ -1196,7 +1188,8 @@ mod tests {
         let mut ws = mock::workspaces()[0].clone();
         let all = |ws: &crate::model::Workspace| flatten(ws, &Default::default(), &Default::default(), true);
         let ci = ws.connections.iter().position(|c| c.status == ConnectionStatus::Disconnected).unwrap();
-        let under = |nodes: &[super::FlatNode]| nodes.iter().filter(|n| n.key.starts_with(&format!("{ci}/"))).cloned().collect::<Vec<_>>();
+        let prefix = format!("{}/", ws.connections[ci].id.0);
+        let under = |nodes: &[super::FlatNode]| nodes.iter().filter(|n| n.key.starts_with(&prefix)).cloned().collect::<Vec<_>>();
         assert!(under(&all(&ws)).is_empty(), "disconnected: no children even when open");
 
         ws.connections[ci].status = ConnectionStatus::Connecting;
@@ -1635,14 +1628,9 @@ mod tests {
         let (window, explorer) = cx.update(|cx| {
             gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Explorer::new(ws, driver, window, cx))).expect("open test window")
         });
-        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        let cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
         (cx, explorer, workspace, fake)
-    }
-
-    /// Every row's key, in tree order.
-    fn row_keys(explorer: &gpui_kit::Entity<super::Explorer>, cx: &gpui_kit::VisualTestContext) -> Vec<String> {
-        explorer.read_with(cx, |e, _| e.nodes.iter().map(|n| n.key.clone()).collect())
     }
 
     #[gpui_kit::test]

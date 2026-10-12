@@ -225,14 +225,6 @@ impl<C> Tabs<C> {
         self.closed = kept;
     }
 
-    /// Replaces every open and recently closed tab's key with `f(key)`.
-    pub fn rekey(&mut self, f: impl Fn(&SharedString) -> SharedString) {
-        for tab in self.tabs.iter_mut().chain(&mut self.closed) {
-            tab.key = f(&tab.key);
-        }
-        self.mru.iter_mut().for_each(|key| *key = f(key));
-    }
-
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {
             self.active = ix;

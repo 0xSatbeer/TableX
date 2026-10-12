@@ -210,8 +210,6 @@ impl Shell {
         .detach();
         cx.subscribe(&explorer, |this, _, ev: &explorer::ConnectionDeleted, cx| {
             this.tabs.drop_connection(ev.id);
-            // Explorer-opened tabs are keyed by tree key, so they follow their connection's move.
-            this.tabs.rekey(|key| explorer::shift_key(key, ev.ix).map_or_else(|| key.clone(), SharedString::from));
             this.tab_changed(cx);
         })
         .detach();
@@ -1576,7 +1574,7 @@ mod tests {
         let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
         let explorer = shell.read_with(&vcx, |this, _| this.explorer.clone());
-        explorer.update_in(&mut vcx, |e, window, cx| e.reveal("0/0/0/table/0", window, cx));
+        explorer.update_in(&mut vcx, |e, window, cx| e.reveal("1/app_db/public/table/users", window, cx));
         vcx.run_until_parked();
         vcx.simulate_keystrokes("enter");
         vcx.run_until_parked();
@@ -1892,8 +1890,8 @@ mod tests {
         let first = selector(row(cx));
         if cx.debug_bounds(first).is_none() {
             // Scrolled out of view: reveal it.
-            let ci = workspace.read_with(cx, |ws, _| ws.connections.iter().position(|c| c.name == name).unwrap());
-            explorer.update_in(cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+            let id = workspace.read_with(cx, |ws, _| ws.connections.iter().find(|c| c.name == name).unwrap().id);
+            explorer.update_in(cx, |e, window, cx| e.reveal(&id.0.to_string(), window, cx));
             cx.run_until_parked();
         }
         let shown = selector(row(cx));
@@ -2030,7 +2028,7 @@ mod tests {
             let before = tab_origins(&shell, &cx);
             let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
             // Scrolls the row into view; prod-pg is open down to a table.
-            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&id.0.to_string(), window, cx));
             cx.run_until_parked();
             let dialog = open_edit_dialog(&mut cx, &shell, row);
             fill(&mut cx, &dialog, &edits);
@@ -2065,7 +2063,7 @@ mod tests {
             assert_eq!(cx.debug_bounds(format!("prod-badge-{row}").leak()).is_some(), production, "{label}: PROD badge in the tree");
             if !stays {
                 // Disconnected by the edit, it connects again from its row.
-                explorer.update_in(&mut cx, |e, window, cx| e.reveal(&ci.to_string(), window, cx));
+                explorer.update_in(&mut cx, |e, window, cx| e.reveal(&id.0.to_string(), window, cx));
                 cx.simulate_keystrokes("enter");
                 let status = workspace.read_with(&cx, |ws, _| ws.connections[ci].status.clone());
                 assert_eq!(status, ConnectionStatus::Connected, "{label}: Enter reconnects");
@@ -2098,7 +2096,7 @@ mod tests {
             let (window, shell) = open_plain(cx);
             let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
             let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
-            explorer.update_in(&mut cx, |e, window, cx| e.reveal("2", window, cx));
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("3", window, cx));
             cx.run_until_parked();
             // Enter on the disconnected local.db starts a connect that lands after `latency`.
             cx.simulate_keystrokes("enter");
@@ -2143,7 +2141,7 @@ mod tests {
             let (window, shell) = open_with_connection_tabs(cx);
             let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
             let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
-            explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("1", window, cx));
             cx.run_until_parked();
             if !filter.is_empty() {
                 cx.simulate_input(filter);
@@ -2161,7 +2159,7 @@ mod tests {
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
         let before = tab_origins(&shell, &cx);
         let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
-        explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("1", window, cx));
         cx.run_until_parked();
         cx.simulate_keystrokes("f2");
         for _ in 0.."prod-pg".len() {
@@ -2623,9 +2621,9 @@ mod tests {
             (&[], "local.db", "staging-pg"),
             (&[], "prod-pg", "staging-pg"),
             // Its open subtree goes with it, so the next connection takes its place.
-            (&["0/0/0/table"], "prod-pg", "staging-pg"),
+            (&["1/app_db/public/table"], "prod-pg", "staging-pg"),
             // The previous connection's row, not the last row above (prod-pg's open tables).
-            (&["0/0/0/table"], "staging-pg", "local.db"),
+            (&["1/app_db/public/table"], "staging-pg", "local.db"),
         ];
         for (open, row, want) in cases {
             let label = format!("{open:?} delete {row}");
@@ -2655,27 +2653,27 @@ mod tests {
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
         let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
         // Connect local.db, open its first table in a tab, and open prod-pg's tables above it.
-        explorer.update_in(&mut cx, |e, window, cx| e.reveal("2", window, cx));
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("3", window, cx));
         cx.simulate_keystrokes("enter");
         cx.run_until_parked();
-        explorer.update_in(&mut cx, |e, window, cx| e.reveal("2/0/0/table/0", window, cx));
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("3/main/main/table/users", window, cx));
         cx.simulate_keystrokes("enter");
         cx.run_until_parked();
-        explorer.update_in(&mut cx, |e, window, cx| e.reveal("0/0/0/table", window, cx));
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("1/app_db/public/table", window, cx));
         cx.run_until_parked();
         let labels = |cx: &gpui_kit::VisualTestContext| explorer.read_with(cx, |e, _| e.row_labels());
         let under_local = |rows: Vec<gpui_kit::SharedString>| rows.into_iter().skip_while(|l| l != "local.db").collect::<Vec<_>>();
         let local_before = under_local(labels(&cx));
         assert!(local_before.len() > 3, "local.db is open down to its tables: {local_before:?}");
         let tab_keys = |cx: &gpui_kit::VisualTestContext| shell.read_with(cx, |this, _| this.tabs.tabs.iter().filter(|t| t.tooltip.is_some()).map(|t| t.key.clone()).collect::<Vec<_>>());
-        assert_eq!(tab_keys(&cx), ["2/0/0/table/0"], "local.db's table tab");
-        let table = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().find(|t| t.key == "2/0/0/table/0").unwrap().title.clone());
+        assert_eq!(tab_keys(&cx), ["3/main/main/table/users"], "local.db's table tab");
+        let table = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().find(|t| t.key == "3/main/main/table/users").unwrap().title.clone());
 
         delete_row(&mut cx, &shell, "prod-pg");
 
         assert_eq!(under_local(labels(&cx)), local_before, "local.db stays open as it was");
-        assert_eq!(tab_keys(&cx), ["1/0/0/table/0"], "its tab follows it to its new position");
-        explorer.update_in(&mut cx, |e, window, cx| e.reveal("1/0/0/table/0", window, cx));
+        assert_eq!(tab_keys(&cx), ["3/main/main/table/users"], "its tab keeps its key");
+        explorer.update_in(&mut cx, |e, window, cx| e.reveal("3/main/main/table/users", window, cx));
         assert_eq!(explorer.read_with(&cx, |e, _| e.selected_label()), Some(table.clone()), "reveal in explorer finds the tab's table");
         let open = shell.read_with(&cx, |this, _| this.tabs.tabs.len());
         cx.simulate_keystrokes("enter");
@@ -2689,11 +2687,11 @@ mod tests {
         use std::time::Duration;
         // (row connecting, key to press Enter on, then add a connection and connect it, the new one's status once the old connect finished)
         let cases: [(&str, &str, Option<bool>, Option<ConnectionStatus>); 4] = [
-            ("local.db", "2", None, None),
-            ("staging-pg", "1/error", None, None),
+            ("local.db", "3", None, None),
+            ("staging-pg", r"2/\error", None, None),
             // local.db has the highest id, so the new connection may get it again.
-            ("local.db", "2", Some(false), Some(Disconnected)),
-            ("local.db", "2", Some(true), Some(Connecting)),
+            ("local.db", "3", Some(false), Some(Disconnected)),
+            ("local.db", "3", Some(true), Some(Connecting)),
         ];
         let latency = Duration::from_millis(1000);
         crate::mock::set_latency(latency.as_millis() as u32);
@@ -2713,8 +2711,8 @@ mod tests {
                 let dialog = open_add_dialog(&mut cx);
                 finish(&mut cx, &dialog, &[("kind-sqlite", ""), ("name", "new.db"), ("path", "/tmp/new.db")], "enter");
                 if connect {
-                    let at = explorer.read_with(&cx, |e, _| e.row_labels().iter().position(|l| l == "new.db").unwrap());
-                    explorer.update_in(&mut cx, |e, window, cx| e.reveal(&(at - 1).to_string(), window, cx));
+                    let id = workspace.read_with(&cx, |ws, _| ws.connections.iter().find(|c| c.name == "new.db").unwrap().id);
+                    explorer.update_in(&mut cx, |e, window, cx| e.reveal(&id.0.to_string(), window, cx));
                     cx.simulate_keystrokes("enter");
                 }
             }
@@ -2752,10 +2750,10 @@ mod tests {
         crate::mock::set_latency(latency.as_millis() as u32);
         let (window, shell) = open_plain(cx);
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
-        expand_row(&mut cx, &shell, "2");
+        expand_row(&mut cx, &shell, "3");
         cx.executor().advance_clock(latency);
         cx.run_until_parked();
-        expand_row(&mut cx, &shell, "2/0/0");
+        expand_row(&mut cx, &shell, "3/main/main");
         assert!(shows_loading_objects(&shell, &cx), "local.db's schema is loading");
         delete_row(&mut cx, &shell, "staging-pg");
         cx.executor().advance_clock(latency);
@@ -2771,19 +2769,18 @@ mod tests {
         crate::mock::set_latency(latency.as_millis() as u32);
         let (window, shell) = open_plain(cx);
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
-        expand_row(&mut cx, &shell, "1");
+        expand_row(&mut cx, &shell, "2");
         cx.executor().advance_clock(latency);
         cx.run_until_parked();
-        expand_row(&mut cx, &shell, "1/0/0");
+        expand_row(&mut cx, &shell, "2/app_db/public");
         assert!(shows_loading_objects(&shell, &cx), "staging-pg's schema is loading");
         delete_row(&mut cx, &shell, "staging-pg");
         cx.executor().advance_clock(latency);
         cx.run_until_parked();
-        // local.db now sits at position 1, where the deleted load's key points.
-        expand_row(&mut cx, &shell, "1");
+        expand_row(&mut cx, &shell, "3");
         cx.executor().advance_clock(latency);
         cx.run_until_parked();
-        expand_row(&mut cx, &shell, "1/0/0");
+        expand_row(&mut cx, &shell, "3/main/main");
         assert!(shows_loading_objects(&shell, &cx), "local.db's schema still loads its objects");
         crate::mock::set_latency(0);
     }
@@ -2804,7 +2801,8 @@ mod tests {
             let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
             let mut want: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
             let at = want.iter().position(|n| n == renamed).unwrap();
-            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&at.to_string(), window, cx));
+            let id = workspace.read_with(&cx, |ws, _| ws.connections[at].id);
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&id.0.to_string(), window, cx));
             cx.simulate_keystrokes("f2 x");
             if how == "action" {
                 cx.dispatch_action(super::DeleteConnection);
@@ -2815,7 +2813,8 @@ mod tests {
             }
             want.retain(|n| n != deleted);
             // Back in the tree, Enter would commit a rename still open.
-            explorer.update_in(&mut cx, |e, window, cx| e.reveal("0", window, cx));
+            let first = workspace.read_with(&cx, |ws, _| ws.connections[0].id);
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal(&first.0.to_string(), window, cx));
             cx.simulate_keystrokes("enter");
             cx.run_until_parked();
             let names: Vec<String> = workspace.read_with(&cx, |ws, _| ws.connections.iter().map(|c| c.name.clone()).collect());
