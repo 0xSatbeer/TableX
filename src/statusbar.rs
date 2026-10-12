@@ -27,7 +27,7 @@ pub struct StatusBar {
     workspace: Entity<Workspace>,
     /// Started with `--demo`, where a tab without an origin shows sample data.
     demo: bool,
-    /// Where the active tab's data comes from; `None` for sample data or no tab.
+    /// Where the active tab's data comes from; `None` for no connection (sample data in the demo) or no tab.
     origin: Option<Origin>,
     /// Some tab is open, so a missing origin means sample data rather than nothing.
     has_tab: bool,
@@ -297,7 +297,10 @@ impl Render for StatusBar {
                             .child(Button::new("status-connect").xsmall().label(label).on_click(cx.listener(move |_, _, _, cx| cx.emit(Connect(id))))),
                     )
                 }),
-            None if self.has_tab => h_flex().child("Sample data · not from a connection"),
+            None if self.has_tab => {
+                let text = if self.demo { "Sample data · not from a connection" } else { "No connection" };
+                h_flex().debug_selector(|| format!("status-origin:{text}")).child(text)
+            }
             None => h_flex(),
         };
         h_flex()
