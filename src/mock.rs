@@ -76,6 +76,7 @@ pub fn workspaces() -> Vec<Workspace> {
         host: host.into(),
         port: 5432,
         user: "app".into(),
+        password: None,
         database: db.into(),
         ssl: SslMode::Prefer,
     };
@@ -195,6 +196,7 @@ fn table(name: String, r: u64) -> DbObject {
         nullable,
         default: default.map(Into::into),
         is_pk,
+        enum_values: Vec::new(),
     };
     let mut columns = vec![
         col("id", "bigint", false, Some(&format!("nextval('{name}_id_seq')")), true),

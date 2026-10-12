@@ -9,8 +9,17 @@ chrono = { version = "0.4", default-features = false }
 # JSON cells are checked before they are saved; already in the tree through gpui.
 serde_json = "1"
 gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql"] }
+# Database IO (src/db): one tokio runtime runs every session (docs/adr/0001).
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tokio-postgres = "0.7"
+rusqlite = { version = "0.37", features = ["bundled"] }
+futures = "0.3"
+# TLS for Postgres on ring only; default features would pull in aws-lc-rs.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 
 [dev-dependencies]
+tempfile = "3"
 gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "test-support"] }
 
 [profile.release]

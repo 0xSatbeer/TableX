@@ -465,7 +465,7 @@ impl Form {
     pub fn of(conn: &Connection) -> Self {
         let base = Form { name: conn.name.clone(), color: conn.color, is_production: conn.is_production, kind: conn.kind(), ..Form::new(&[]) };
         match &conn.params {
-            ConnectionParams::Postgres { host, port, user, database, ssl } => {
+            ConnectionParams::Postgres { host, port, user, database, ssl, .. } => {
                 Form { host: host.clone(), port: port.to_string(), user: user.clone(), database: database.clone(), ssl: *ssl, ..base }
             }
             ConnectionParams::Sqlite { path } => Form { path: path.display().to_string(), ..base },
@@ -493,7 +493,7 @@ impl Form {
         let database = required(&self.database, "Database can't be empty");
         match (host, port, user, database) {
             (Ok(host), Ok(port), Ok(user), Ok(database)) => {
-                Ok(ConnectionParams::Postgres { host, port, user, database, ssl: self.ssl })
+                Ok(ConnectionParams::Postgres { host, port, user, password: None, database, ssl: self.ssl })
             }
             (host, port, user, database) => Err(FieldErrors {
                 host: host.err(),
@@ -587,6 +587,7 @@ mod tests {
             host: host.into(),
             port,
             user: "u".into(),
+            password: None,
             database: "d".into(),
             ssl: SslMode::Prefer,
         };
@@ -683,6 +684,7 @@ mod tests {
             host: host.into(),
             port: 5432,
             user: "u".into(),
+            password: None,
             database: "d".into(),
             ssl: SslMode::Prefer,
         };

@@ -1,0 +1,22 @@
+# Test Postgres for the db integration tests:
+#   podman-compose up -d   (or: docker compose up -d)
+#   export QUERYX_TEST_PG=postgres://queryx:queryx@localhost:55432/queryx
+services:
+  postgres:
+    image: docker.io/library/postgres:17
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_USER: queryx
+      POSTGRES_PASSWORD: queryx
+      POSTGRES_DB: queryx
+    # TLS with the image's self-signed cert, so the SSL mode tests have a TLS server.
+    command:
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      - -c
+      - ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+    volumes:
+      - ./scripts/pg-test-init.sh:/docker-entrypoint-initdb.d/pg-test-init.sh:ro

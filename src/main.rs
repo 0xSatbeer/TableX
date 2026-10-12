@@ -14,6 +14,8 @@ use std::rc::Rc;
 
 mod assets;
 mod connection_dialog;
+#[allow(dead_code)] // the UI starts calling db in T03 (explorer) and T05 (dialog)
+mod db;
 mod explorer;
 mod gallery;
 mod grid;
@@ -1781,7 +1783,7 @@ mod tests {
     fn saving_a_valid_form_appends_the_connection_and_selects_its_row(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{Connection, ConnectionParams, ConnectionStatus, SslMode};
         use std::path::PathBuf;
-        let postgres = ConnectionParams::Postgres { host: "db.local".into(), port: 5433, user: "u".into(), database: "d".into(), ssl: SslMode::Prefer };
+        let postgres = ConnectionParams::Postgres { host: "db.local".into(), port: 5433, user: "u".into(), password: None, database: "d".into(), ssl: SslMode::Prefer };
         // (empty the workspace first, edits, clicks, want name, color, production, params)
         let cases: Vec<(bool, Vec<(&str, &str)>, Vec<&'static str>, &str, u8, bool, ConnectionParams)> = vec![
             (false, vec![("name", " c "), ("host", " db.local "), ("port", " 5433 "), ("user", " u "), ("database", " d ")], vec![], "c", 1, false, postgres.clone()),

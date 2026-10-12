@@ -65,9 +65,23 @@ pub enum SslMode {
     Require,
 }
 
+/// A password. In memory only, never written anywhere (QX-035 moves it to the keyring).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConnectionParams {
-    Postgres { host: String, port: u16, user: String, database: String, ssl: SslMode },
+    Postgres { host: String, port: u16, user: String, password: Option<Secret>, database: String, ssl: SslMode },
     Sqlite { path: PathBuf },
 }
 
@@ -166,6 +180,8 @@ pub struct Column {
     pub nullable: bool,
     pub default: Option<String>,
     pub is_pk: bool,
+    /// The labels of an enum column, in declared order; empty for every other type.
+    pub enum_values: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
