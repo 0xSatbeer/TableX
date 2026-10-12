@@ -208,11 +208,16 @@ struct Shell {
 
 impl Shell {
     fn new(mode: Mode, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let workspace = match mode {
-            Mode::Normal => model::Workspace { id: 1, name: "Workspace".into(), connections: Vec::new() },
-            Mode::Demo => mock::workspaces().remove(0),
+        let (workspace, driver): (_, std::sync::Arc<dyn db::Driver>) = match mode {
+            Mode::Normal => (model::Workspace { id: 1, name: "Workspace".into(), connections: Vec::new() }, std::sync::Arc::new(db::Live::default())),
+            Mode::Demo => {
+                // The trees start unloaded, so the mock driver serves each level as it is expanded.
+                let mut workspace = mock::workspaces().remove(0);
+                workspace.connections.iter_mut().for_each(|c| c.databases = None);
+                (workspace, std::sync::Arc::new(db::mock::Mock::new(cx.background_executor().clone())))
+            }
         };
-        Self::with_driver(mode, workspace, std::sync::Arc::new(db::Live::default()), window, cx)
+        Self::with_driver(mode, workspace, driver, window, cx)
     }
 
     /// The Shell started in `mode` on `workspace`, whose explorer reads databases through `driver`.
@@ -3095,9 +3100,25 @@ mod tests {
             cx.executor().advance_clock(Duration::from_millis(499));
             cx.run_until_parked();
             assert!(!databases.iter().any(|d| under(&cx).contains(d)), "{name}: nothing before the latency, got {:?}", under(&cx));
-            cx.executor().advance_clock(Duration::from_secs(2));
-            cx.run_until_parked();
+            // Each call (connect, then the listing) waits out the latency in turn.
+            for _ in 0..4 {
+                cx.executor().advance_clock(Duration::from_millis(500));
+                cx.run_until_parked();
+            }
             assert_eq!(under(&cx), databases, "{name}: the sample databases");
+            // One level down, the first database's schemas come from the same sample tree.
+            let first = &databases[0];
+            let row = explorer.read_with(&cx, |e, _| e.row_labels().iter().position(|l| l == first)).unwrap();
+            let at = cx.debug_bounds(format!("tree-label-{row}").leak()).unwrap_or_else(|| panic!("{first} row drawn")).center();
+            cx.simulate_click(at, Default::default());
+            cx.simulate_keystrokes("right");
+            for _ in 0..4 {
+                cx.executor().advance_clock(Duration::from_millis(500));
+                cx.run_until_parked();
+            }
+            let schemas: Vec<String> = crate::mock::workspaces().into_iter().flat_map(|ws| ws.connections).find(|c| c.name == name).unwrap().databases.unwrap()[0].schemas.iter().flatten().map(|s| s.name.clone()).collect();
+            let shown = under(&cx);
+            assert_eq!(&shown[1..=schemas.len()], &schemas[..], "{name}: {first}'s sample schemas");
             let status = workspace.read_with(&cx, |ws, _| ws.connections.iter().find(|c| c.name == name).unwrap().status.clone());
             assert_eq!(status, ConnectionStatus::Connected, "{name}");
         }

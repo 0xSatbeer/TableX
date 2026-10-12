@@ -847,7 +847,8 @@ impl Explorer {
         };
         let refreshing = self.workspace.update(cx, |ws, _| locate(ws, id, &segments).is_some_and(|node| node.loaded()));
         self.loads.insert(key.clone(), if refreshing { Load::Refreshing } else { Load::Loading });
-        let generation = self.gens.get(&id).copied().unwrap_or_default();
+        // Entered, so a connection Connected from the start (the demo's) matches its own results.
+        let generation = *self.gens.entry(id).or_default();
         let driver = self.driver.clone();
         cx.spawn(async move |this, cx| {
             let result = match open.await {

@@ -13,6 +13,7 @@ use crate::model::{Column, ConnectionParams, DbObject};
 
 #[cfg(test)]
 pub mod fake;
+pub mod mock;
 pub mod postgres;
 pub mod sqlite;
 mod tls;
@@ -25,6 +26,7 @@ pub type Reply<T> = BoxFuture<'static, Result<T, String>>;
 pub enum Session {
     Postgres(Arc<postgres::PgSession>),
     Sqlite(Arc<sqlite::SqliteSession>),
+    Mock(Arc<mock::MockSession>),
     #[cfg(test)]
     Fake(Arc<fake::FakeSession>),
 }
@@ -35,6 +37,7 @@ impl Session {
         match self {
             Session::Postgres(session) => session.is_closed(),
             Session::Sqlite(session) => session.is_closed(),
+            Session::Mock(_) => false,
             #[cfg(test)]
             Session::Fake(session) => session.is_closed(),
         }
