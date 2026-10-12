@@ -397,6 +397,7 @@ impl Render for ConnectionDialog {
                     .child(field("user", "User", Input::new(&self.user).small(), &errors, cx))
                     .child(field("database", "Database", Input::new(&self.database).small(), &errors, cx))
                     .into_any_element(),
+                field("password", "Password", Input::new(&self.password).small(), &errors, cx).into_any_element(),
                 field("ssl", "SSL", Select::new(&self.ssl).small(), &errors, cx).into_any_element(),
             ],
             DbKind::Sqlite => vec![field("path", "File path", Input::new(&self.path).small(), &errors, cx).into_any_element()],
@@ -502,7 +503,7 @@ impl Form {
         let database = required(&self.database, "Database can't be empty");
         match (host, port, user, database) {
             (Ok(host), Ok(port), Ok(user), Ok(database)) => {
-                Ok(ConnectionParams::Postgres { host, port, user, password: None, database, ssl: self.ssl })
+                Ok(ConnectionParams::Postgres { host, port, user, password: (!self.password.is_empty()).then(|| Secret::new(&self.password)), database, ssl: self.ssl })
             }
             (host, port, user, database) => Err(FieldErrors {
                 host: host.err(),
