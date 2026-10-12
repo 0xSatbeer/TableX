@@ -799,6 +799,13 @@ impl Explorer {
         self.refresh(cx);
     }
 
+    /// Connects connection `id` as Retry on its error row does (Connect or Retry in the status bar).
+    pub fn connect_connection(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        if let Some(ci) = self.workspace.read(cx).connections.iter().position(|c| c.id == id) {
+            self.connect(ci, false, cx);
+        }
+    }
+
     /// Closes the sessions of every connection whose params changed or that was deleted, drops
     /// what it was loading and collapses it, so nothing from its old server lands or stays.
     fn forget_changed(&mut self, cx: &mut Context<Self>) {

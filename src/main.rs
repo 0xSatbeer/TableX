@@ -255,6 +255,8 @@ impl Shell {
             this.focus_content = !ev.preview;
         })
         .detach();
+        let status_bar = cx.new(|cx| statusbar::StatusBar::new(workspace.clone(), demo, window, cx));
+        cx.subscribe(&status_bar, |this, _, statusbar::Connect(id), cx| this.explorer.update(cx, |e, cx| e.connect_connection(*id, cx))).detach();
         let overflow_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search tabs…"));
         cx.subscribe(&overflow_search, |this, search, ev: &InputEvent, cx| match ev {
             InputEvent::Change => cx.notify(),
@@ -309,7 +311,7 @@ impl Shell {
                 bottom: split::BOTTOM,
                 dragging: None,
             },
-            status_bar: cx.new(|cx| statusbar::StatusBar::new(workspace.clone(), demo, window, cx)),
+            status_bar,
             bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace.clone(), log, window, cx)),
             focus_handle: cx.focus_handle(),
             gallery_visible: false,
