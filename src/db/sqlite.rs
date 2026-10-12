@@ -1,5 +1,6 @@
 //! The SQLite driver: rusqlite on the shared runtime's blocking pool.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures::FutureExt;
@@ -14,6 +15,22 @@ pub struct SqliteSession {
     /// The file name, shown as the session's one database.
     name: String,
     conn: Mutex<rusqlite::Connection>,
+    /// Set by an I/O error (the file vanished or its drive failed), so the explorer drops the session.
+    closed: AtomicBool,
+}
+
+impl SqliteSession {
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Relaxed)
+    }
+
+    /// The reason for `err`, marking the session closed when it is an I/O error.
+    fn fail(&self, err: rusqlite::Error) -> String {
+        if err.sqlite_error_code() == Some(rusqlite::ErrorCode::SystemIoFailure) {
+            self.closed.store(true, Ordering::Relaxed);
+        }
+        err.to_string()
+    }
 }
 
 /// `ident` as a quoted SQLite identifier.
@@ -35,7 +52,7 @@ fn open(params: &ConnectionParams) -> Result<SqliteSession, String> {
     // Reads the header now, so a bad file fails at connect rather than at the first listing.
     conn.query_row("PRAGMA schema_version", [], |_| Ok(())).map_err(|e| e.to_string())?;
     let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
-    Ok(SqliteSession { name, conn: Mutex::new(conn) })
+    Ok(SqliteSession { name, conn: Mutex::new(conn), closed: AtomicBool::new(false) })
 }
 
 impl Driver for Sqlite {
@@ -69,12 +86,12 @@ impl Driver for Sqlite {
                 quote(&schema)
             );
             let conn = session.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(&sql).map_err(|e| session.fail(e))?;
             let rows = stmt.query_map([], |row| {
                 let kind = if row.get::<_, String>(0)? == "view" { ObjectKind::View } else { ObjectKind::Table };
                 Ok(DbObject { kind, name: row.get(1)?, columns: None, keys: Vec::new(), indexes: Vec::new(), row_estimate: None })
             });
-            rows.and_then(Iterator::collect).map_err(|e| e.to_string())
+            rows.and_then(Iterator::collect).map_err(|e| session.fail(e))
         })
     }
 
@@ -85,7 +102,7 @@ impl Driver for Sqlite {
             // table_xinfo also lists generated columns; hidden = 1 marks a virtual table's hidden ones.
             let sql = "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_xinfo(?1, ?2) WHERE hidden <> 1 ORDER BY cid";
             let conn = session.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(sql).map_err(|e| session.fail(e))?;
             let rows = stmt.query_map([&object, &schema], |row| {
                 Ok(Column {
                     name: row.get(0)?,
@@ -96,7 +113,7 @@ impl Driver for Sqlite {
                     enum_values: Vec::new(),
                 })
             });
-            rows.and_then(Iterator::collect).map_err(|e| e.to_string())
+            rows.and_then(Iterator::collect).map_err(|e| session.fail(e))
         })
     }
 }

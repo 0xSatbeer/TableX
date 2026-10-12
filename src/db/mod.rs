@@ -34,8 +34,7 @@ impl Session {
     pub fn is_closed(&self) -> bool {
         match self {
             Session::Postgres(session) => session.is_closed(),
-            // shortcut: a SQLite session never reports closed; mark it on a SQLite I/O error once files can vanish under one (QX-038).
-            Session::Sqlite(_) => false,
+            Session::Sqlite(session) => session.is_closed(),
             #[cfg(test)]
             Session::Fake(session) => session.is_closed(),
         }
