@@ -97,8 +97,13 @@ impl Driver for Postgres {
         })
     }
 
-    fn schemas(&self, _session: &Session) -> Reply<Vec<String>> {
-        not_yet()
+    fn schemas(&self, session: &Session) -> Reply<Vec<String>> {
+        read(session, |session| async move {
+            // The pg_ prefix is reserved for system schemas, temp and toast ones included.
+            let sql = "SELECT nspname::text FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema' \
+                       ORDER BY nspname COLLATE \"C\"";
+            Ok(session.query(sql, &[]).await?.iter().map(|row| row.get(0)).collect())
+        })
     }
 
     fn objects(&self, _session: &Session, _schema: &str) -> Reply<Vec<DbObject>> {
