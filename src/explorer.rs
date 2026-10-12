@@ -148,27 +148,51 @@ fn fetch(driver: &dyn Driver, session: &Session, segments: &[String]) -> futures
     }
 }
 
-/// Puts `children` in connection `id`'s tree, under the node with `segments`.
-fn store(ws: &mut Workspace, id: ConnectionId, segments: &[String], children: Children) {
-    let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) else { return };
-    let children = match children {
-        Children::Databases(names) => return conn.databases = Some(names.into_iter().map(|name| Database { name, schemas: None }).collect()),
-        other => other,
-    };
-    let Some(db) = conn.databases.iter_mut().flatten().find(|d| Some(&d.name) == segments.get(1)) else { return };
-    let children = match children {
-        Children::Schemas(names) => return db.schemas = Some(names.into_iter().map(|name| Schema { name, objects: None }).collect()),
-        other => other,
-    };
-    let Some(schema) = db.schemas.iter_mut().flatten().find(|s| Some(&s.name) == segments.get(2)) else { return };
-    let children = match children {
-        Children::Objects(objects) => return schema.objects = Some(objects),
-        other => other,
-    };
-    let mut objects = schema.objects.iter_mut().flatten();
-    let Some(object) = objects.find(|o| Some(o.kind.as_str()) == segments.get(3).map(String::as_str) && Some(&o.name) == segments.get(4)) else { return };
-    if let Children::Columns(columns) = children {
-        object.columns = Some(columns);
+/// A node of the tree whose children load: connection, database, schema or table-like object.
+enum NodeMut<'a> {
+    Connection(&'a mut Connection),
+    Database(&'a mut Database),
+    Schema(&'a mut Schema),
+    Object(&'a mut DbObject),
+}
+
+/// The node with `segments` in connection `id`'s tree.
+fn locate<'a>(ws: &'a mut Workspace, id: ConnectionId, segments: &[String]) -> Option<NodeMut<'a>> {
+    let conn = ws.connections.iter_mut().find(|c| c.id == id)?;
+    let Some(name) = segments.get(1) else { return Some(NodeMut::Connection(conn)) };
+    let db = conn.databases.iter_mut().flatten().find(|d| &d.name == name)?;
+    let Some(name) = segments.get(2) else { return Some(NodeMut::Database(db)) };
+    let schema = db.schemas.iter_mut().flatten().find(|s| &s.name == name)?;
+    let (Some(kind), Some(name)) = (segments.get(3), segments.get(4)) else { return Some(NodeMut::Schema(schema)) };
+    schema.objects.iter_mut().flatten().find(|o| o.kind.as_str() == kind && &o.name == name).map(NodeMut::Object)
+}
+
+/// Puts `children` in connection `id`'s tree, under the node with `segments`. Returns the key
+/// tails (`name`, or `kind/name` for objects) of that node's children before and after, so the caller can follow what came and went.
+fn store(ws: &mut Workspace, id: ConnectionId, segments: &[String], children: Children) -> (Vec<String>, Vec<String>) {
+    let db_tail = |d: &Database| seg(&d.name);
+    let schema_tail = |s: &Schema| seg(&s.name);
+    let object_tail = |o: &DbObject| format!("{}/{}", o.kind.as_str(), seg(&o.name));
+    match (locate(ws, id, segments), children) {
+        (Some(NodeMut::Connection(conn)), Children::Databases(names)) => {
+            let old = conn.databases.iter().flatten().map(db_tail).collect();
+            let new = names.into_iter().map(|name| Database { name, schemas: None }).collect::<Vec<_>>();
+            (old, conn.databases.insert(new).iter().map(db_tail).collect())
+        }
+        (Some(NodeMut::Database(db)), Children::Schemas(names)) => {
+            let old = db.schemas.iter().flatten().map(schema_tail).collect();
+            let new = names.into_iter().map(|name| Schema { name, objects: None }).collect::<Vec<_>>();
+            (old, db.schemas.insert(new).iter().map(schema_tail).collect())
+        }
+        (Some(NodeMut::Schema(schema)), Children::Objects(objects)) => {
+            let old = schema.objects.iter().flatten().map(object_tail).collect();
+            (old, schema.objects.insert(objects).iter().map(object_tail).collect())
+        }
+        (Some(NodeMut::Object(object)), Children::Columns(columns)) => {
+            object.columns = Some(columns);
+            (Vec::new(), Vec::new())
+        }
+        _ => (Vec::new(), Vec::new()),
     }
 }
 
@@ -810,10 +834,15 @@ impl Explorer {
                 match result {
                     Ok(children) => {
                         this.loads.remove(&key);
-                        this.workspace.update(cx, |ws, cx| {
-                            store(ws, id, &segments, children);
+                        let (old, new) = this.workspace.update(cx, |ws, cx| {
                             cx.notify();
+                            store(ws, id, &segments, children)
                         });
+                        // A child that is gone takes its expansion with it, and its descendants'.
+                        for tail in old.iter().filter(|t| !new.contains(t)) {
+                            let child = format!("{key}/{tail}");
+                            this.expanded.retain(|k| *k != child && !k.starts_with(&format!("{child}/")));
+                        }
                     }
                     Err(reason) => {
                         // A session the server closed is dropped, so Retry opens a new one.
