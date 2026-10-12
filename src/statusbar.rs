@@ -531,6 +531,25 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_tab_without_a_connection_shows_no_connection_or_in_demo_mode_sample_data(cx: &mut gpui_kit::TestAppContext) {
+        const SAMPLE: &str = "Sample data · not from a connection";
+        // (demo, a tab is open, text shown)
+        let cases = [(false, true, Some("No connection")), (true, true, Some(SAMPLE)), (false, false, None), (true, false, None)];
+        for (demo, has_tab, text) in cases {
+            let (mut cx, bar, _) = open_bar(cx, 1200., demo);
+            bar.update(&mut cx, |bar, cx| bar.set_origin(None, has_tab, cx));
+            cx.run_until_parked();
+            let case = format!("demo {demo}, tab {has_tab}");
+            for known in ["No connection", SAMPLE] {
+                assert_eq!(drawn(&mut cx, format!("status-origin:{known}")), text == Some(known), "{case}: {known:?}");
+            }
+            for status in ["status-dot-solid", "status-dot-ring", "auto-commit", "status-button:Connect", "status-button:Retry"] {
+                assert!(!drawn(&mut cx, status.into()), "{case}: no {status}");
+            }
+        }
+    }
+
+    #[gpui_kit::test]
     fn truncated_status_path_shows_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Bounds, Entity, WindowBounds, WindowOptions, point, px, size};
         use crate::{tabs::Origin, theme::tests::hover_shows_truncation_tip};
