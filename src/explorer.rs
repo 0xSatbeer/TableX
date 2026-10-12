@@ -2882,4 +2882,26 @@ mod tests {
             assert_eq!(labels(&explorer, &cx), ["pg", "app", "public", "Tables", "t", "u", "sibling"], "app in flight {app_in_flight}");
         }
     }
+
+    #[gpui_kit::test]
+    fn refresh_while_a_refresh_of_the_same_node_is_running_starts_no_second_load(cx: &mut gpui_kit::TestAppContext) {
+        // (rows refreshed in turn, the loads pending after)
+        let cases: [(&[&str], &[&str]); 5] = [
+            (&["pg", "pg"], &["databases app"]),
+            (&["app", "app"], &["schemas app"]),
+            (&["public", "public"], &["objects app/public"]),
+            (&["t", "t"], &["columns app/public/t"]),
+            (&["public", "t"], &["objects app/public", "columns app/public/t"]),
+        ];
+        for (rows, want) in cases {
+            let (mut cx, explorer, _, fake) = tables_open(cx);
+            expand(&explorer, &mut cx, "t");
+            answer(&fake, "columns app/public/t", Ok(()));
+            cx.run_until_parked();
+            for row in rows {
+                refresh(&explorer, &mut cx, row);
+            }
+            assert_eq!(fake.pending(), want, "{rows:?}");
+        }
+    }
 }
