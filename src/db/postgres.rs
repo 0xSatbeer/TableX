@@ -169,6 +169,9 @@ pub(crate) mod testing {
 
     impl Drop for Scratch {
         fn drop(&mut self) {
+            if self.drop.starts_with("DROP DATABASE") {
+                admin(&self.pg, &format!("ALTER DATABASE {} IS_TEMPLATE false", self.name));
+            }
             admin(&self.pg, &self.drop);
         }
     }
@@ -371,5 +374,41 @@ mod tests {
                 None => assert!(got.is_err_and(|reason| !reason.is_empty()), "{ssl:?} via {server:?}"),
             }
         }
+    }
+
+    /// `pg` opened on `database` instead.
+    fn on(pg: &ConnectionParams, database: &str) -> ConnectionParams {
+        let ConnectionParams::Postgres { host, port, user, password, ssl, .. } = pg.clone() else { unreachable!() };
+        ConnectionParams::Postgres { host, port, user, password, database: database.into(), ssl }
+    }
+
+    fn session(params: &ConnectionParams) -> Session {
+        block_on(Postgres::default().connect(params)).expect("connect")
+    }
+
+    #[test]
+    fn databases_are_sorted_without_templates_or_ones_that_refuse_connections() {
+        let Some(pg) = test_pg() else { return };
+        let (app, closed, template) =
+            (Scratch::new(&pg, "DATABASE", ""), Scratch::new(&pg, "DATABASE", ""), Scratch::new(&pg, "DATABASE", ""));
+        admin(&pg, &format!("ALTER DATABASE {} ALLOW_CONNECTIONS false", closed.name));
+        admin(&pg, &format!("ALTER DATABASE {} IS_TEMPLATE true", template.name));
+        let got = block_on(Postgres::default().databases(&session(&pg))).expect("databases");
+        // Other tests create databases in parallel, so only these names are checked.
+        // (database, listed)
+        let cases = [
+            ("postgres", true),
+            (app.name.as_str(), true),
+            ("template0", false),
+            ("template1", false),
+            (closed.name.as_str(), false),
+            (template.name.as_str(), false),
+        ];
+        for (name, listed) in cases {
+            assert_eq!(got.iter().any(|d| d == name), listed, "{name} in {got:?}");
+        }
+        let mut sorted = got.clone();
+        sorted.sort();
+        assert_eq!(got, sorted, "sorted by name");
     }
 }
