@@ -127,7 +127,7 @@ impl Driver for Postgres {
                          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
                          WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm', 'S') \
                        UNION ALL \
-                         SELECT CASE p.prokind WHEN 'p' THEN 5 ELSE 4 END, p.proname::text, NULL \
+                         SELECT CASE p.prokind WHEN 'p' THEN 5 ELSE 4 END, format('%s(%s)', p.proname, oidvectortypes(p.proargtypes)), NULL \
                          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 \
                        UNION ALL \
                          SELECT 6, t.typname::text, NULL FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
