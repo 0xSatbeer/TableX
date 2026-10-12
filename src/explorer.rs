@@ -3010,4 +3010,25 @@ mod tests {
         assert_eq!(labels(&explorer, &cx), want);
         assert!(!is_expanded(&explorer, &cx, "t"), "tables stay collapsed");
     }
+
+    #[gpui_kit::test]
+    fn star_on_a_connection_that_is_not_connected_connects_first_then_expands_everything(cx: &mut gpui_kit::TestAppContext) {
+        let cases = [ConnectionStatus::Disconnected, ConnectionStatus::Error("connection refused".into())];
+        for status in cases {
+            let conn = crate::model::Connection { status: status.clone(), ..pg(1, "pg", "app") };
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![conn]);
+            explorer.update_in(&mut cx, |e, _, cx| e.expand_all_under(0, cx));
+            cx.run_until_parked();
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connecting, "{status:?}");
+            assert_eq!(fake.pending(), ["connect app"], "{status:?}");
+            fake.resolve("connect app", Ok(crate::db::fake::session("app")));
+            cx.run_until_parked();
+            fake.resolve("databases app", Ok(strings(&["analytics", "app"])));
+            cx.run_until_parked();
+            let calls = answer_all(&fake, &mut cx, "");
+            assert!(calls.iter().all(|c| !c.starts_with("columns")), "{status:?}: no column fetch: {calls:?}");
+            let want: Vec<&str> = ["pg", "analytics"].iter().chain(&EXPANDED_DB).chain(&["app"]).chain(&EXPANDED_DB).copied().collect();
+            assert_eq!(labels(&explorer, &cx), want, "{status:?}");
+        }
+    }
 }
