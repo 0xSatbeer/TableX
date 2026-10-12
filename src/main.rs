@@ -761,23 +761,26 @@ impl Render for Shell {
         let theme = cx.theme();
         let content = match self.tabs.active().map(|t| &t.content) {
             // shortcut: a grid with no columns is a table tab's placeholder; QX-033 fills it with the table's rows
-            Some(TabContent::Grid(grid)) if grid.read(cx).is_blank() => v_flex()
-                .size_full()
-                .child(div().flex_1().child(grid.clone()))
-                .child(
-                    div()
-                        .debug_selector(|| "table-placeholder".into())
-                        .absolute()
-                        .inset_0()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(theme::ui_sm())
-                        .text_color(theme.muted_foreground)
-                        .child("Table data arrives in a later version"),
-                )
-                .relative()
-                .into_any_element(),
+            Some(TabContent::Grid(grid)) if grid.read(cx).is_blank() => {
+                let text = "Table data arrives in a later version";
+                v_flex()
+                    .size_full()
+                    .child(div().flex_1().child(grid.clone()))
+                    .child(
+                        div()
+                            .debug_selector(|| format!("table-placeholder:{text}"))
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(theme::ui_sm())
+                            .text_color(theme.muted_foreground)
+                            .child(text),
+                    )
+                    .relative()
+                    .into_any_element()
+            }
             Some(TabContent::Grid(grid)) => grid.clone().into_any_element(),
             Some(TabContent::Console) => {
                 let production = self.tabs.active().and_then(|t| t.origin.as_ref()).is_some_and(|o| o.production);
