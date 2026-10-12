@@ -2714,4 +2714,36 @@ mod tests {
             assert_eq!(under(&explorer, &cx, "t"), ["Columns", "id", "name"], "{row}");
         }
     }
+
+    #[gpui_kit::test]
+    fn refreshing_a_connection_re_lists_its_databases_and_re_reads_its_expanded_databases_and_schemas(cx: &mut gpui_kit::TestAppContext) {
+        // (databases the refresh lists, rows after)
+        let cases = [
+            (vec!["analytics", "app", "new"], vec!["pg", "analytics", "app", "public", "Tables", "sibling", "new"]),
+            (vec!["app"], vec!["pg", "app", "public", "Tables", "sibling"]),
+        ];
+        for (databases, rows) in cases {
+            let (mut cx, explorer, _, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            connect_answered(&explorer, &fake, &mut cx, &["analytics", "app"]);
+            for step in ["app", "public"] {
+                expand(&explorer, &mut cx, step);
+                for pending in fake.pending() {
+                    answer(&fake, &pending, Ok(()));
+                }
+                cx.run_until_parked();
+            }
+            refresh(&explorer, &mut cx, "pg");
+            assert_eq!(fake.pending(), ["databases app"], "{databases:?}: no new connect, the databases are re-listed");
+            fake.resolve("databases app", Ok(strings(&databases)));
+            cx.run_until_parked();
+            // analytics is not expanded, so it is not read.
+            for call in ["schemas app", "objects app/public"] {
+                assert_eq!(fake.pending(), [call], "{databases:?}");
+                answer(&fake, call, Ok(()));
+                cx.run_until_parked();
+            }
+            assert_eq!(fake.pending(), Vec::<String>::new(), "{databases:?}");
+            assert_eq!(labels(&explorer, &cx), rows, "{databases:?}");
+        }
+    }
 }
