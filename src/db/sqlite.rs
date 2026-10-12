@@ -29,6 +29,8 @@ fn open(params: &ConnectionParams) -> Result<SqliteSession, String> {
     // Without SQLITE_OPEN_CREATE, so a typo never leaves an empty database behind.
     let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = rusqlite::Connection::open_with_flags(path, flags).map_err(|e| e.to_string())?;
+    // Reads the header now, so a bad file fails at connect rather than at the first listing.
+    conn.query_row("PRAGMA schema_version", [], |_| Ok(())).map_err(|e| e.to_string())?;
     let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
     Ok(SqliteSession { name, conn: Mutex::new(conn) })
 }
