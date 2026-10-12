@@ -1882,6 +1882,21 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn expanding_again_while_connecting_starts_no_second_connect(cx: &mut gpui_kit::TestAppContext) {
+        // (keys pressed on the connecting connection's row)
+        let cases = ["right", "left right", "enter", "left enter", "space space"];
+        for keys in cases {
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            expand_connection(&explorer, &mut cx);
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("1", window, cx));
+            cx.simulate_keystrokes(keys);
+            cx.run_until_parked();
+            assert_eq!(fake.pending(), ["connect app"], "{keys}");
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connecting, "{keys}");
+        }
+    }
+
+    #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
         cx.update(gpui_kit::init);
