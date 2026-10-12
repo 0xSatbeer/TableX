@@ -1126,6 +1126,12 @@ impl Grid {
     }
 
     /// Active range as display rows and visible source columns, plus the sort that maps those rows.
+    /// Rows in the whole result, across pages.
+    #[cfg(test)]
+    pub fn row_count(&self) -> usize {
+        self.all.row_count()
+    }
+
     pub fn selection_key(&self) -> SelectionKey {
         let (rows, cols) = self.selection();
         let cols = cols.filter_map(|c| self.col_order.get(c).copied()).filter(|&s| !self.hidden[s]).collect();

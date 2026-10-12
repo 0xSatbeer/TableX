@@ -3004,6 +3004,44 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn opening_a_table_shows_a_placeholder_in_normal_mode_and_mock_rows_in_demo_mode(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        // (mode, rows in the tab's grid, placeholder text shown)
+        let cases = [(super::Mode::Normal, 0, true), (super::Mode::Demo, 1, false)];
+        for (mode, min_rows, placeholder) in cases {
+            let (window, shell) = cx.update(|cx| {
+                gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(mode, crate::mock::workspaces().remove(0), fake(), window, cx))).expect("open test window")
+            });
+            let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+            vcx.run_until_parked();
+            let explorer = shell.read_with(&vcx, |this, _| this.explorer.clone());
+            explorer.update_in(&mut vcx, |e, window, cx| e.reveal("1/app_db/public/table/users", window, cx));
+            vcx.run_until_parked();
+            vcx.simulate_keystrokes("enter");
+            vcx.run_until_parked();
+            let (title, rows) = shell.read_with(&vcx, |this, cx| {
+                let tab = this.tabs.active().expect("a tab opened");
+                let rows = match &tab.content {
+                    super::TabContent::Grid(grid) => grid.read(cx).row_count(),
+                    super::TabContent::Console => panic!("{mode:?}: a grid tab opens"),
+                };
+                (tab.title.to_string(), rows)
+            });
+            assert_eq!(title, "users", "{mode:?}");
+            if placeholder {
+                assert_eq!(rows, 0, "{mode:?}: an empty grid");
+            } else {
+                assert!(rows >= min_rows, "{mode:?}: mock rows");
+            }
+            assert_eq!(vcx.debug_bounds("table-placeholder").is_some(), placeholder, "{mode:?}: Table data arrives in a later version");
+        }
+    }
+
+    #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
         for filter in ["", "zzz"] {
