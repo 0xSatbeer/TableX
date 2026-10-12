@@ -192,4 +192,41 @@ mod tests {
             assert!(objects.iter().all(|o| o.columns.is_empty() && o.row_estimate.is_none()), "{sql}");
         }
     }
+
+    #[test]
+    fn columns_come_in_ordinal_order_with_type_nullability_default_and_pk() {
+        let dir = tempfile::tempdir().unwrap();
+        let col = |name: &str, data_type: &str, nullable, default: Option<&str>, is_pk| Column {
+            name: name.into(),
+            data_type: data_type.into(),
+            nullable,
+            default: default.map(Into::into),
+            is_pk,
+            enum_values: Vec::new(),
+        };
+        // (schema sql, object, columns)
+        let cases = [
+            ("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)", "t", vec![col("id", "INTEGER", true, None, true), col("name", "TEXT", true, None, false)]),
+            (
+                "CREATE TABLE t (a INT, b TEXT NOT NULL DEFAULT 'x', c, PRIMARY KEY (b, a))",
+                "t",
+                vec![col("a", "INT", true, None, true), col("b", "TEXT", false, Some("'x'"), true), col("c", "", true, None, false)],
+            ),
+            (
+                "CREATE TABLE t (price REAL, qty INT, total REAL GENERATED ALWAYS AS (price * qty) VIRTUAL)",
+                "t",
+                vec![col("price", "REAL", true, None, false), col("qty", "INT", true, None, false), col("total", "REAL", true, None, false)],
+            ),
+            (
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, x TEXT); CREATE VIEW v AS SELECT id, x AS y FROM t",
+                "v",
+                vec![col("id", "INTEGER", true, None, false), col("y", "TEXT", true, None, false)],
+            ),
+            ("CREATE TABLE \"we/ird\" (\"a b\" TEXT)", "we/ird", vec![col("a b", "TEXT", true, None, false)]),
+        ];
+        for (i, (sql, object, want)) in cases.into_iter().enumerate() {
+            let session = block_on(Sqlite.connect(&params(&file(dir.path(), &format!("{i}.db"), sql)))).unwrap();
+            assert_eq!(block_on(Sqlite.columns(&session, "main", object)), Ok(want), "{sql}");
+        }
+    }
 }
