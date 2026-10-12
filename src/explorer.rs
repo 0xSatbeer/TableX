@@ -2258,6 +2258,45 @@ mod tests {
         }
     }
 
+    /// Collapses the row labelled `label`.
+    fn collapse(explorer: &gpui_kit::Entity<super::Explorer>, cx: &mut gpui_kit::VisualTestContext, label: &str) {
+        explorer.update_in(cx, |e, _, cx| {
+            let ix = e.nodes.iter().position(|n| n.label.as_ref() == label).unwrap_or_else(|| panic!("{label} row"));
+            e.set_expanded(ix, false, cx);
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn collapsing_during_a_load_still_stores_its_result_and_the_node_stays_collapsed(cx: &mut gpui_kit::TestAppContext) {
+        // (row collapsed while loading, its load, its rows once expanded again with no new load)
+        let cases = [("public", "objects app/public", vec!["Tables"]), ("app", "schemas app", vec!["public", "sibling"]), ("t", "columns app/public/t", vec!["Columns"])];
+        for (row, call, after) in cases {
+            let (mut cx, explorer, _, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            connect_answered(&explorer, &fake, &mut cx, &["app"]);
+            for step in ["app", "public", "Tables", "t"] {
+                expand(&explorer, &mut cx, step);
+                if step == row {
+                    break;
+                }
+                for pending in fake.pending() {
+                    answer(&fake, &pending, Ok(()));
+                }
+                cx.run_until_parked();
+            }
+            assert_eq!(fake.pending(), [call], "{row}");
+            collapse(&explorer, &mut cx, row);
+            answer(&fake, call, Ok(()));
+            cx.run_until_parked();
+            let expanded = explorer.read_with(&cx, |e, _| e.nodes.iter().find(|n| n.label.as_ref() == row).unwrap().expanded);
+            assert!(!expanded, "{row}: stays collapsed");
+            assert_eq!(under(&explorer, &cx, row), Vec::<String>::new(), "{row}: no rows under it");
+            expand(&explorer, &mut cx, row);
+            assert_eq!(fake.pending(), Vec::<String>::new(), "{row}: the stored result shows without a new load");
+            assert_eq!(under(&explorer, &cx, row), after, "{row}");
+        }
+    }
+
     #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
