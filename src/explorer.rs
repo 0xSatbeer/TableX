@@ -48,6 +48,8 @@ enum NodeKind {
 #[derive(Clone, Debug, PartialEq)]
 enum Load {
     Loading,
+    /// Reloading children already shown, which stay until the new ones arrive.
+    Refreshing,
     Failed(String),
 }
 
@@ -55,6 +57,7 @@ enum Load {
 fn load_row(loads: &HashMap<String, Load>, key: &str) -> Option<(String, NodeKind, String)> {
     match loads.get(key)? {
         Load::Loading => Some((format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…".into())),
+        Load::Refreshing => None,
         Load::Failed(reason) => Some((format!("{key}/{ERROR}"), NodeKind::LoadError, format!("Could not load: {reason}"))),
     }
 }
@@ -154,6 +157,18 @@ enum NodeMut<'a> {
     Database(&'a mut Database),
     Schema(&'a mut Schema),
     Object(&'a mut DbObject),
+}
+
+impl NodeMut<'_> {
+    /// Whether its children are loaded.
+    fn loaded(&self) -> bool {
+        match self {
+            NodeMut::Connection(conn) => conn.databases.is_some(),
+            NodeMut::Database(db) => db.schemas.is_some(),
+            NodeMut::Schema(schema) => schema.objects.is_some(),
+            NodeMut::Object(object) => object.columns.is_some(),
+        }
+    }
 }
 
 /// The node with `segments` in connection `id`'s tree.
@@ -809,7 +824,7 @@ impl Explorer {
         let Some(conn) = ws.connections.iter().find(|c| c.id.0.to_string() == segments[0]) else { return };
         let id = conn.id;
         let db = segments.get(1).cloned().unwrap_or_else(|| conn.params.database());
-        if matches!(self.loads.get(&key), Some(Load::Loading)) {
+        if matches!(self.loads.get(&key), Some(Load::Loading | Load::Refreshing)) {
             return;
         }
         // Another Postgres database needs a session of its own, opened with the same settings.
@@ -817,7 +832,8 @@ impl Explorer {
             Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
             None => self.driver.connect(&on_database(&conn.params, &db)),
         };
-        self.loads.insert(key.clone(), Load::Loading);
+        let refreshing = self.workspace.update(cx, |ws, _| locate(ws, id, &segments).is_some_and(|node| node.loaded()));
+        self.loads.insert(key.clone(), if refreshing { Load::Refreshing } else { Load::Loading });
         let generation = self.gens.get(&id).copied().unwrap_or_default();
         let driver = self.driver.clone();
         cx.spawn(async move |this, cx| {
