@@ -19,8 +19,8 @@ use gpui_kit::*;
 
 use std::sync::Arc;
 
-use crate::db::Driver;
-use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
+use crate::db::{Driver, Session};
+use crate::model::{Connection, Database, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
 use crate::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
 use crate::tabs::Origin;
 use crate::{assets, mock, theme};
@@ -80,6 +80,53 @@ fn ancestors(key: &str) -> Vec<&str> {
         }
     }
     out
+}
+
+/// `key`'s segments with their escapes undone: connection id, database, schema, kind, object, ...
+fn segments(key: &str) -> Vec<String> {
+    let mut out = vec![String::new()];
+    let mut chars = key.chars();
+    while let Some(c) = chars.next() {
+        let last = out.last_mut().expect("never empty");
+        match c {
+            '\\' => last.extend(chars.next()),
+            '/' => out.push(String::new()),
+            c => last.push(c),
+        }
+    }
+    out
+}
+
+/// The database a connection's own session is open on: Postgres's from the dialog, SQLite's file name
+/// (what the SQLite driver lists as its one database).
+fn database_of(params: &ConnectionParams) -> String {
+    match params {
+        ConnectionParams::Postgres { database, .. } => database.clone(),
+        ConnectionParams::Sqlite { path } => path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
+    }
+}
+
+/// What a load of one tree level brings back.
+enum Children {
+    Databases(Vec<String>),
+}
+
+/// Starts the load of the children of the node whose key has `segments`.
+fn fetch(driver: &dyn Driver, session: &Session, segments: &[String]) -> futures::future::BoxFuture<'static, Result<Children, String>> {
+    use futures::TryFutureExt as _;
+    match segments {
+        [_] => Box::pin(driver.databases(session).map_ok(Children::Databases)),
+        _ => Box::pin(futures::future::ready(Err("nothing to load".to_string()))),
+    }
+}
+
+/// Puts `children` in connection `id`'s tree, under the node with `segments`.
+fn store(ws: &mut Workspace, id: ConnectionId, segments: &[String], children: Children) {
+    let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) else { return };
+    match (segments, children) {
+        ([_], Children::Databases(names)) => conn.databases = Some(names.into_iter().map(|name| Database { name, schemas: None }).collect()),
+        _ => {}
+    }
 }
 
 /// Whether `key` is connection `id`'s row or one under it. The id segment is a plain number.
@@ -520,8 +567,10 @@ pub struct Explorer {
     /// Schema keys whose objects have "arrived", and those still waiting on mock latency.
     loaded: HashSet<String>,
     loading: HashSet<String>,
-    /// The latest connect started on each connection; only that one may land.
-    connects: HashMap<ConnectionId, usize>,
+    /// Each connection's generation: every connect bumps it, and a result carrying an older one is dropped.
+    gens: HashMap<ConnectionId, u64>,
+    /// Open sessions by connection and database.
+    sessions: HashMap<(ConnectionId, String), Session>,
     /// Mirror of the field's text; non-empty shows only matches and their ancestors.
     filter: String,
     field: Entity<InputState>,
@@ -553,7 +602,7 @@ impl Explorer {
             }
         })
         .detach();
-        Self { field, workspace, driver, expanded, loaded, loading: HashSet::new(), connects: HashMap::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { field, workspace, driver, expanded, loaded, loading: HashSet::new(), gens: HashMap::new(), sessions: HashMap::new(), filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -587,8 +636,8 @@ impl Explorer {
         self.refresh(cx);
     }
 
-    /// Starts a mock connect that lands after `mock::latency()`. Expanding a connection that is
-    /// not connected and Retry on a failed one both come here.
+    /// Connects connection `ci`, then lists its databases. Expanding a connection that is not
+    /// connected and Retry on a failed one both come here.
     fn connect(&mut self, ci: usize, cx: &mut Context<Self>) {
         let started = self.workspace.update(cx, |ws, cx| {
             let conn = &mut ws.connections[ci];
@@ -597,28 +646,76 @@ impl Explorer {
             }
             conn.status = ConnectionStatus::Connecting;
             cx.notify();
-            Some(conn.id)
+            Some((conn.id, conn.params.clone()))
         });
-        let Some(id) = started else { return };
-        let token = self.connects.entry(id).or_default();
-        *token += 1;
-        let token = *token;
-        self.expanded.insert(id.0.to_string());
-        // ponytail: every mock connect succeeds, including retries; drivers report real failures (QX-023)
+        let Some((id, params)) = started else { return };
+        let generation = self.next_gen(id);
+        let key = id.0.to_string();
+        self.expanded.insert(key.clone());
+        let reply = self.driver.connect(&params);
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(mock::latency()).await;
+            let result = reply.await;
             this.update(cx, |this, cx| {
-                if this.connects.get(&id) != Some(&token) {
-                    return; // a later connect owns the result
+                // An edit of the params disconnects it, so Connecting means none happened since this connect began.
+                let connecting = this.workspace.read(cx).connections.iter().any(|c| c.id == id && c.status == ConnectionStatus::Connecting);
+                if this.gens.get(&id) != Some(&generation) || !connecting {
+                    return;
                 }
-                this.workspace.update(cx, |ws, cx| {
-                    // A params edit disconnects it, so Connecting means none happened since this connect began.
-                    let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) else { return };
-                    if conn.status == ConnectionStatus::Connecting {
-                        conn.status = ConnectionStatus::Connected;
+                if let Ok(session) = result {
+                    this.sessions.insert((id, database_of(&params)), session);
+                    this.set_status(id, ConnectionStatus::Connected, cx);
+                    this.load(key, cx);
+                }
+                this.refresh(cx);
+            })
+            .ok();
+        })
+        .detach();
+        self.refresh(cx);
+    }
+
+    /// Bumps connection `id`'s generation, so every result started before is dropped.
+    fn next_gen(&mut self, id: ConnectionId) -> u64 {
+        let generation = self.gens.entry(id).or_default();
+        *generation += 1;
+        *generation
+    }
+
+    fn set_status(&mut self, id: ConnectionId, status: ConnectionStatus, cx: &mut Context<Self>) {
+        self.workspace.update(cx, |ws, cx| {
+            if let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) {
+                conn.status = status;
+                cx.notify();
+            }
+        });
+    }
+
+    /// Loads the children of the node `key` through its database's session.
+    fn load(&mut self, key: String, cx: &mut Context<Self>) {
+        let segments = segments(&key);
+        let ws = self.workspace.read(cx);
+        let Some(conn) = ws.connections.iter().find(|c| c.id.0.to_string() == segments[0]) else { return };
+        let id = conn.id;
+        let db = segments.get(1).cloned().unwrap_or_else(|| database_of(&conn.params));
+        let Some(session) = self.sessions.get(&(id, db)).cloned() else { return };
+        if !self.loading.insert(key.clone()) {
+            return;
+        }
+        let generation = self.gens.get(&id).copied().unwrap_or_default();
+        let reply = fetch(&*self.driver, &session, &segments);
+        cx.spawn(async move |this, cx| {
+            let result = reply.await;
+            this.update(cx, |this, cx| {
+                if this.gens.get(&id) != Some(&generation) {
+                    return;
+                }
+                this.loading.remove(&key);
+                if let Ok(children) = result {
+                    this.workspace.update(cx, |ws, cx| {
+                        store(ws, id, &segments, children);
                         cx.notify();
-                    }
-                });
+                    });
+                }
                 this.refresh(cx);
             })
             .ok();

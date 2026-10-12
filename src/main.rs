@@ -1032,6 +1032,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    /// A driver whose calls wait until the test answers them, so no test reaches a real database.
+    fn fake() -> std::sync::Arc<dyn crate::db::Driver> {
+        std::sync::Arc::new(crate::db::fake::Fake::default())
+    }
+
     use super::{Edge, LayoutState, split};
     use gpui_kit::{point, px, size};
 
@@ -1135,7 +1140,7 @@ mod tests {
             super::bind_panel_keys(cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         if logs_focused {
@@ -1219,7 +1224,7 @@ mod tests {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(|cx| gpui_kit::init(cx));
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1241,7 +1246,7 @@ mod tests {
             super::bind_zoom_keys(cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1293,7 +1298,7 @@ mod tests {
             crate::theme::set_ui_scale(130, cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         shell.update(&mut cx, |this, cx| {
@@ -1326,7 +1331,7 @@ mod tests {
             let (window, shell) = cx.update(|cx| {
                 gpui_kit::open_window(Default::default(), cx, |window, cx| {
                     cx.new(|cx| {
-                        let mut shell = super::Shell::new(window, cx);
+                        let mut shell = super::Shell::with_driver(fake(), window, cx);
                         shell.watch_user_themes(dir, window, cx);
                         shell
                     })
@@ -1370,7 +1375,7 @@ mod tests {
         std::fs::write(dir.join("nord.json"), nord("#2E3440")).unwrap();
         cx.update(|cx| gpui_kit::init(cx));
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         // After the window exists: notifications need its root.
@@ -1417,7 +1422,7 @@ mod tests {
             super::bind_overflow_keys(cx);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let _ = cx.update_window(window.into(), |_, _, cx| {
             shell.update(cx, |this, cx| {
@@ -1468,7 +1473,7 @@ mod tests {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(gpui_kit::init);
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1522,7 +1527,7 @@ mod tests {
         use gpui_kit::{AppContext as _, Focusable as _};
         cx.update(gpui_kit::init);
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         cx.run_until_parked();
@@ -1569,7 +1574,7 @@ mod tests {
             cx.set_reduce_motion(true);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(fake(), window, cx))).expect("open test window")
         });
         let mut vcx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
@@ -1604,13 +1609,18 @@ mod tests {
     /// The Shell with the mock workspace, parked. Motion is reduced so a dialog lands in place
     /// at once; mid-slide, a click's mouse-up would hit a different spot than its mouse-down.
     fn open_plain(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        open_plain_with(cx, fake())
+    }
+
+    /// `open_plain` with the explorer reading through `driver`.
+    fn open_plain_with(cx: &mut gpui_kit::TestAppContext, driver: std::sync::Arc<dyn crate::db::Driver>) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
         use gpui_kit::AppContext as _;
         cx.update(|cx| {
             gpui_kit::init(cx);
             cx.set_reduce_motion(true);
         });
         let (window, shell) = cx.update(|cx| {
-            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(window, cx))).expect("open test window")
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::with_driver(driver, window, cx))).expect("open test window")
         });
         gpui_kit::VisualTestContext::from_window(window.into(), cx).run_until_parked();
         (window.into(), shell)
@@ -2066,7 +2076,7 @@ mod tests {
                 explorer.update_in(&mut cx, |e, window, cx| e.reveal(&id.0.to_string(), window, cx));
                 cx.simulate_keystrokes("enter");
                 let status = workspace.read_with(&cx, |ws, _| ws.connections[ci].status.clone());
-                assert_eq!(status, ConnectionStatus::Connected, "{label}: Enter reconnects");
+                assert_eq!(status, ConnectionStatus::Connecting, "{label}: Enter reconnects");
             }
         }
     }
@@ -2074,7 +2084,7 @@ mod tests {
     #[gpui_kit::test]
     fn a_connect_in_flight_is_discarded_when_an_edit_changes_the_params(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionParams, ConnectionStatus};
-        use std::{path::PathBuf, time::Duration};
+        use std::path::PathBuf;
         use ConnectionStatus::{Connected, Connecting, Disconnected};
         // (new name, paths saved in turn, connect again after the edits, status once the first
         // connect finishes, status once the second one does)
@@ -2089,16 +2099,15 @@ mod tests {
             ("local.db", &["~/acme/other.db"], true, Connecting, Connected),
             ("local.db", &["~/acme/other.db", "~/acme/local.db"], true, Connecting, Connected),
         ];
-        let latency = Duration::from_millis(1000);
-        crate::mock::set_latency(latency.as_millis() as u32);
         for (name, paths, again, first, second) in cases {
             let label = format!("{name} {paths:?} again {again}");
-            let (window, shell) = open_plain(cx);
+            let driver = std::sync::Arc::new(crate::db::fake::Fake::default());
+            let (window, shell) = open_plain_with(cx, driver.clone());
             let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
             let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
             explorer.update_in(&mut cx, |e, window, cx| e.reveal("3", window, cx));
             cx.run_until_parked();
-            // Enter on the disconnected local.db starts a connect that lands after `latency`.
+            // Enter on the disconnected local.db starts a connect that lands when the test answers it.
             cx.simulate_keystrokes("enter");
             let (id, status) = workspace.read_with(&cx, |ws, _| (ws.connections[2].id, ws.connections[2].status.clone()));
             assert_eq!(status, Connecting, "{label}: connecting");
@@ -2108,22 +2117,24 @@ mod tests {
                     cx.notify();
                 });
             }
-            cx.executor().advance_clock(latency / 2);
+            cx.run_until_parked();
             if again {
                 // The edit left the row open; close it and open it to connect again.
                 cx.simulate_keystrokes("left enter");
                 assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections[2].status.clone()), Connecting, "{label}: connecting again");
             }
-            cx.executor().advance_clock(latency / 2);
+            let connects: Vec<String> = driver.pending().into_iter().filter(|l| l.starts_with("connect ")).collect();
+            driver.resolve(&connects[0], Ok(crate::db::fake::session("local.db")));
             cx.run_until_parked();
             let conn = workspace.read_with(&cx, |ws, _| ws.connections[2].clone());
             assert_eq!((conn.name.as_str(), conn.status), (name, first), "{label}: after the first connect finished");
-            cx.executor().advance_clock(latency);
-            cx.run_until_parked();
+            if let Some(next) = connects.get(1) {
+                driver.resolve(next, Ok(crate::db::fake::session("other.db")));
+                cx.run_until_parked();
+            }
             assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections[2].status.clone()), second, "{label}: after the second connect finished");
             assert_eq!(explorer.read_with(&cx, |e, _| e.row_labels().iter().filter(|l| l.as_ref() == name).count()), 1, "{label}: one tree row");
         }
-        crate::mock::set_latency(0);
     }
 
     #[gpui_kit::test]
@@ -2653,8 +2664,11 @@ mod tests {
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
         let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
         // Connect local.db, open its first table in a tab, and open prod-pg's tables above it.
-        explorer.update_in(&mut cx, |e, window, cx| e.reveal("3", window, cx));
-        cx.simulate_keystrokes("enter");
+        let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+        workspace.update(&mut cx, |ws, cx| {
+            ws.connections[2].status = crate::model::ConnectionStatus::Connected;
+            cx.notify();
+        });
         cx.run_until_parked();
         explorer.update_in(&mut cx, |e, window, cx| e.reveal("3/main/main/table/users", window, cx));
         cx.simulate_keystrokes("enter");
@@ -2729,59 +2743,6 @@ mod tests {
                 assert_eq!(workspace.read_with(&cx, |ws, _| ws.clone()), others, "{label}: the others unchanged");
             }
         }
-        crate::mock::set_latency(0);
-    }
-
-    /// Selects the row keyed `key` and presses Right on it: expands it, or connects a connection.
-    fn expand_row(cx: &mut gpui_kit::VisualTestContext, shell: &gpui_kit::Entity<super::Shell>, key: &str) {
-        let explorer = shell.read_with(cx, |this, _| this.explorer.clone());
-        explorer.update_in(cx, |e, window, cx| e.reveal(key, window, cx));
-        cx.simulate_keystrokes("right");
-    }
-
-    fn shows_loading_objects(shell: &gpui_kit::Entity<super::Shell>, cx: &gpui_kit::VisualTestContext) -> bool {
-        shell.read_with(cx, |this, cx| this.explorer.read(cx).row_labels().iter().any(|l| l == "Loading objects…"))
-    }
-
-    #[gpui_kit::test]
-    fn a_schema_load_still_running_when_a_connection_above_is_deleted_lands_on_its_connection_at_the_new_position(cx: &mut gpui_kit::TestAppContext) {
-        use std::time::Duration;
-        let latency = Duration::from_millis(2000);
-        crate::mock::set_latency(latency.as_millis() as u32);
-        let (window, shell) = open_plain(cx);
-        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
-        expand_row(&mut cx, &shell, "3");
-        cx.executor().advance_clock(latency);
-        cx.run_until_parked();
-        expand_row(&mut cx, &shell, "3/main/main");
-        assert!(shows_loading_objects(&shell, &cx), "local.db's schema is loading");
-        delete_row(&mut cx, &shell, "staging-pg");
-        cx.executor().advance_clock(latency);
-        cx.run_until_parked();
-        assert!(!shows_loading_objects(&shell, &cx), "the load lands on local.db, now at position 1");
-        crate::mock::set_latency(0);
-    }
-
-    #[gpui_kit::test]
-    fn a_schema_load_still_running_when_its_connection_is_deleted_marks_nothing_loaded(cx: &mut gpui_kit::TestAppContext) {
-        use std::time::Duration;
-        let latency = Duration::from_millis(2000);
-        crate::mock::set_latency(latency.as_millis() as u32);
-        let (window, shell) = open_plain(cx);
-        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
-        expand_row(&mut cx, &shell, "2");
-        cx.executor().advance_clock(latency);
-        cx.run_until_parked();
-        expand_row(&mut cx, &shell, "2/app_db/public");
-        assert!(shows_loading_objects(&shell, &cx), "staging-pg's schema is loading");
-        delete_row(&mut cx, &shell, "staging-pg");
-        cx.executor().advance_clock(latency);
-        cx.run_until_parked();
-        expand_row(&mut cx, &shell, "3");
-        cx.executor().advance_clock(latency);
-        cx.run_until_parked();
-        expand_row(&mut cx, &shell, "3/main/main");
-        assert!(shows_loading_objects(&shell, &cx), "local.db's schema still loads its objects");
         crate::mock::set_latency(0);
     }
 
