@@ -2613,4 +2613,34 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(under(&explorer, &cx, "Tables"), ["t", "t2", "u"]);
     }
+
+    /// Whether the row labelled `label` is expanded.
+    fn is_expanded(explorer: &gpui_kit::Entity<super::Explorer>, cx: &gpui_kit::VisualTestContext, label: &str) -> bool {
+        explorer.read_with(cx, |e, _| e.nodes.iter().find(|n| n.label.as_ref() == label).unwrap_or_else(|| panic!("{label} row")).expanded)
+    }
+
+    #[gpui_kit::test]
+    fn refreshing_a_schema_after_a_table_was_dropped_removes_it_and_forgets_its_expansion(cx: &mut gpui_kit::TestAppContext) {
+        // (t expanded before it was dropped)
+        for t_open in [true, false] {
+            let (mut cx, explorer, _, fake) = tables_open(cx);
+            if t_open {
+                expand(&explorer, &mut cx, "t");
+                answer(&fake, "columns app/public/t", Ok(()));
+                cx.run_until_parked();
+            }
+            refresh(&explorer, &mut cx, "public");
+            fake.resolve("objects app/public", Ok(vec![table("u")]));
+            cx.run_until_parked();
+            assert_eq!(under(&explorer, &cx, "Tables"), ["u"], "t open {t_open}: t gone");
+
+            // t created again: it comes back collapsed, with no column load.
+            refresh(&explorer, &mut cx, "public");
+            fake.resolve("objects app/public", Ok(vec![table("t"), table("u")]));
+            cx.run_until_parked();
+            assert_eq!(under(&explorer, &cx, "Tables"), ["t", "u"], "t open {t_open}");
+            assert!(!is_expanded(&explorer, &cx, "t"), "t open {t_open}: its expansion is forgotten");
+            assert_eq!(fake.pending(), Vec::<String>::new(), "t open {t_open}");
+        }
+    }
 }
