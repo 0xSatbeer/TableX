@@ -764,4 +764,31 @@ mod tests {
             assert_eq!(columns_of(&pg, s, object).0, Ok(want), "{object}");
         }
     }
+
+    #[test]
+    fn enum_columns_carry_their_labels_in_declared_order_in_one_statement() {
+        let Some(pg) = test_pg() else { return };
+        let schema = Scratch::new(&pg, "SCHEMA", "");
+        admin(&pg, &format!(
+            "SET search_path = {};
+             CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+             CREATE TYPE grade AS ENUM ('b', 'a');
+             ALTER TYPE grade ADD VALUE 'ab' BEFORE 'a';
+             CREATE TABLE t (id int, m mood, g grade, ms mood[], label text);
+             CREATE VIEW v AS SELECT m FROM t;",
+            schema.name
+        ));
+        let labels = |l: &[&str]| l.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        // (object, enum_values per column)
+        let cases = [
+            ("t", vec![vec![], labels(&["sad", "ok", "happy"]), labels(&["b", "ab", "a"]), vec![], vec![]]),
+            ("v", vec![labels(&["sad", "ok", "happy"])]),
+        ];
+        for (object, want) in cases {
+            let (columns, statements) = columns_of(&pg, &schema.name, object);
+            let got: Vec<_> = columns.expect("columns").into_iter().map(|c| c.enum_values).collect();
+            assert_eq!(got, want, "{object}");
+            assert_eq!(statements, 1, "{object}");
+        }
+    }
 }
