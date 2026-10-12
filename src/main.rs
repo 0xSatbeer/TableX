@@ -1014,18 +1014,25 @@ fn open_shell(mode: Mode, options: WindowOptions, user_themes: Option<std::path:
     })
 }
 
+/// Sets the mock round-trip time for every connect and load from `value`
+/// (`QUERYX_MOCK_LATENCY_MS`), to see loading states.
+fn apply_mock_latency(mode: Mode, value: Option<String>) {
+    let _ = mode;
+    if let Some(ms) = value {
+        match ms.parse() {
+            Ok(ms) => mock::set_latency(ms),
+            Err(_) => eprintln!("QUERYX_MOCK_LATENCY_MS={ms:?} is not a whole number of milliseconds; using 0"),
+        }
+    }
+}
+
 fn main() {
     gpui_kit::application()
         .with_assets(assets::Assets)
         .run(|cx| {
             gpui_kit::init(cx);
-            // Mock round-trip time for every fake connect, load and query, to see loading states.
-            if let Ok(ms) = std::env::var("QUERYX_MOCK_LATENCY_MS") {
-                match ms.parse() {
-                    Ok(ms) => mock::set_latency(ms),
-                    Err(_) => eprintln!("QUERYX_MOCK_LATENCY_MS={ms:?} is not a whole number of milliseconds; using 0"),
-                }
-            }
+            let mode = Mode::from_args(std::env::args().skip(1));
+            apply_mock_latency(mode, std::env::var("QUERYX_MOCK_LATENCY_MS").ok());
             theme::init(cx);
             bind_overflow_keys(cx);
             bind_panel_keys(cx);
@@ -1051,7 +1058,7 @@ fn main() {
             };
             // No home or config dir: built-in themes only.
             let user_themes = theme::UserThemeDir::resolve(|k| std::env::var_os(k));
-            open_shell(Mode::from_args(std::env::args().skip(1)), options, user_themes.map(|t| t.dir), cx).expect("open window");
+            open_shell(mode, options, user_themes.map(|t| t.dir), cx).expect("open window");
             cx.activate(true);
         });
 }
@@ -1102,6 +1109,30 @@ mod tests {
         for (args, want) in cases {
             assert_eq!(Mode::from_args(args.iter().map(|a| a.to_string())), want, "{args:?}");
         }
+    }
+
+    #[test]
+    fn the_mock_latency_variable_applies_in_demo_mode_only() {
+        use super::Mode::{self, *};
+        // (mode, QUERYX_MOCK_LATENCY_MS, latency in ms)
+        let cases: [(Mode, Option<&str>, u64); 10] = [
+            (Demo, Some("500"), 500),
+            (Normal, Some("500"), 0),
+            (Demo, None, 0),
+            (Normal, None, 0),
+            (Demo, Some("0"), 0),
+            (Demo, Some("2000"), 2000),
+            (Demo, Some("5000"), 2000), // capped
+            (Demo, Some("abc"), 0),
+            (Demo, Some(""), 0),
+            (Demo, Some("-5"), 0),
+        ];
+        for (mode, value, want) in cases {
+            crate::mock::set_latency(0);
+            super::apply_mock_latency(mode, value.map(String::from));
+            assert_eq!(crate::mock::latency(), std::time::Duration::from_millis(want), "{mode:?} {value:?}");
+        }
+        crate::mock::set_latency(0);
     }
 
     #[test]
