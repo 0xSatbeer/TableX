@@ -75,14 +75,6 @@ impl Fake {
     }
 }
 
-/// The database a fake session or params name: Postgres's database, or SQLite's file name.
-fn database(params: &ConnectionParams) -> String {
-    match params {
-        ConnectionParams::Postgres { database, .. } => database.clone(),
-        ConnectionParams::Sqlite { path } => path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
-    }
-}
-
 fn on(session: &Session) -> &str {
     match session {
         Session::Fake(fake) => &fake.database,
@@ -92,11 +84,11 @@ fn on(session: &Session) -> &str {
 
 impl Driver for Fake {
     fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
-        self.call(format!("connect {}", database(params)))
+        self.call(format!("connect {}", params.database()))
     }
 
     fn test(&self, params: &ConnectionParams) -> Reply<()> {
-        self.call(format!("test {}", database(params)))
+        self.call(format!("test {}", params.database()))
     }
 
     fn databases(&self, session: &Session) -> Reply<Vec<String>> {

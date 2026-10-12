@@ -114,19 +114,10 @@ fn segments(key: &str) -> Vec<String> {
     out
 }
 
-/// The database a connection's own session is open on: Postgres's from the dialog, SQLite's file name
-/// (what the SQLite driver lists as its one database).
-fn database_of(params: &ConnectionParams) -> String {
-    match params {
-        ConnectionParams::Postgres { database, .. } => database.clone(),
-        ConnectionParams::Sqlite { path } => path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
-    }
-}
-
 /// `params` pointed at database `db`: a Postgres server's other database, or the SQLite file itself.
 fn on_database(params: &ConnectionParams, db: &str) -> ConnectionParams {
     match params {
-        ConnectionParams::Postgres { .. } if database_of(params) != db => {
+        ConnectionParams::Postgres { .. } if params.database() != db => {
             let mut params = params.clone();
             if let ConnectionParams::Postgres { database, .. } = &mut params {
                 *database = db.to_string();
@@ -728,7 +719,7 @@ impl Explorer {
                 }
                 match result {
                     Ok(session) => {
-                        this.sessions.insert((id, database_of(&params)), session);
+                        this.sessions.insert((id, params.database()), session);
                         this.set_status(id, ConnectionStatus::Connected, cx);
                         this.load(key, cx);
                     }
@@ -778,7 +769,7 @@ impl Explorer {
         let ws = self.workspace.read(cx);
         let Some(conn) = ws.connections.iter().find(|c| c.id.0.to_string() == segments[0]) else { return };
         let id = conn.id;
-        let db = segments.get(1).cloned().unwrap_or_else(|| database_of(&conn.params));
+        let db = segments.get(1).cloned().unwrap_or_else(|| conn.params.database());
         // Another Postgres database needs a session of its own, opened with the same settings.
         let open: crate::db::Reply<Session> = match self.sessions.get(&(id, db.clone())) {
             Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),

@@ -91,6 +91,16 @@ pub enum ConnectionParams {
     Sqlite { path: PathBuf },
 }
 
+impl ConnectionParams {
+    /// The database a connect opens: Postgres's from the dialog, SQLite's file name.
+    pub fn database(&self) -> String {
+        match self {
+            Self::Postgres { database, .. } => database.clone(),
+            Self::Sqlite { path } => path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Connection {
     pub id: ConnectionId,
