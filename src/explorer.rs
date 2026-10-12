@@ -2035,6 +2035,37 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_connection_collapsed_and_expanded_again_while_connecting_opens_when_the_connect_lands(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::session;
+        // (expanded again before the connect lands, the connect's answer, open after, rows after)
+        let cases: [(bool, Result<(), &str>, bool, &[&str]); 4] = [
+            (true, Ok(()), true, &["pg", "app"]),
+            (true, Err("boom"), true, &["pg", "Could not connect: boom"]),
+            (false, Ok(()), false, &["pg"]),
+            (false, Err("boom"), false, &["pg", "Could not connect: boom"]),
+        ];
+        for (again, answer, open, rows) in cases {
+            let label = format!("again {again} {answer:?}");
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            expand_connection(&explorer, &mut cx);
+            collapse(&explorer, &mut cx, "pg");
+            if again {
+                expand(&explorer, &mut cx, "pg");
+            }
+            assert_eq!(fake.pending(), ["connect app"], "{label}: no second connect");
+            fake.resolve("connect app", answer.map(|()| session("app")).map_err(String::from));
+            cx.run_until_parked();
+            if answer.is_ok() {
+                assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connected, "{label}");
+                fake.resolve("databases app", Ok(strings(&["app"])));
+                cx.run_until_parked();
+            }
+            assert_eq!(explorer.read_with(&cx, |e, _| e.nodes[0].expanded), open, "{label}: open");
+            assert_eq!(labels(&explorer, &cx), rows, "{label}: rows");
+        }
+    }
+
+    #[gpui_kit::test]
     fn a_failed_connect_shows_could_not_connect_in_the_error_row_and_the_dot_tooltip(cx: &mut gpui_kit::TestAppContext) {
         // (reason the connect fails with)
         let cases = ["password authentication failed for user \"u\"", "timeout expired after 10 s", "No file at /x/local.db"];
