@@ -268,4 +268,14 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn connect_to_a_missing_database_names_it() {
+        let Some(pg) = test_pg() else { return };
+        let missing = super::testing::unique("qx_missing");
+        let ConnectionParams::Postgres { host, port, user, password, ssl, .. } = pg else { unreachable!() };
+        let params = ConnectionParams::Postgres { host, port, user, password, database: missing.clone(), ssl };
+        let got = block_on(Postgres::default().connect(&params)).map(drop);
+        assert_eq!(got, Err(format!("database \"{missing}\" does not exist")));
+    }
 }
