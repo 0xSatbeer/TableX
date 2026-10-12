@@ -1980,6 +1980,36 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_connect_that_failed_on_expand_connects_again_on_enter_or_right_on_its_open_row(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::session;
+        use ConnectionStatus::*;
+        // (key on the failed, still open connection row, the new connect's answer, status after)
+        let cases = [
+            ("enter", Ok(()), Connected),
+            ("enter", Err("new"), Error("new".into())),
+            ("enter", Err("boom"), Error("boom".into())),
+            ("right", Ok(()), Connected),
+            ("right", Err("new"), Error("new".into())),
+        ];
+        for (key, answer, want) in cases {
+            let label = format!("{key} {answer:?}");
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            expand_connection(&explorer, &mut cx);
+            fake.resolve::<crate::db::Session>("connect app", Err("boom".into()));
+            cx.run_until_parked();
+            explorer.update_in(&mut cx, |e, window, cx| e.reveal("1", window, cx));
+            assert!(explorer.read_with(&cx, |e, _| e.nodes[0].expanded), "{label}: the failed row is open");
+            cx.simulate_keystrokes(key);
+            cx.run_until_parked();
+            assert_eq!(status_of(&workspace, &cx), Connecting, "{label}");
+            assert_eq!(fake.pending(), ["connect app"], "{label}");
+            fake.resolve("connect app", answer.map(|()| session("app")).map_err(String::from));
+            cx.run_until_parked();
+            assert_eq!(status_of(&workspace, &cx), want, "{label}");
+        }
+    }
+
+    #[gpui_kit::test]
     fn expanding_again_while_connecting_starts_no_second_connect(cx: &mut gpui_kit::TestAppContext) {
         // (keys pressed on the connecting connection's row)
         let cases = ["right", "left right", "enter", "left enter", "space space"];
