@@ -910,8 +910,11 @@ impl Explorer {
 
     /// Refresh in row `ix`'s menu: re-reads that node's subtree.
     fn refresh_row(&mut self, ix: usize, cx: &mut Context<Self>) {
-        let Some(key) = self.nodes.get(ix).map(|n| n.key.clone()) else { return };
-        self.load(key, cx);
+        let Some(node) = self.nodes.get(ix) else { return };
+        if matches!(node.kind, NodeKind::Connection(_)) && self.workspace.read(cx).connections[node.conn].status != ConnectionStatus::Connected {
+            return self.connect(node.conn, cx);
+        }
+        self.load(node.key.clone(), cx);
     }
 
     /// Opens every ancestor of `key`, selects it and focuses the tree.
