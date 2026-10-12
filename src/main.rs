@@ -2251,6 +2251,27 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn the_edit_dialog_prefills_the_saved_password_masked_and_test_uses_it(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::{ConnectionParams, Secret};
+        let fake = std::sync::Arc::new(crate::db::fake::Fake::default());
+        let (window, shell) = open_plain_with(cx, fake.clone());
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+        workspace.update(&mut cx, |ws, _| {
+            let conn = ws.connections.iter_mut().find(|c| c.name == "prod-pg").unwrap();
+            let ConnectionParams::Postgres { password, .. } = &mut conn.params else { panic!("prod-pg is Postgres") };
+            *password = Some(Secret::new("s3cret"));
+        });
+        let dialog = open_edit_dialog(&mut cx, &shell, "prod-pg");
+        assert_eq!(dialog.read_with(&cx, |d, cx| d.form(cx).password), "s3cret", "pre-filled");
+        assert!(dialog.read_with(&cx, |d, cx| d.password.read(cx).presentation().is_masked()), "masked");
+        click(&mut cx, "dialog-test");
+        let tested = fake.tested();
+        assert_eq!(tested.len(), 1, "Test went through the driver");
+        assert!(matches!(&tested[0], ConnectionParams::Postgres { password: Some(p), .. } if p.expose() == "s3cret"), "{tested:?}");
+    }
+
+    #[gpui_kit::test]
     fn test_connection_is_enabled_only_while_the_connection_fields_are_valid(cx: &mut gpui_kit::TestAppContext) {
         // (edits, Test connection enabled)
         let cases: Vec<(Vec<(&str, &str)>, bool)> = vec![
