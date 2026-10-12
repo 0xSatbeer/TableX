@@ -2746,4 +2746,21 @@ mod tests {
             assert_eq!(labels(&explorer, &cx), rows, "{databases:?}");
         }
     }
+
+    #[gpui_kit::test]
+    fn old_children_stay_visible_while_a_refresh_is_in_flight(cx: &mut gpui_kit::TestAppContext) {
+        // (row refreshed, its load)
+        let cases = [("pg", "databases app"), ("app", "schemas app"), ("public", "objects app/public"), ("t", "columns app/public/t")];
+        for (row, call) in cases {
+            let (mut cx, explorer, _, fake) = tables_open(cx);
+            expand(&explorer, &mut cx, "t");
+            answer(&fake, "columns app/public/t", Ok(()));
+            cx.run_until_parked();
+            expand(&explorer, &mut cx, "Columns");
+            let before = under(&explorer, &cx, row);
+            refresh(&explorer, &mut cx, row);
+            assert_eq!(fake.pending(), [call], "{row}");
+            assert_eq!(under(&explorer, &cx, row), before, "{row}: the old children stay until the new ones arrive");
+        }
+    }
 }
