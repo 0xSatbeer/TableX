@@ -2,11 +2,12 @@
 //! prefix-summed widths against the horizontal scroll offset.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, menu::ContextMenuExt as _, tooltip::Tooltip, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Disableable as _, Sizable as _, button::{Button, ButtonVariants as _}, h_flex, input::{Input, InputEvent, InputState}, menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem}, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -51,6 +52,52 @@ impl GridSource for BigEvents {
     fn row(&self, ix: usize) -> Row {
         mock::big_events_row(ix)
     }
+}
+
+/// One page of `all`: rows `start..start + len`.
+struct Page {
+    all: Rc<dyn GridSource>,
+    start: usize,
+    len: usize,
+}
+
+impl Page {
+    fn new(all: Rc<dyn GridSource>, page: usize, size: usize) -> Self {
+        let start = (page * size).min(all.row_count());
+        Self { len: size.min(all.row_count() - start), all, start }
+    }
+}
+
+impl GridSource for Page {
+    fn row_count(&self) -> usize {
+        self.len
+    }
+    fn columns(&self) -> &[ColumnMeta] {
+        self.all.columns()
+    }
+    fn row(&self, ix: usize) -> Row {
+        self.all.row(self.start + ix)
+    }
+}
+
+const PAGE_SIZES: [usize; 5] = [100, 500, 1_000, 5_000, 10_000];
+
+/// Pages needed for `rows` at `size` per page; an empty result still has one.
+fn page_count(rows: usize, size: usize) -> usize {
+    rows.div_ceil(size).max(1)
+}
+
+/// `1234567` as "1,234,567".
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 const DEFAULT_WIDTH: Pixels = px(160.);
@@ -279,7 +326,78 @@ fn copy_in_list<R: AsRef<[Value]>>(ranges: &[Block], order: &[usize], hidden: &[
     sql_in_list(&[], &firsts)
 }
 
-actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns]);
+/// Fields of TSV text as `tsv` writes it: quoted fields may hold tabs, newlines and doubled quotes.
+fn parse_tsv(text: &str) -> Vec<Vec<String>> {
+    let (mut rows, mut row, mut field) = (Vec::new(), Vec::new(), String::new());
+    let (mut quoted, mut chars) = (false, text.chars().peekable());
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            '"' if quoted => quoted = false,
+            '"' if field.is_empty() => quoted = true,
+            '\t' if !quoted => row.push(std::mem::take(&mut field)),
+            '\r' if !quoted && chars.peek() == Some(&'\n') => {}
+            '\n' if !quoted => {
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+            }
+            ch => field.push(ch),
+        }
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        rows.push(row);
+    }
+    rows
+}
+
+/// A typed or pasted cell as a value of column type `data_type`. Empty is NULL, as `tsv` copies it.
+// shortcut: timestamps, bytes and arrays stay text; parse them when edits are submitted to a driver.
+fn parse_value(text: &str, data_type: &str) -> Value {
+    let ty = data_type.to_lowercase();
+    let number = is_numeric_type(&ty);
+    match text {
+        "" => Value::Null,
+        s if number && (ty.starts_with("int") || ty.starts_with("bigint") || ty.starts_with("smallint")) => s.parse().map_or_else(|_| Value::Text(s.into()), Value::Int),
+        s if number => s.parse().map_or_else(|_| Value::Text(s.into()), Value::Float),
+        s if ty.starts_with("bool") => match s.to_lowercase().as_str() {
+            "true" | "t" => Value::Bool(true),
+            "false" | "f" => Value::Bool(false),
+            _ => Value::Text(s.into()),
+        },
+        s if ty.starts_with("json") => Value::Json(s.into()),
+        s => Value::Text(s.into()),
+    }
+}
+
+/// Every cell of `ranges` in a visible column, once, as (display row, display column).
+fn fill_targets(ranges: &[Block], hidden: &[bool]) -> Vec<(usize, usize)> {
+    let mut cells: Vec<_> = ranges.iter().flat_map(|(rs, cs)| rs.clone().flat_map(move |r| cs.clone().map(move |c| (r, c)))).filter(|&(_, c)| !hidden[c]).collect();
+    cells.sort_unstable();
+    cells.dedup();
+    cells
+}
+
+/// Where a pasted `block` lands: one value fills every selected cell, a bigger block goes from
+/// `top_left` over visible columns, clipped at the last row and column.
+fn paste_targets(block: &[Vec<String>], ranges: &[Block], top_left: (usize, usize), rows: usize, hidden: &[bool]) -> Vec<((usize, usize), String)> {
+    if let [row] = block
+        && let [value] = row.as_slice()
+    {
+        return fill_targets(ranges, hidden).into_iter().map(|cell| (cell, value.clone())).collect();
+    }
+    let cols: Vec<usize> = (top_left.1..hidden.len()).filter(|&c| !hidden[c]).collect();
+    block
+        .iter()
+        .zip(top_left.0..rows)
+        .flat_map(|(fields, r)| fields.iter().zip(&cols).map(move |(v, &c)| ((r, c), v.clone())))
+        .collect()
+}
+
+actions!(grid, [CopyCsv, CopyJson, CopyMarkdown, CopySqlInsert, CopySqlInList, HideColumn, ShowAllColumns, Paste, SetValue]);
 
 fn csv(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
     let field = |s: String| if s.contains([',', '\n', '\r', '"']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s };
@@ -516,7 +634,11 @@ impl Render for DragColumn {
 }
 
 pub struct Grid {
-    source: Rc<dyn GridSource>,
+    /// The current page of `all`; everything but paging works on it.
+    source: Rc<Page>,
+    all: Rc<dyn GridSource>,
+    page: usize,
+    page_size: usize,
     widths: Vec<Pixels>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
@@ -530,8 +652,6 @@ pub struct Grid {
     order: Option<Vec<usize>>,
     /// Earlier ranges kept by Ctrl+click, as (rows, cols). Copy uses only the active range.
     extra: Vec<(Range<usize>, Range<usize>)>,
-    /// Value inspector for the head cell, toggled by Shift+Enter or double-click.
-    inspecting: bool,
     /// Transposed one-row view of the head row (Ctrl+Shift+R).
     record: bool,
     hidden: Vec<bool>,
@@ -542,15 +662,43 @@ pub struct Grid {
     menu_col: usize,
     /// This pane's mono font size, before UI scale (Ctrl+= / Ctrl+- / Ctrl+0).
     mono: Pixels,
+    /// What Ctrl+C copies as, picked in the toolbar.
+    copy_csv: bool,
+    /// WHERE and ORDER BY inputs; made on first render, since InputState needs the window.
+    filter: Option<(Entity<InputState>, Entity<InputState>)>,
+    /// Share of the filter bar the WHERE input takes, and (mouse x, share) while its edge is dragged.
+    where_share: f32,
+    filter_drag: Option<(Pixels, f32)>,
+    /// Pending cell values by (row in `all`, source column), shown over the source until submitted.
+    edits: HashMap<(usize, usize), Value>,
+    /// Bumped on every edit, so the status bar recomputes an unchanged selection.
+    revision: usize,
+    /// The in-cell editor, while open (double-click, Enter, F2).
+    editing: Option<Editing>,
+    /// The multi-cell selection a click on one of its cells collapsed, so a double-click can restore it.
+    before_click: Option<Selection>,
+    /// A left button pressed on a cell is still down, so moving over cells extends the selection.
+    drag_selecting: bool,
 }
 
-pub type SelectionKey = (Range<usize>, Vec<usize>, Option<(usize, bool)>);
+/// An open in-cell editor: the display cell it sits in and every cell its value goes to.
+struct Editing {
+    input: Entity<InputState>,
+    cell: (usize, usize),
+    // Fixed at open, since the click that blurs (and commits) it moves the selection first.
+    targets: Vec<(usize, usize)>,
+}
+
+pub type SelectionKey = (Range<usize>, Vec<usize>, Option<(usize, bool)>, usize);
 
 impl Grid {
     pub fn new(source: Rc<dyn GridSource>, cx: &mut Context<Self>) -> Self {
         let n = source.columns().len();
         let mut grid = Self {
-            source,
+            source: Rc::new(Page::new(source.clone(), 0, PAGE_SIZES[1])),
+            all: source,
+            page: 0,
+            page_size: PAGE_SIZES[1],
             widths: vec![DEFAULT_WIDTH; n],
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
@@ -560,12 +708,20 @@ impl Grid {
             sort: None,
             order: None,
             extra: Vec::new(),
-            inspecting: false,
             record: false,
             hidden: vec![false; n],
             col_order: (0..n).collect(),
             menu_col: 0,
             mono: theme::MONO,
+            copy_csv: false,
+            filter: None,
+            where_share: 0.6,
+            filter_drag: None,
+            edits: HashMap::new(),
+            revision: 0,
+            editing: None,
+            before_click: None,
+            drag_selecting: false,
         };
         // Open fitted to the first rows, so timestamps and UUIDs don't arrive clipped.
         for c in 0..n {
@@ -575,9 +731,129 @@ impl Grid {
         grid
     }
 
+    /// Shows page `page` at `size` rows per page; selection and sort start over.
+    fn set_page(&mut self, page: usize, size: usize, cx: &mut Context<Self>) {
+        (self.page_size, self.page) = (size, page.min(page_count(self.all.row_count(), size) - 1));
+        self.source = Rc::new(Page::new(self.all.clone(), self.page, size));
+        (self.anchor, self.head, self.sort, self.order) = ((0, 0), (0, 0), None, None);
+        self.extra.clear();
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
     /// Row at display position `r`, after sorting.
     fn row(&self, r: usize) -> Row {
-        self.source.row(self.order.as_ref().map_or(r, |o| o[r]))
+        self.page_row(self.order.as_ref().map_or(r, |o| o[r]))
+    }
+
+    /// Page row `ix` with pending edits over it.
+    fn page_row(&self, ix: usize) -> Row {
+        let mut row = self.source.row(ix);
+        if !self.edits.is_empty() {
+            let at = self.source.start + ix;
+            for (c, v) in row.iter_mut().enumerate() {
+                if let Some(edit) = self.edits.get(&(at, c)) {
+                    *v = edit.clone();
+                }
+            }
+        }
+        row
+    }
+
+    /// Row in `all` shown at display position `r`.
+    fn abs_row(&self, r: usize) -> usize {
+        self.source.start + self.order.as_ref().map_or(r, |o| o[r])
+    }
+
+    /// Stores `cells` (display row, display column, typed text) as pending edits.
+    fn set_cells(&mut self, cells: Vec<((usize, usize), String)>, cx: &mut Context<Self>) {
+        for ((r, c), text) in cells {
+            let s = self.col_order[c];
+            let value = parse_value(&text, &self.source.columns()[s].data_type);
+            self.edits.insert((self.abs_row(r), s), value);
+        }
+        self.revision += 1;
+        cx.notify();
+    }
+
+    /// Ctrl+V: clipboard TSV into the selection; a multi-cell paste then selects what it wrote.
+    fn paste(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else { return };
+        let ranges = ranges_in_order(&self.extra, self.selection());
+        let (rows, cols) = self.selection();
+        let block = parse_tsv(&text);
+        let cells = paste_targets(&block, &ranges, (rows.start, cols.start), self.source.row_count(), &self.display_hidden());
+        let fill = matches!(block.as_slice(), [row] if row.len() == 1);
+        if !fill && let (Some(first), Some(last)) = (cells.first(), cells.last()) {
+            (self.anchor, self.head) = (first.0, last.0);
+            self.extra.clear();
+        }
+        self.set_cells(cells, cx);
+    }
+
+    /// Selected cells in visible columns, once each.
+    fn selected_cells(&self) -> Vec<(usize, usize)> {
+        fill_targets(&ranges_in_order(&self.extra, self.selection()), &self.display_hidden())
+    }
+
+    /// Opens the editor in display cell `cell`, prefilled with its value; it writes to every selected cell.
+    fn start_editing(&mut self, cell: (usize, usize), window: &mut Window, cx: &mut Context<Self>) {
+        let value = &self.row(cell.0)[self.col_order[cell.1]];
+        let text = if *value == Value::Null { String::new() } else { value.to_string() };
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("NULL"));
+        input.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.focus(window, cx);
+        });
+        cx.subscribe_in(&input, window, |this, _, ev: &InputEvent, window, cx| match ev {
+            // Clicking elsewhere keeps what was typed, as in a spreadsheet.
+            InputEvent::PressEnter { .. } | InputEvent::Blur => this.stop_editing(true, window, cx),
+            _ => {}
+        })
+        .detach();
+        self.editing = Some(Editing { input, cell, targets: self.selected_cells() });
+        cx.notify();
+    }
+
+    /// Closes the editor, writing its value to its targets when `commit`.
+    fn stop_editing(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Editing { input, targets, .. }) = self.editing.take() else { return };
+        if commit {
+            let text = input.read(cx).value().to_string();
+            self.set_cells(targets.into_iter().map(|cell| (cell, text.clone())).collect(), cx);
+        }
+        if input.read(cx).focus_handle(cx).is_focused(window) {
+            window.focus(&self.focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// Cell mouse-down: click selects (or extends, or adds a range); a double-click edits, keeping
+    /// a multi-cell selection the first click collapsed when the cell was part of it.
+    fn cell_down(&mut self, cell: (usize, usize), ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // The grid's own focus tracking would take focus back from the editor on this press.
+        if self.editing.as_ref().is_some_and(|e| e.cell == cell) {
+            return window.prevent_default();
+        }
+        // Commit now rather than on the blur, which lands a frame later.
+        self.stop_editing(true, window, cx);
+        window.focus(&self.focus, cx);
+        let plain = !ev.modifiers.secondary() && !ev.modifiers.shift;
+        if ev.click_count == 2 && plain {
+            if let Some((anchor, head, extra)) = self.before_click.take() {
+                (self.anchor, self.head, self.extra) = (anchor, head, extra);
+            }
+            window.prevent_default();
+            return self.start_editing(cell, window, cx);
+        }
+        let multi = self.selected_cells().len() > 1 && self.is_selected(cell.0, cell.1);
+        self.before_click = (multi && plain).then(|| (self.anchor, self.head, self.extra.clone()));
+        if ev.modifiers.secondary() {
+            self.add_range(cell, cx);
+        } else {
+            self.select(cell, ev.modifiers.shift, cx);
+        }
+        self.drag_selecting = true;
     }
 
     /// Header sort button: ascending, descending, off.
@@ -588,7 +864,7 @@ impl Grid {
             _ => Some((c, true)),
         };
         self.order = self.sort.map(|(c, asc)| {
-            let keys: Vec<Value> = (0..self.source.row_count()).map(|r| self.source.row(r)[c].clone()).collect();
+            let keys: Vec<Value> = (0..self.source.row_count()).map(|r| self.page_row(r)[c].clone()).collect();
             let mut order: Vec<usize> = (0..keys.len()).collect();
             // NULLs stay last in both directions.
             order.sort_by(|&x, &y| match (&keys[x], &keys[y]) {
@@ -610,7 +886,7 @@ impl Grid {
     pub fn selection_key(&self) -> SelectionKey {
         let (rows, cols) = self.selection();
         let cols = cols.filter_map(|c| self.col_order.get(c).copied()).filter(|&s| !self.hidden[s]).collect();
-        (rows, cols, self.sort)
+        (rows, cols, self.sort, self.revision)
     }
 
     /// Status-bar aggregate of the active range, hidden columns skipped.
@@ -619,7 +895,7 @@ impl Grid {
         if self.source.row_count() == 0 {
             return None;
         }
-        let (rows, cols, _) = self.selection_key();
+        let (rows, cols, ..) = self.selection_key();
         let values = rows.clone().flat_map(|r| {
             let row = self.row(r);
             cols.iter().map(|&c| row[c].clone()).collect::<Vec<_>>()
@@ -686,7 +962,7 @@ impl Grid {
     }
 
     fn gutter(&self) -> Pixels {
-        gutter_width(self.source.row_count(), self.mono_px())
+        gutter_width(self.all.row_count(), self.mono_px())
     }
 
     /// Scroll so the head cell is in view, both axes.
@@ -726,33 +1002,133 @@ impl Grid {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
 
-    fn on_key(&mut self, ev: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let rows = self.source.row_count();
-        if rows == 0 || self.widths.is_empty() {
+        if self.editing.is_some() && ev.keystroke.key == "escape" {
+            return self.stop_editing(false, window, cx);
+        }
+        // Keys typed into the filter inputs bubble up here; they are not grid navigation.
+        if rows == 0 || self.widths.is_empty() || !self.focus.is_focused(window) {
             return;
         }
         let m = ev.keystroke.modifiers;
-        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / self.row_h()) as usize;
         match ev.keystroke.key.as_str() {
-            "c" if m.secondary() => return self.copy_as(tsv, cx),
+            "c" if m.secondary() => return self.copy_as(if self.copy_csv { csv } else { tsv }, cx),
+            "v" if m.secondary() => return self.paste(cx),
+            "enter" | "f2" if !m.secondary() && !m.shift => return self.start_editing(self.head, window, cx),
             "r" if m.secondary() && m.shift => {
                 self.record = !self.record;
                 return cx.notify();
             }
-            "enter" if m.shift => {
-                self.inspecting = !self.inspecting;
-                return cx.notify();
-            }
-            "escape" if self.inspecting => {
-                self.inspecting = false;
-                return cx.notify();
-            }
             _ => {}
         }
+        let page = (self.scroll.0.borrow().base_handle.bounds().size.height / self.row_h()) as usize;
         let Some(next) = nav(&ev.keystroke.key, m.secondary(), m.shift, self.head, rows, &self.display_hidden(), page) else { return };
         self.select(next, m.shift && ev.keystroke.key != "tab", cx);
         self.reveal_head();
         cx.stop_propagation();
+    }
+
+    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (page, size, last) = (self.page, self.page_size, page_count(self.all.row_count(), self.page_size) - 1);
+        let page_button = |id: &'static str, icon: IconName, tip: &'static str, to: usize| {
+            Button::new(id).ghost().small().icon(icon).tooltip(tip).accessibility_label(tip).disabled(to == page).on_click(cx.listener(move |this, _, _, cx| this.set_page(to, size, cx)))
+        };
+        let (start, end) = (self.source.start, self.source.start + self.source.len);
+        let range = if end == 0 { "No rows".to_string() } else { format!("{}–{} of {}", grouped(start + 1), grouped(end), grouped(self.all.row_count())) };
+        // shortcut: no query backend yet, so these stay disabled until results come from a live connection.
+        let pending = |id: &'static str, icon: IconName, tip: &'static str| {
+            Button::new(id).ghost().small().icon(icon).tooltip(format!("{tip} (needs a live connection)")).accessibility_label(tip).disabled(true)
+        };
+        let divider = || div().flex_none().w(px(1.)).h(theme::space_16()).mx(theme::space_4()).bg(theme.border);
+        let (grid, current) = (cx.entity().downgrade(), self.copy_csv);
+        let pager = grid.clone();
+        h_flex()
+            .flex_none()
+            .px(theme::space_4())
+            .py(theme::space_2())
+            .gap(theme::space_2())
+            .border_b_1()
+            .border_color(theme.border)
+            .text_size(theme::ui())
+            .child(page_button("grid-first", IconName::ChevronFirst, "First page", 0))
+            .child(page_button("grid-prev", IconName::ChevronLeft, "Previous page", page.saturating_sub(1)))
+            .child(
+                Button::new("grid-page-size").ghost().small().label(range).dropdown_caret(true).tooltip("Rows per page").dropdown_menu(move |menu, _, _| {
+                    PAGE_SIZES.into_iter().fold(menu.label("Rows per page"), |menu, n| {
+                        let pager = pager.clone();
+                        menu.item(PopupMenuItem::new(grouped(n)).checked(n == size).on_click(move |_, _, cx| {
+                            // Stay on the page holding the current first row.
+                            _ = pager.update(cx, |this, cx| this.set_page(start / n, n, cx));
+                        }))
+                    })
+                }),
+            )
+            .child(page_button("grid-next", IconName::ChevronRight, "Next page", (page + 1).min(last)))
+            .child(page_button("grid-last", IconName::ChevronLast, "Last page", last))
+            .child(divider())
+            .child(pending("grid-refresh", IconName::RefreshCw, "Refresh"))
+            .child(pending("grid-stop", IconName::Square, "Stop query"))
+            .child(divider())
+            .child(pending("grid-add-row", IconName::Plus, "Add row"))
+            .child(pending("grid-delete-row", IconName::Minus, "Delete row"))
+            .child(pending("grid-submit", IconName::ArrowUp, "Submit changes"))
+            .child(div().flex_1())
+            .child(
+                Button::new("grid-copy-format")
+                    .ghost()
+                    .small()
+                    .label(if self.copy_csv { "Copy as CSV" } else { "Copy as TSV" })
+                    .dropdown_caret(true)
+                    .tooltip("Format Ctrl+C copies")
+                    .dropdown_menu(move |menu, _, _| {
+                        [("TSV (tab-separated)", false), ("CSV (comma-separated)", true)].into_iter().fold(menu.label("Ctrl+C copies as"), |menu, (name, is_csv)| {
+                            let grid = grid.clone();
+                            menu.item(PopupMenuItem::new(name).checked(current == is_csv).on_click(move |_, _, cx| {
+                                _ = grid.update(cx, |this, cx| {
+                                    this.copy_csv = is_csv;
+                                    cx.notify();
+                                });
+                            }))
+                        })
+                    }),
+            )
+    }
+
+    // shortcut: no query backend yet, so WHERE / ORDER BY are typed but not applied; wire to the query once drivers land.
+    fn render_filter_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (where_input, order_input) = self
+            .filter
+            .get_or_insert_with(|| {
+                let mut input = |placeholder: &'static str, cx: &mut Context<Self>| cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+                (input("WHERE", cx), input("ORDER BY", cx))
+            })
+            .clone();
+        let theme = cx.theme();
+        let icon = |name: IconName| Icon::new(name).xsmall().text_color(theme.muted_foreground);
+        h_flex()
+            .flex_none()
+            .items_stretch()
+            .border_b_1()
+            .border_color(theme.border)
+            .text_size(theme::ui())
+            .child(div().w(relative(self.where_share)).min_w_0().child(Input::new(&where_input).small().bordered(false).prefix(icon(IconName::Funnel))))
+            .child(
+                div()
+                    .id("filter-split")
+                    .flex_none()
+                    .w(theme::space_8())
+                    .cursor_col_resize()
+                    .flex()
+                    .justify_center()
+                    .child(div().w(px(1.)).h_full().bg(theme.border))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                        this.filter_drag = Some((ev.position.x, this.where_share));
+                        cx.stop_propagation();
+                    })),
+            )
+            .child(div().flex_1().min_w_0().child(Input::new(&order_input).small().bordered(false).prefix(icon(IconName::ArrowDownWideNarrow))))
     }
 
     /// Horizontal scroll position and viewport width of the cell area.
@@ -777,9 +1153,10 @@ impl Grid {
         let (scroll_x, view) = self.viewport(window);
         let cols = visible_cols(&offsets, scroll_x, view, OVERSCAN);
         let total = *offsets.last().unwrap_or(&Pixels::ZERO);
+        let (editor, editing_cell) = (self.editing.as_ref().map(|e| e.input.clone()), self.editing.as_ref().map(|e| e.cell));
         range
             .map(|r| {
-                let row = self.row(r);
+                let (row, at) = (self.row(r), self.abs_row(r));
                 let cells = cols.clone().map(|c| (c, self.col_order[c])).filter(|&(_, s)| !self.hidden[s]).map(|(c, s)| {
                     let (text, kind) = format_cell(&row[s]);
                     let selected = self.is_selected(r, c);
@@ -796,23 +1173,23 @@ impl Grid {
                         .border_r_1()
                         .border_color(theme.table_row_border)
                         .when(aligns_right(&kind, &self.source.columns()[s].data_type), |d| d.justify_end())
+                        .when(self.edits.contains_key(&(at, s)), |d| d.bg(theme::grid_edited(theme)))
                         .when(selected, |d| d.bg(fill))
                         .when_some(cursor.filter(|_| self.head == (r, c)), |d, color| d.border_1().border_color(color))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                                window.focus(&this.focus, cx);
-                                if ev.modifiers.secondary() {
-                                    this.add_range((r, c), cx);
-                                } else {
-                                    this.select((r, c), ev.modifiers.shift, cx);
-                                }
-                                if ev.click_count == 2 {
-                                    this.inspecting = true;
-                                }
-                            }),
+                            cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.cell_down((r, c), ev, window, cx)),
                         )
-                        .child(if kind == CellKind::Null {
+                        // Dragging across cells moves the head; the anchor stays where the drag began.
+                        .on_mouse_move(cx.listener(move |this, ev: &MouseMoveEvent, _, cx| {
+                            if this.drag_selecting && ev.dragging() && this.head != (r, c) {
+                                this.select((r, c), true, cx);
+                            }
+                        }))
+                        .when_some(editor.clone().filter(|_| editing_cell == Some((r, c))), |d, input| {
+                            d.px_0().child(Input::new(&input).small().bordered(false).w_full().h_full().font_family(theme.mono_font_family.clone()).text_size(self.mono_px()))
+                        })
+                        .when(editing_cell != Some((r, c)), |d| d.child(if kind == CellKind::Null {
                             div()
                                 .px(theme::space_4())
                                 .rounded(theme::radius_sm())
@@ -823,7 +1200,7 @@ impl Grid {
                             div().text_color(theme.muted_foreground).child(text)
                         } else {
                             div().child(text)
-                        })
+                        }))
                 });
                 div()
                     .relative()
@@ -858,7 +1235,7 @@ impl Grid {
                                     this.select_band(Some(r), None, ev.modifiers.shift, cx);
                                 }),
                             )
-                            .child((r + 1).to_string()),
+                            .child((self.source.start + r + 1).to_string()),
                     )
             })
             .collect()
@@ -886,7 +1263,7 @@ impl Grid {
                     .items_center()
                     .text_size(theme::ui_sm())
                     .text_color(theme.muted_foreground)
-                    .child(format!("Row {} of {}   (Ctrl+Shift+R back to grid, ↑↓ change row)", r + 1, self.source.row_count())),
+                    .child(format!("Row {} of {}   (Ctrl+Shift+R back to grid, ↑↓ change row)", self.source.start + r + 1, self.all.row_count())),
             )
             .children(self.source.columns().iter().zip(row.iter()).enumerate().map(|(c, (meta, value))| {
                 let (text, kind) = format_cell(value);
@@ -1107,19 +1484,30 @@ impl Render for Grid {
             .on_action(cx.listener(|this, _: &CopyMarkdown, _, cx| this.copy_as(markdown, cx)))
             .on_action(cx.listener(|this, _: &CopySqlInsert, _, cx| this.copy_as(sql_insert, cx)))
             .on_action(cx.listener(|this, _: &CopySqlInList, _, cx| this.copy_in_list(cx)))
+            .on_action(cx.listener(|this, _: &Paste, _, cx| this.paste(cx)))
+            .on_action(cx.listener(|this, _: &SetValue, window, cx| this.start_editing(this.head, window, cx)))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
                 if let Some((c, start_x, start_w)) = this.resizing {
                     this.widths[c] = (start_w + ev.position.x - start_x).max(MIN_WIDTH);
                     cx.notify();
                 }
+                if let Some((start_x, start_share)) = this.filter_drag {
+                    let width = this.scroll.0.borrow().base_handle.bounds().size.width;
+                    if width > Pixels::ZERO {
+                        this.where_share = (start_share + (ev.position.x - start_x) / width).clamp(0.15, 0.85);
+                        cx.notify();
+                    }
+                }
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| this.resizing = None))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| (this.resizing, this.filter_drag, this.drag_selecting) = (None, None, false)))
             // Re-render on scroll so the header and column window follow the offset.
             .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
+            .child(self.render_toolbar(cx))
+            .child(self.render_filter_bar(window, cx))
             .when(!self.record, |d| d.child(self.render_header(window, cx)))
             .when(self.record && self.source.row_count() > 0, |d| d.child(self.render_record(cx)))
             .when(!self.record, |d| d.child(
-                div().id("grid-body").flex_1().min_h_0().child(
+                div().id("grid-body").debug_selector(|| "grid-body".into()).flex_1().min_h_0().child(
                     uniform_list("grid-rows", self.source.row_count(), cx.processor(Self::render_rows))
                         .track_scroll(&self.scroll)
                         .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
@@ -1135,46 +1523,164 @@ impl Render for Grid {
                             .menu("Markdown", Box::new(CopyMarkdown))
                             .menu("SQL INSERT", Box::new(CopySqlInsert))
                             .menu("SQL IN-list", Box::new(CopySqlInList))
+                            .separator()
+                            .menu("Paste (Ctrl+V)", Box::new(Paste))
+                            .menu("Edit selected cells… (Enter)", Box::new(SetValue))
                     }
                 }),
             ))
-            .when(self.inspecting && self.source.row_count() > 0, |d| {
-                let theme = cx.theme();
-                let (r, c) = (self.head.0, self.col_order[self.head.1]);
-                let meta = &self.source.columns()[c];
-                d.child(
-                    v_flex()
-                        .flex_none()
-                        .h(px(180.))
-                        .border_t_1()
-                        .border_color(theme.border)
-                        .bg(theme.background)
-                        .child(
-                            div()
-                                .px(theme::space_8())
-                                .py(theme::space_4())
-                                .text_size(theme::ui_sm())
-                                .text_color(theme.muted_foreground)
-                                .child(format!("{} · {} · row {}   (Esc closes)", meta.name, meta.data_type, r + 1)),
-                        )
-                        .child(
-                            div()
-                                .id("grid-inspector")
-                                .flex_1()
-                                .overflow_y_scroll()
-                                .px(theme::space_8())
-                                .font_family(theme.mono_font_family.clone())
-                                .text_size(self.mono_px())
-                                .child(inspect_text(&self.row(r)[c])),
-                        ),
-                )
-            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{aligns_right, gutter_digits, gutter_width, row_height, is_numeric_type, Block, copy_in_list, copy_ranges, ranges_in_order, GridSource as _, sort_availability, SortAvail, header_height, header_model, HeaderModel, band_cols, selection_after_drop, cmp_values, copy_cols, display_widths, nav, pick, move_col, csv, inspect_text, json, markdown, pretty_json, sql_in_list, sql_insert, CellKind, ColumnMeta, MAX_CHARS, format_cell, mock, prefix_sums, px, tsv, visible_cols, Value};
+
+    #[test]
+    fn parse_tsv_reads_back_what_tsv_copies() {
+        let cols = [ColumnMeta { name: "a".into(), data_type: "text".into(), is_pk: false }];
+        let rows = vec![vec![Value::Text("x\ty".into()), Value::Null], vec![Value::Text("say \"hi\"\nbye".into()), Value::Int(3)]];
+        let parsed = super::parse_tsv(&tsv(&cols, &rows));
+        assert_eq!(parsed, [vec!["x\ty", ""], vec!["say \"hi\"\nbye", "3"]]);
+        assert_eq!(super::parse_tsv("1\t2\r\n3\t4"), [vec!["1", "2"], vec!["3", "4"]], "CRLF and no trailing newline");
+        assert_eq!(super::parse_tsv("v\n"), [vec!["v"]]);
+    }
+
+    #[test]
+    fn parse_value_follows_the_column_type() {
+        use super::parse_value;
+        assert_eq!(parse_value("", "text"), Value::Null);
+        assert_eq!(parse_value("42", "integer"), Value::Int(42));
+        assert_eq!(parse_value("4.5", "numeric(10,2)"), Value::Float(4.5));
+        assert_eq!(parse_value("abc", "bigint"), Value::Text("abc".into()), "unparsable stays as typed");
+        assert_eq!(parse_value("TRUE", "boolean"), Value::Bool(true));
+        assert_eq!(parse_value("{}", "jsonb"), Value::Json("{}".into()));
+        assert_eq!(parse_value("42", "text"), Value::Text("42".into()));
+    }
+
+    #[test]
+    fn paste_fills_one_value_and_lays_out_a_block() {
+        use super::paste_targets;
+        let block = |rows: &[&[&str]]| rows.iter().map(|r| r.iter().map(|s| s.to_string()).collect()).collect::<Vec<Vec<String>>>();
+        let one = paste_targets(&block(&[&["x"]]), &[(0..2, 0..2), (1..2, 1..3)], (1, 1), 10, &[false, false, true]);
+        let cells: Vec<_> = one.iter().map(|(c, _)| *c).collect();
+        assert_eq!(cells, [(0, 0), (0, 1), (1, 0), (1, 1)], "every selected visible cell once, hidden column 2 skipped");
+        let grid = paste_targets(&block(&[&["a", "b", "c"], &["d", "e", "f"], &["g", "h", "i"]]), &[(1..2, 0..1)], (1, 0), 3, &[false, true, false, false]);
+        let got: Vec<_> = grid.iter().map(|((r, c), v)| (*r, *c, v.as_str())).collect();
+        assert_eq!(got, [(1, 0, "a"), (1, 2, "b"), (1, 3, "c"), (2, 0, "d"), (2, 2, "e"), (2, 3, "f")], "skips hidden column 1, clipped at the last row");
+    }
+
+    #[gpui_kit::test]
+    fn paste_and_set_value_edit_the_selected_cells(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(mock::wide_table(20)), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        let cell = |cx: &mut gpui_kit::VisualTestContext, r: usize, c: usize| grid.read_with(cx, |g, _| g.row(r)[c].clone());
+        grid.update_in(&mut cx, |g, window, cx| {
+            window.focus(&g.focus, cx);
+            (g.anchor, g.head) = ((0, 0), (1, 1));
+        });
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("7".into()));
+        cx.simulate_keystrokes("ctrl-v");
+        assert_eq!([cell(&mut cx, 0, 0), cell(&mut cx, 1, 1)], [Value::Int(7), Value::Int(7)], "one value fills the selection");
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("1\t2\n3\t4\n".into()));
+        grid.update(&mut cx, |g, _| (g.anchor, g.head) = ((5, 2), (5, 2)));
+        cx.simulate_keystrokes("ctrl-v");
+        assert_eq!([cell(&mut cx, 5, 2), cell(&mut cx, 6, 3)], [Value::Int(1), Value::Int(4)], "a block pastes from the top-left");
+        assert_eq!(grid.read_with(&cx, |g, _| (g.anchor, g.head)), ((5, 2), (6, 3)), "and selects what it wrote");
+
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("99");
+        cx.simulate_keystrokes("escape");
+        assert!(grid.read_with(&cx, |g, _| g.editing.is_none()), "Esc closes the input");
+        assert_eq!(cell(&mut cx, 5, 2), Value::Int(1), "Esc applies nothing");
+        cx.simulate_keystrokes("enter");
+        grid.update_in(&mut cx, |g, window, cx| g.editing.as_ref().unwrap().input.clone().update(cx, |i, cx| i.set_value("", window, cx)));
+        cx.simulate_keystrokes("enter");
+        assert!(grid.read_with(&cx, |g, _| g.editing.is_none()), "Enter applies and closes");
+        assert_eq!([cell(&mut cx, 5, 2), cell(&mut cx, 5, 3), cell(&mut cx, 6, 2), cell(&mut cx, 6, 3)], [Value::Null, Value::Null, Value::Null, Value::Null], "empty sets every selected cell NULL");
+    }
+
+    #[gpui_kit::test]
+    fn dragging_across_cells_selects_the_rectangle(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(mock::wide_table(20)), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let (gutter, row_h, offsets) = grid.read_with(&cx, |g, _| (g.gutter(), g.row_h(), g.offsets()));
+        let body = cx.debug_bounds("grid-body").expect("grid body drawn").origin;
+        let at = |r: usize, c: usize| gpui_kit::point(body.x + gutter + offsets[c] + px(5.), body.y + row_h * (r as f32 + 0.5));
+        cx.simulate_mouse_down(at(1, 0), gpui_kit::MouseButton::Left, Default::default());
+        cx.simulate_mouse_move(at(3, 2), Some(gpui_kit::MouseButton::Left), Default::default());
+        cx.simulate_mouse_up(at(3, 2), gpui_kit::MouseButton::Left, Default::default());
+        assert_eq!(grid.read_with(&cx, |g, _| g.selection()), (1..4, 0..3), "anchor at the press, head at the release");
+        cx.simulate_mouse_move(at(5, 4), None, Default::default());
+        assert_eq!(grid.read_with(&cx, |g, _| g.selection()), (1..4, 0..3), "moving with no button pressed changes nothing");
+    }
+
+    #[gpui_kit::test]
+    fn double_click_edits_in_the_cell_and_fills_the_selection(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        cx.update(gpui_kit::init);
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|cx| super::Grid::new(std::rc::Rc::new(mock::wide_table(20)), cx))).expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let (gutter, row_h, offsets) = grid.read_with(&cx, |g, _| (g.gutter(), g.row_h(), g.offsets()));
+        let body = cx.debug_bounds("grid-body").expect("grid body drawn").origin;
+        let at = |r: usize, c: usize| gpui_kit::point(body.x + gutter + offsets[c] + px(5.), body.y + row_h * (r as f32 + 0.5));
+        let double_click = |cx: &mut gpui_kit::VisualTestContext, r, c| {
+            for click_count in [1, 2] {
+                cx.simulate_event(gpui_kit::MouseDownEvent { button: gpui_kit::MouseButton::Left, position: at(r, c), modifiers: Default::default(), click_count, first_mouse: false });
+                cx.simulate_event(gpui_kit::MouseUpEvent { button: gpui_kit::MouseButton::Left, position: at(r, c), modifiers: Default::default(), click_count });
+            }
+        };
+        let cell = |cx: &mut gpui_kit::VisualTestContext, r: usize, c: usize| grid.read_with(cx, |g, _| g.row(r)[c].clone());
+        let original = cell(&mut cx, 3, 3);
+
+        grid.update(&mut cx, |g, _| (g.anchor, g.head) = ((0, 0), (1, 1)));
+        double_click(&mut cx, 1, 0);
+        assert_eq!(grid.read_with(&cx, |g, _| (g.selection(), g.editing.as_ref().map(|e| e.cell))), ((0..2, 0..2), Some((1, 0))), "double-click inside keeps the selection and edits that cell");
+        grid.update_in(&mut cx, |g, window, cx| g.editing.as_ref().unwrap().input.clone().update(cx, |i, cx| i.set_value("5", window, cx)));
+        cx.simulate_keystrokes("enter");
+        assert_eq!([0, 1].map(|r| [0, 1].map(|c| cell(&mut cx, r, c))), [[Value::Int(5), Value::Int(5)], [Value::Int(5), Value::Int(5)]], "the typed value fills every selected cell");
+
+        double_click(&mut cx, 3, 3);
+        cx.simulate_input("8");
+        assert_eq!(cell(&mut cx, 3, 3), original, "nothing is written while typing");
+        cx.simulate_click(at(6, 0), Default::default());
+        cx.run_until_parked();
+        assert!(grid.read_with(&cx, |g, _| g.editing.is_none()), "clicking another cell closes the editor");
+        assert_eq!(cell(&mut cx, 3, 3), Value::Int(format!("{original}8").parse().unwrap()), "and keeps what was typed, only in the edited cell");
+        assert_eq!(cell(&mut cx, 6, 0), grid.read_with(&cx, |g, _| g.source.row(6)[0].clone()), "the clicked cell is untouched");
+    }
+
+    #[test]
+    fn grouped_puts_commas_every_three_digits() {
+        for (n, s) in [(0, "0"), (999, "999"), (1_000, "1,000"), (10_000, "10,000"), (1_000_000, "1,000,000")] {
+            assert_eq!(super::grouped(n), s);
+        }
+    }
+
+    #[test]
+    fn pages_cover_every_row_once() {
+        use super::{page_count, Page};
+        let all: std::rc::Rc<dyn super::GridSource> = std::rc::Rc::new(mock::wide_table(1_050));
+        assert_eq!(page_count(1_050, 500), 3);
+        assert_eq!(page_count(0, 500), 1, "an empty result still has a page");
+        let last = Page::new(all.clone(), 2, 500);
+        assert_eq!((last.start, last.len), (1_000, 50));
+        assert_eq!(last.row(0), all.row(1_000));
+        let past = Page::new(all, 9, 500);
+        assert_eq!(past.len, 0, "a page past the end is empty, not a panic");
+    }
 
     #[test]
     fn visible_cols_follow_scroll_offset() {

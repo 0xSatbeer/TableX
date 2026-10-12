@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::time::{Duration, UNIX_EPOCH};
 
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -26,6 +26,8 @@ const TIME_W: f32 = 10.;
 pub struct BottomPanel {
     /// Set by the shell: the panel covers the editor area, so the header offers restore.
     pub maximized: bool,
+    /// Set by the shell: Results belongs to the query console, so other tabs hide it.
+    pub console: bool,
     tab: usize,
     log: Vec<QueryLogEntry>,
     filter: LogFilter,
@@ -72,6 +74,7 @@ impl BottomPanel {
         let rows = filter_rows(&log, &filter);
         Self {
             maximized: false,
+            console: true,
             tab: RESULTS,
             log,
             filter,
@@ -137,6 +140,38 @@ impl BottomPanel {
                         if !this.filter.connections.remove(&id) {
                             this.filter.connections.insert(id);
                         }
+                        this.refilter(cx);
+                        cx.notify();
+                    });
+                }));
+            }
+            menu
+        })
+    }
+
+    /// Status and introspection filters; each item toggles one, like the connection menu.
+    fn filter_menu(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let toggle_status: fn(&mut LogFilter, StatusKind) = |f, kind| {
+            if !f.statuses.remove(&kind) {
+                f.statuses.insert(kind);
+            }
+        };
+        let items: Vec<(&'static str, bool, std::rc::Rc<dyn Fn(&mut LogFilter)>)> = vec![
+            ("Ok", self.filter.statuses.contains(&StatusKind::Ok), std::rc::Rc::new(move |f| toggle_status(f, StatusKind::Ok))),
+            ("Error", self.filter.statuses.contains(&StatusKind::Error), std::rc::Rc::new(move |f| toggle_status(f, StatusKind::Error))),
+            ("Cancelled", self.filter.statuses.contains(&StatusKind::Cancelled), std::rc::Rc::new(move |f| toggle_status(f, StatusKind::Cancelled))),
+            ("Introspection", self.filter.introspection, std::rc::Rc::new(|f| f.introspection = !f.introspection)),
+        ];
+        let panel = cx.entity().downgrade();
+        Button::new("log-filters").ghost().xsmall().icon(Icon::new(Lucide::Funnel)).tooltip("Filters").dropdown_menu(move |mut menu, _, _| {
+            for (ix, (label, on, toggle)) in items.iter().enumerate() {
+                if ix == 3 {
+                    menu = menu.separator();
+                }
+                let (panel, toggle) = (panel.clone(), toggle.clone());
+                menu = menu.item(PopupMenuItem::new(*label).checked(*on).on_click(move |_, _, cx| {
+                    _ = panel.update(cx, |this, cx| {
+                        toggle(&mut this.filter);
                         this.refilter(cx);
                         cx.notify();
                     });
@@ -442,22 +477,6 @@ fn log_header(theme: &gpui_kit::component::Theme) -> impl IntoElement {
         .child(div().flex_none().w(theme::space_24()))
 }
 
-fn filter_toggle(
-    id: &'static str,
-    label: &'static str,
-    on: bool,
-    toggle: impl Fn(&mut LogFilter) + 'static,
-    cx: &mut Context<BottomPanel>,
-) -> Button {
-    // A checkbox glyph, so the off state still reads as a toggle and not a label.
-    let check = Icon::new(if on { Lucide::SquareCheck } else { Lucide::Square });
-    Button::new(id).ghost().small().icon(check).label(label).selected(on).on_click(cx.listener(move |this, _, _, cx| {
-        toggle(&mut this.filter);
-        this.refilter(cx);
-        cx.notify();
-    }))
-}
-
 impl Focusable for BottomPanel {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -466,23 +485,9 @@ impl Focusable for BottomPanel {
 
 impl Render for BottomPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let status_toggle = |id, label, kind: StatusKind, cx: &mut Context<Self>| {
-            let on = self.filter.statuses.contains(&kind);
-            let toggle: fn(&mut LogFilter, StatusKind) = |f, kind| {
-                if !f.statuses.remove(&kind) {
-                    f.statuses.insert(kind);
-                }
-            };
-            filter_toggle(id, label, on, move |f| toggle(f, kind), cx)
-        };
-        let status_toggles = [
-            status_toggle("status-ok", "Ok", StatusKind::Ok, cx),
-            status_toggle("status-error", "Error", StatusKind::Error, cx),
-            status_toggle("status-cancelled", "Cancelled", StatusKind::Cancelled, cx),
-        ];
         let connection_menu = self.connection_menu(cx);
-        let introspection_toggle =
-            filter_toggle("show-introspection", "Introspection", self.filter.introspection, |f| f.introspection = !f.introspection, cx);
+        let filter_menu = self.filter_menu(cx);
+        let tab = if !self.console && self.tab == RESULTS { LOGS } else { self.tab };
         let theme = cx.theme();
         // Flat, same height as the editor strip; the active view is underlined, not boxed.
         let header = h_flex()
@@ -493,8 +498,8 @@ impl Render for BottomPanel {
             .gap(theme::space_16())
             .border_b_1()
             .border_color(theme.border)
-            .children(TABS.iter().enumerate().map(|(ix, label)| {
-                let active = ix == self.tab;
+            .children(TABS.iter().enumerate().filter(|(ix, _)| self.console || *ix != RESULTS).map(|(ix, label)| {
+                let active = ix == tab;
                 div()
                     .id(("panel-tab", ix))
                     .h_full()
@@ -515,11 +520,10 @@ impl Render for BottomPanel {
             .child(
                 h_flex()
                     .gap(theme::space_8())
-                    .when(self.tab == LOGS, |this| {
+                    .when(tab == LOGS, |this| {
                         this.child(div().w(theme::space_24() * 8.).child(Input::new(&self.search).small()))
                             .child(connection_menu)
-                            .children(status_toggles)
-                            .child(introspection_toggle)
+                            .child(filter_menu)
                     })
                     .child({
                         let (icon, label) = if self.maximized { (IconName::WindowRestore, "Restore panel") } else { (IconName::WindowMaximize, "Maximize panel") };
@@ -542,7 +546,7 @@ impl Render for BottomPanel {
         let empty = |text: &'static str| {
             div().size_full().flex().items_center().justify_center().text_color(theme.muted_foreground).child(text)
         };
-        let body = match self.tab {
+        let body = match tab {
             LOGS if let Some(message) = empty_message(&self.rows) => v_flex()
                 .size_full()
                 .items_center()

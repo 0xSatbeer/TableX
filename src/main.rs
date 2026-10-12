@@ -162,6 +162,7 @@ impl LayoutState {
 
 struct Shell {
     /// The one copy of the workspace's connections; explorer, panel and tabs follow it.
+    #[cfg_attr(not(test), allow(dead_code, reason = "tests reach the workspace through the Shell"))]
     workspace: Entity<model::Workspace>,
     explorer: Entity<explorer::Explorer>,
     editor: Entity<EditorState>,
@@ -885,7 +886,8 @@ impl Render for Shell {
                 let explorer_w = self.layout.explorer.shown(viewport.width);
                 let bottom_h = self.layout.bottom.shown(viewport.height);
                 let maximized = self.layout.panel_maximized;
-                self.bottom_panel.update(cx, |panel, _| panel.maximized = maximized);
+                let console = matches!(self.tabs.active().map(|t| &t.content), Some(TabContent::Console));
+                self.bottom_panel.update(cx, |panel, _| (panel.maximized, panel.console) = (maximized, console));
                 main.child(
                     h_flex()
                         .relative()

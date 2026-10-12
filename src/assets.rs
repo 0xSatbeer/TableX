@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use gpui_kit::{AssetSource, Result, SharedString, assets::icon_assets};
 
 // Lucide icons beyond gpui-kit's default 101, embedded one by one so we don't pay for all 1,830.
-icon_assets!(LucideExtras, [Columns3, Database, KeyRound, Layers, Square, SquareCheck]);
+icon_assets!(LucideExtras, [ArrowDownWideNarrow, ChevronFirst, ChevronLast, Columns3, Database, Funnel, KeyRound, Layers, Square, SquareCheck]);
 
 pub const POSTGRES_ICON: &str = "icons/brand/postgresql.svg";
 pub const SQLITE_ICON: &str = "icons/brand/sqlite.svg";
