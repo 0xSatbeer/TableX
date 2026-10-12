@@ -2779,4 +2779,22 @@ mod tests {
             assert_eq!(under(&explorer, &cx, row), before, "{row}: the old children stay until the new ones arrive");
         }
     }
+
+    #[gpui_kit::test]
+    fn refresh_on_a_connection_that_is_not_connected_connects_the_same_as_expand(cx: &mut gpui_kit::TestAppContext) {
+        let cases = [ConnectionStatus::Disconnected, ConnectionStatus::Error("connection refused".into())];
+        for status in cases {
+            let conn = crate::model::Connection { status: status.clone(), ..pg(1, "pg", "app") };
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![conn]);
+            refresh(&explorer, &mut cx, "pg");
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connecting, "{status:?}");
+            assert_eq!(fake.pending(), ["connect app"], "{status:?}");
+            fake.resolve("connect app", Ok(crate::db::fake::session("app")));
+            cx.run_until_parked();
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connected, "{status:?}");
+            answer(&fake, "databases app", Ok(()));
+            cx.run_until_parked();
+            assert_eq!(labels(&explorer, &cx), ["pg", "app"], "{status:?}: open on its databases");
+        }
+    }
 }
