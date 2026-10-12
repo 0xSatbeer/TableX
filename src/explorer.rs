@@ -1912,6 +1912,55 @@ mod tests {
         }
     }
 
+    /// Connection `conn`'s params with `password` and `database`.
+    fn pg_params(password: Option<&str>, database: &str) -> crate::model::ConnectionParams {
+        use crate::model::{ConnectionParams, Secret, SslMode};
+        ConnectionParams::Postgres { host: "h".into(), port: 5432, user: "u".into(), password: password.map(Secret::new), database: database.into(), ssl: SslMode::Prefer }
+    }
+
+    #[gpui_kit::test]
+    fn a_connect_whose_connection_is_edited_or_deleted_while_connecting_is_dropped(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::session;
+        use ConnectionStatus::*;
+        // (change while connecting, the connect's answer, the connection's status once it lands; None = deleted)
+        let cases: [(&str, Result<(), &str>, Option<ConnectionStatus>); 8] = [
+            ("database", Ok(()), Some(Disconnected)),
+            ("database", Err("boom"), Some(Disconnected)),
+            ("password", Ok(()), Some(Disconnected)),
+            ("password", Err("boom"), Some(Disconnected)),
+            ("delete", Ok(()), None),
+            ("delete", Err("boom"), None),
+            // Name only: the params are the same, so the connect still lands.
+            ("name", Ok(()), Some(Connected)),
+            ("name", Err("boom"), Some(Error("boom".into()))),
+        ];
+        for (change, answer, want) in cases {
+            let label = format!("{change} {answer:?}");
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            expand_connection(&explorer, &mut cx);
+            let id = crate::model::ConnectionId(1);
+            workspace.update(&mut cx, |ws, cx| {
+                match change {
+                    "database" => ws.edit(id, "pg".into(), 0, false, pg_params(None, "other")),
+                    "password" => ws.edit(id, "pg".into(), 0, false, pg_params(Some("secret"), "app")),
+                    "name" => ws.edit(id, "renamed".into(), 0, false, pg_params(None, "app")),
+                    _ => drop(ws.delete(id)),
+                }
+                cx.notify();
+            });
+            cx.run_until_parked();
+            fake.resolve("connect app", answer.map(|()| session("app")).map_err(String::from));
+            cx.run_until_parked();
+            let status = workspace.read_with(&cx, |ws, _| ws.connections.first().map(|c| c.status.clone()));
+            assert_eq!(status, want, "{label}");
+            if change != "name" {
+                assert_eq!(fake.pending(), Vec::<String>::new(), "{label}: nothing loads from the dropped result");
+                let rows = labels(&explorer, &cx);
+                assert!(rows.iter().all(|r| !r.starts_with("Could not connect")), "{label}: no error row from it: {rows:?}");
+            }
+        }
+    }
+
     #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
