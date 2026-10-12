@@ -162,6 +162,22 @@ impl LayoutState {
     }
 }
 
+/// How the app starts. `Demo` (`--demo`) loads the sample workspace, tabs and query log and
+/// reads every connection through the mock driver; `Normal` starts empty on the real drivers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Mode {
+    Normal,
+    Demo,
+}
+
+impl Mode {
+    /// The mode for the command-line `args` after the program name. Any other argument is ignored.
+    fn from_args(args: impl IntoIterator<Item = String>) -> Self {
+        let _ = args;
+        Mode::Normal
+    }
+}
+
 struct Shell {
     /// The one copy of the workspace's connections; explorer, panel and tabs follow it.
     #[cfg_attr(not(test), allow(dead_code, reason = "tests reach the workspace through the Shell"))]
@@ -1049,6 +1065,26 @@ mod tests {
             explorer: split::EXPLORER,
             bottom: split::BOTTOM,
             dragging: None,
+        }
+    }
+
+    #[test]
+    fn demo_mode_needs_the_exact_demo_flag_and_ignores_every_other_argument() {
+        use super::Mode::{self, *};
+        // (args after the program name, mode)
+        let cases: [(&[&str], Mode); 9] = [
+            (&[], Normal),
+            (&["--demo"], Demo),
+            (&["--unknown"], Normal),
+            (&["--unknown", "--demo"], Demo),
+            (&["--demo", "--unknown"], Demo),
+            (&["--demo", "--demo"], Demo),
+            (&["--demo=1"], Normal),
+            (&["demo"], Normal),
+            (&["--DEMO"], Normal),
+        ];
+        for (args, want) in cases {
+            assert_eq!(Mode::from_args(args.iter().map(|a| a.to_string())), want, "{args:?}");
         }
     }
 
