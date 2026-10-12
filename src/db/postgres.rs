@@ -571,4 +571,27 @@ mod tests {
         let (objects, _) = objects_of(&pg, s);
         assert_eq!(kinds_and_names(&objects.expect("objects")), want);
     }
+
+    #[test]
+    fn tables_carry_their_row_estimate_unless_never_analyzed() {
+        let Some(pg) = test_pg() else { return };
+        let schema = Scratch::new(&pg, "SCHEMA", "");
+        admin(&pg, &format!(
+            "SET search_path = {};
+             CREATE TABLE t (a int); INSERT INTO t SELECT generate_series(1, 1200); ANALYZE t;
+             CREATE TABLE one (a int); INSERT INTO one VALUES (1); ANALYZE one;
+             CREATE TABLE emptied (a int); ANALYZE emptied;
+             CREATE TABLE fresh (a int); INSERT INTO fresh VALUES (1);
+             CREATE VIEW v AS SELECT 1 AS x;",
+            schema.name
+        ));
+        // (object, row estimate)
+        let cases = [("t", Some(1200)), ("one", Some(1)), ("emptied", Some(0)), ("fresh", None), ("v", None)];
+        let (objects, _) = objects_of(&pg, &schema.name);
+        let objects = objects.expect("objects");
+        for (name, want) in cases {
+            let object = objects.iter().find(|o| o.name == name).unwrap_or_else(|| panic!("{name} listed"));
+            assert_eq!(object.row_estimate, want, "{name}");
+        }
+    }
 }
