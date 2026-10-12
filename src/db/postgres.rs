@@ -460,4 +460,19 @@ mod tests {
             assert_eq!(block_on(Postgres::default().schemas(&session(db))), Ok(want.iter().map(|s| s.to_string()).collect()), "{db:?}");
         }
     }
+
+    #[test]
+    fn schemas_of_a_database_without_connect_privilege_fail_with_the_reason() {
+        let Some(pg) = test_pg() else { return };
+        let (db, role) = (Scratch::new(&pg, "DATABASE", ""), Scratch::new(&pg, "ROLE", "LOGIN PASSWORD 'pw'"));
+        admin(&pg, &format!("REVOKE CONNECT ON DATABASE {} FROM PUBLIC", db.name));
+        let schemas = |database: &str| {
+            let driver = Postgres::default();
+            let session = block_on(driver.connect(&on(&as_user(&pg, &role.name, Some("pw")), database)))?;
+            block_on(driver.schemas(&session))
+        };
+        // Expanding a database opens a session to it, so the missing privilege fails that connect.
+        assert_eq!(schemas(&db.name), Err(format!("permission denied for database \"{}\"", db.name)));
+        assert_eq!(schemas("postgres"), Ok(vec!["public".to_string()]), "a database the role may connect to still lists");
+    }
 }
