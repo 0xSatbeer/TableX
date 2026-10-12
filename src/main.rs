@@ -309,7 +309,7 @@ impl Shell {
                 bottom: split::BOTTOM,
                 dragging: None,
             },
-            status_bar: cx.new(|cx| statusbar::StatusBar::new(window, cx)),
+            status_bar: cx.new(|cx| statusbar::StatusBar::new(workspace.clone(), demo, window, cx)),
             bottom_panel: cx.new(|cx| panel::BottomPanel::new(workspace.clone(), log, window, cx)),
             focus_handle: cx.focus_handle(),
             gallery_visible: false,

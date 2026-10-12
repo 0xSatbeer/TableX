@@ -14,7 +14,7 @@ use gpui_kit::*;
 use gpui_kit::prelude::FluentBuilder as _;
 
 use crate::grid::{Grid, SelectionKey};
-use crate::model::Value;
+use crate::model::{Value, Workspace};
 use crate::tabs::Origin;
 use crate::{ToggleBottomPanel, ToggleExplorer, theme};
 
@@ -23,6 +23,10 @@ const AGGREGATE_MAX: usize = 1_000_000;
 const MEMORY_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct StatusBar {
+    /// Where the active origin's connection status comes from.
+    workspace: Entity<Workspace>,
+    /// Started with `--demo`, where a tab without an origin shows sample data.
+    demo: bool,
     /// Where the active tab's data comes from; `None` for sample data or no tab.
     origin: Option<Origin>,
     /// Some tab is open, so a missing origin means sample data rather than nothing.
@@ -42,8 +46,10 @@ pub struct StatusBar {
 }
 
 impl StatusBar {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(workspace: Entity<Workspace>, demo: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut this = Self {
+            workspace,
+            demo,
             origin: None,
             has_tab: false,
             memory_mb: None,
@@ -372,7 +378,7 @@ mod tests {
                 ..Default::default()
             };
             let (window, bar): (_, Entity<super::StatusBar>) =
-                cx.update(|cx| gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::StatusBar::new(window, cx))).expect("open test window"));
+                cx.update(|cx| gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| super::StatusBar::new(cx.new(|_| crate::mock::workspaces().remove(0)), true, window, cx))).expect("open test window"));
             let mut cx = gpui_kit::VisualTestContext::from_window(window.into(), cx);
             bar.update(&mut cx, |bar, cx| bar.set_origin(Some(Origin { connection: crate::model::ConnectionId(0), color: 0, production: false, path: path.into(), tail: "".into() }), true, cx));
             cx.run_until_parked();
