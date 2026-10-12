@@ -20,10 +20,10 @@ use gpui_kit::*;
 use std::sync::Arc;
 
 use crate::db::{Driver, Session};
-use crate::model::{Connection, Database, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
+use crate::model::{Column, Connection, Database, Schema, ConnectionId, ConnectionParams, ConnectionStatus, DbKind, DbObject, Key, ObjectKind, Workspace};
 use crate::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
 use crate::tabs::Origin;
-use crate::{assets, mock, theme};
+use crate::{assets, theme};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum NodeKind {
@@ -106,9 +106,26 @@ fn database_of(params: &ConnectionParams) -> String {
     }
 }
 
+/// `params` pointed at database `db`: a Postgres server's other database, or the SQLite file itself.
+fn on_database(params: &ConnectionParams, db: &str) -> ConnectionParams {
+    match params {
+        ConnectionParams::Postgres { .. } if database_of(params) != db => {
+            let mut params = params.clone();
+            if let ConnectionParams::Postgres { database, .. } = &mut params {
+                *database = db.to_string();
+            }
+            params
+        }
+        _ => params.clone(),
+    }
+}
+
 /// What a load of one tree level brings back.
 enum Children {
     Databases(Vec<String>),
+    Schemas(Vec<String>),
+    Objects(Vec<DbObject>),
+    Columns(Vec<Column>),
 }
 
 /// Starts the load of the children of the node whose key has `segments`.
@@ -116,6 +133,9 @@ fn fetch(driver: &dyn Driver, session: &Session, segments: &[String]) -> futures
     use futures::TryFutureExt as _;
     match segments {
         [_] => Box::pin(driver.databases(session).map_ok(Children::Databases)),
+        [_, _] => Box::pin(driver.schemas(session).map_ok(Children::Schemas)),
+        [_, _, schema] => Box::pin(driver.objects(session, schema).map_ok(Children::Objects)),
+        [_, _, schema, _, object] => Box::pin(driver.columns(session, schema, object).map_ok(Children::Columns)),
         _ => Box::pin(futures::future::ready(Err("nothing to load".to_string()))),
     }
 }
@@ -123,9 +143,24 @@ fn fetch(driver: &dyn Driver, session: &Session, segments: &[String]) -> futures
 /// Puts `children` in connection `id`'s tree, under the node with `segments`.
 fn store(ws: &mut Workspace, id: ConnectionId, segments: &[String], children: Children) {
     let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) else { return };
-    match (segments, children) {
-        ([_], Children::Databases(names)) => conn.databases = Some(names.into_iter().map(|name| Database { name, schemas: None }).collect()),
-        _ => {}
+    let children = match children {
+        Children::Databases(names) => return conn.databases = Some(names.into_iter().map(|name| Database { name, schemas: None }).collect()),
+        other => other,
+    };
+    let Some(db) = conn.databases.iter_mut().flatten().find(|d| Some(&d.name) == segments.get(1)) else { return };
+    let children = match children {
+        Children::Schemas(names) => return db.schemas = Some(names.into_iter().map(|name| Schema { name, objects: None }).collect()),
+        other => other,
+    };
+    let Some(schema) = db.schemas.iter_mut().flatten().find(|s| Some(&s.name) == segments.get(2)) else { return };
+    let children = match children {
+        Children::Objects(objects) => return schema.objects = Some(objects),
+        other => other,
+    };
+    let mut objects = schema.objects.iter_mut().flatten();
+    let Some(object) = objects.find(|o| Some(o.kind.as_str()) == segments.get(3).map(String::as_str) && Some(&o.name) == segments.get(4)) else { return };
+    if let Children::Columns(columns) = children {
+        object.columns = Some(columns);
     }
 }
 
@@ -360,6 +395,8 @@ struct FlatNode {
     suffix: Option<SharedString>,
     /// A primary-key column.
     pk: bool,
+    /// Its children are not loaded yet, so expanding it loads them.
+    unloaded: bool,
 }
 
 fn group_label(kind: ObjectKind) -> &'static str {
@@ -429,11 +466,13 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
             expanded: false,
             suffix: None,
             pk: false,
+            unloaded: false,
         };
         let key = conn.id.0.to_string();
         // Expanding a connection that isn't connected connects it, even with no databases yet.
-        let expandable = conn.databases.as_ref().is_some_and(|d| !d.is_empty()) || conn.status != ConnectionStatus::Connected;
-        let open = push(FlatNode { expandable, ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
+        let expandable = conn.databases.as_ref().is_none_or(|d| !d.is_empty()) || conn.status != ConnectionStatus::Connected;
+        let unloaded = conn.databases.is_none();
+        let open = push(FlatNode { expandable, unloaded, ..node(key.clone(), NodeKind::Connection(conn.kind()), &conn.name, 0) });
         match &conn.status {
             ConnectionStatus::Connected => {}
             ConnectionStatus::Error(msg) => {
@@ -449,18 +488,29 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
         if !open {
             continue;
         }
+        // While a level loads, one row says so in place of its children.
+        if loading.contains(&key) {
+            push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 1));
+            continue;
+        }
         for db in conn.databases.iter().flatten() {
             let key = format!("{key}/{}", seg(&db.name));
-            if !push(FlatNode { expandable: db.schemas.as_ref().is_some_and(|s| !s.is_empty()), ..node(key.clone(), NodeKind::Database, &db.name, 1) }) {
+            let (expandable, unloaded) = (db.schemas.as_ref().is_none_or(|s| !s.is_empty()), db.schemas.is_none());
+            if !push(FlatNode { expandable, unloaded, ..node(key.clone(), NodeKind::Database, &db.name, 1) }) {
+                continue;
+            }
+            if loading.contains(&key) {
+                push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 2));
                 continue;
             }
             for schema in db.schemas.iter().flatten() {
                 let key = format!("{key}/{}", seg(&schema.name));
-                if !push(FlatNode { expandable: schema.objects.as_ref().is_some_and(|o| !o.is_empty()), ..node(key.clone(), NodeKind::Schema, &schema.name, 2) }) {
+                let (expandable, unloaded) = (schema.objects.as_ref().is_none_or(|o| !o.is_empty()), schema.objects.is_none());
+                if !push(FlatNode { expandable, unloaded, ..node(key.clone(), NodeKind::Schema, &schema.name, 2) }) {
                     continue;
                 }
                 if loading.contains(&key) {
-                    push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading objects…", 3));
+                    push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 3));
                     continue;
                 }
                 let mut groups: BTreeMap<ObjectKind, Vec<&DbObject>> = BTreeMap::new();
@@ -479,8 +529,13 @@ fn flatten(ws: &Workspace, expanded: &HashSet<String>, loading: &HashSet<String>
                         let suffix = row_estimate_label(obj.row_estimate).map(Into::into);
                         let parts = [(Part::Columns, obj.columns.as_ref().map_or(0, Vec::len)), (Part::Keys, obj.keys.len()), (Part::Indexes, obj.indexes.len())];
                         let parts: Vec<_> = parts.into_iter().filter(|(_, n)| *n > 0).collect();
-                        let expandable = opens_tab(kind) && !parts.is_empty();
-                        if !push(FlatNode { expandable, suffix, ..node(key.clone(), kind, &obj.name, 4) }) {
+                        let unloaded = opens_tab(kind) && obj.columns.is_none();
+                        let expandable = opens_tab(kind) && !parts.is_empty() || unloaded;
+                        if !push(FlatNode { expandable, unloaded, suffix, ..node(key.clone(), kind, &obj.name, 4) }) {
+                            continue;
+                        }
+                        if loading.contains(&key) {
+                            push(node(format!("{key}/{LOADING}"), NodeKind::Loading, "Loading…", 5));
                             continue;
                         }
                         for (part, n) in parts {
@@ -564,8 +619,7 @@ pub struct Explorer {
     workspace: Entity<Workspace>,
     driver: Arc<dyn Driver>,
     expanded: HashSet<String>,
-    /// Schema keys whose objects have "arrived", and those still waiting on mock latency.
-    loaded: HashSet<String>,
+    /// Nodes whose children are loading.
     loading: HashSet<String>,
     /// Each connection's generation: every connect bumps it, and a result carrying an older one is dropped.
     gens: HashMap<ConnectionId, u64>,
@@ -593,7 +647,6 @@ impl Explorer {
         // ponytail: starts collapsed; QX-020 restores the last session's expanded nodes
         let expanded = HashSet::new();
         let nodes = flatten(workspace.read(cx), &expanded, &HashSet::new(), false);
-        let loaded = HashSet::new();
         // Edits made elsewhere (rename, recolor, connect, new params, delete) rebuild the rows.
         cx.observe(&workspace, |this, _, cx| {
             this.forget_changed(cx);
@@ -609,7 +662,7 @@ impl Explorer {
             }
         })
         .detach();
-        Self { field, workspace, driver, expanded, loaded, loading: HashSet::new(), gens: HashMap::new(), sessions: HashMap::new(), params, filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
+        Self { field, workspace, driver, expanded, loading: HashSet::new(), gens: HashMap::new(), sessions: HashMap::new(), params, filter: String::new(), nodes, selected: 0, picked: false, marked: HashSet::new(), rename: None, scroll: UniformListScrollHandle::new(), focus: cx.focus_handle() }
     }
 
     fn set_expanded(&mut self, ix: usize, open: bool, cx: &mut Context<Self>) {
@@ -622,23 +675,13 @@ impl Explorer {
             let ci = node.conn;
             return self.connect(ci, cx);
         }
-        if open && node.kind == NodeKind::Schema && !self.loaded.contains(&key) && self.loading.insert(key.clone()) {
-            let key = key.clone();
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(mock::latency()).await;
-                this.update(cx, |this, cx| {
-                    this.loading.remove(&key);
-                    this.loaded.insert(key);
-                    this.refresh(cx);
-                })
-                .ok();
-            })
-            .detach();
+        if open && node.unloaded {
+            self.load(key.clone(), cx);
         }
         if open {
-            self.expanded.insert(node.key.clone());
+            self.expanded.insert(key);
         } else {
-            self.expanded.remove(&node.key);
+            self.expanded.remove(&key);
         }
         self.refresh(cx);
     }
@@ -690,7 +733,7 @@ impl Explorer {
         for id in changed {
             self.next_gen(id);
             self.sessions.retain(|(conn, _), _| *conn != id);
-            for keys in [&mut self.expanded, &mut self.loaded, &mut self.loading] {
+            for keys in [&mut self.expanded, &mut self.loading] {
                 keys.retain(|k| !of_connection(k, id));
             }
         }
@@ -720,14 +763,33 @@ impl Explorer {
         let Some(conn) = ws.connections.iter().find(|c| c.id.0.to_string() == segments[0]) else { return };
         let id = conn.id;
         let db = segments.get(1).cloned().unwrap_or_else(|| database_of(&conn.params));
-        let Some(session) = self.sessions.get(&(id, db)).cloned() else { return };
+        // Another Postgres database needs a session of its own, opened with the same settings.
+        let open: crate::db::Reply<Session> = match self.sessions.get(&(id, db.clone())) {
+            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
+            None => self.driver.connect(&on_database(&conn.params, &db)),
+        };
         if !self.loading.insert(key.clone()) {
             return;
         }
         let generation = self.gens.get(&id).copied().unwrap_or_default();
-        let reply = fetch(&*self.driver, &session, &segments);
+        let driver = self.driver.clone();
         cx.spawn(async move |this, cx| {
-            let result = reply.await;
+            let result = match open.await {
+                Ok(session) => {
+                    let current = this.update(cx, |this, _| {
+                        let current = this.gens.get(&id) == Some(&generation);
+                        if current {
+                            this.sessions.entry((id, db)).or_insert_with(|| session.clone());
+                        }
+                        current
+                    });
+                    if !current.unwrap_or(false) {
+                        return;
+                    }
+                    fetch(&*driver, &session, &segments).await
+                }
+                Err(reason) => Err(reason),
+            };
             this.update(cx, |this, cx| {
                 if this.gens.get(&id) != Some(&generation) {
                     return;
@@ -749,12 +811,7 @@ impl Explorer {
 
     /// Opens every ancestor of `key`, selects it and focuses the tree.
     pub fn reveal(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
-        for (depth, ancestor) in ancestors(key).into_iter().enumerate() {
-            if depth == 2 {
-                self.loaded.insert(ancestor.to_string());
-            }
-            self.expanded.insert(ancestor.to_string());
-        }
+        self.expanded.extend(ancestors(key).into_iter().map(String::from));
         self.put_filter(String::new(), window, cx);
         if let Some(ix) = self.nodes.iter().position(|n| n.key == key) {
             self.select(ix, cx);
@@ -762,15 +819,12 @@ impl Explorer {
         window.focus(&self.focus, cx);
     }
 
-    /// `*`: opens the node and everything under it, skipping the loading step.
+    /// `*`: opens the node and everything loaded under it.
     fn expand_all_under(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(root) = self.nodes.get(ix).map(|n| n.key.clone()) else { return };
         let prefix = format!("{root}/");
         let all = flatten(self.workspace.read(cx), &HashSet::new(), &HashSet::new(), true);
         for n in all.into_iter().filter(|n| n.expandable && (n.key.starts_with(&prefix) || n.key == root)) {
-            if n.kind == NodeKind::Schema {
-                self.loaded.insert(n.key.clone());
-            }
             self.expanded.insert(n.key);
         }
         self.refresh(cx);
@@ -2033,6 +2087,7 @@ mod tests {
             let ix = e.nodes.iter().position(|n| n.label.as_ref() == label).unwrap_or_else(|| panic!("{label} row"));
             e.set_expanded(ix, true, cx);
         });
+        cx.run_until_parked();
     }
 
     /// The labels of the rows under the row labelled `label`.
