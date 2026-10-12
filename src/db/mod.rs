@@ -139,4 +139,41 @@ mod tests {
             assert_eq!(reason(&err), want, "{severity} {message}");
         }
     }
+
+    /// A driver error wrapping `source` under a prefix, the shape tokio-postgres builds.
+    #[derive(Debug)]
+    struct Wrapped(&'static str, Box<dyn StdError + Send + Sync>);
+
+    impl std::fmt::Display for Wrapped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}: {}", self.0, self.1)
+        }
+    }
+
+    impl StdError for Wrapped {
+        fn source(&self) -> Option<&(dyn StdError + 'static)> {
+            Some(&*self.1)
+        }
+    }
+
+    #[test]
+    fn reason_of_a_nested_io_error_is_the_io_text_only() {
+        let io = |text: &str| Box::new(std::io::Error::other(text.to_string()));
+        // (error, reason)
+        let cases: [(Box<dyn StdError + Send + Sync>, &str); 4] = [
+            (Box::new(Wrapped("error connecting to server", io("Connection refused (os error 111)"))), "Connection refused (os error 111)"),
+            (Box::new(Wrapped("db error", Box::new(Wrapped("error connecting to server", io("no route to host"))))), "no route to host"),
+            (io("unexpected EOF"), "unexpected EOF"),
+            (Box::new(Wrapped("error performing TLS handshake", "server does not support TLS".into())), "server does not support TLS"),
+        ];
+        for (err, want) in cases {
+            assert_eq!(reason(&*err), want, "{err}");
+        }
+        // A real refused connect: tokio-postgres' "error connecting to server:" prefix is gone.
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let err = login_error(port, "bob");
+        let io = std::iter::successors(Some(&err as &(dyn StdError + 'static)), |e| (*e).source()).last().unwrap().to_string();
+        assert_eq!(reason(&err), io, "{err}");
+        assert!(!reason(&err).contains("error connecting to server"), "{err}");
+    }
 }
