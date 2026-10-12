@@ -6,7 +6,7 @@ use futures::FutureExt;
 use futures::future::ready;
 
 use super::{Driver, Reply, Session, blocking, foreign};
-use crate::model::{Column, ConnectionParams, DbObject};
+use crate::model::{Column, ConnectionParams, DbObject, ObjectKind};
 
 pub struct Sqlite;
 
@@ -18,6 +18,11 @@ pub struct SqliteSession {
 
 fn not_yet<T: Send + 'static>() -> Reply<T> {
     futures::future::ready(Err("not implemented".to_string())).boxed()
+}
+
+/// `ident` as a quoted SQLite identifier.
+fn quote(ident: &str) -> String {
+    format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
 /// Opens the file `params` names.
@@ -58,8 +63,23 @@ impl Driver for Sqlite {
         ready(Ok(vec!["main".to_string()])).boxed()
     }
 
-    fn objects(&self, _session: &Session, _schema: &str) -> Reply<Vec<DbObject>> {
-        not_yet()
+    fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>> {
+        let Session::Sqlite(session) = session else { return foreign() };
+        let (session, schema) = (session.clone(), schema.to_string());
+        blocking(move || {
+            let sql = format!(
+                "SELECT type, name FROM {}.sqlite_schema \
+                 WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY type, name",
+                quote(&schema)
+            );
+            let conn = session.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |row| {
+                let kind = if row.get::<_, String>(0)? == "view" { ObjectKind::View } else { ObjectKind::Table };
+                Ok(DbObject { kind, name: row.get(1)?, columns: Vec::new(), keys: Vec::new(), indexes: Vec::new(), row_estimate: None })
+            });
+            rows.and_then(Iterator::collect).map_err(|e| e.to_string())
+        })
     }
 
     fn columns(&self, _session: &Session, _schema: &str, _object: &str) -> Reply<Vec<Column>> {
