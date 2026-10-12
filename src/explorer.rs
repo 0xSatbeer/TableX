@@ -1961,6 +1961,59 @@ mod tests {
         }
     }
 
+    /// Expands the connection and answers its connect and databases; returns a handle that dies with the session.
+    fn connect_answered(
+        explorer: &gpui_kit::Entity<super::Explorer>,
+        fake: &crate::db::fake::Fake,
+        cx: &mut gpui_kit::VisualTestContext,
+        databases: &[&str],
+    ) -> std::sync::Weak<crate::db::fake::FakeSession> {
+        expand_connection(explorer, cx);
+        let session = crate::db::fake::session("app");
+        let crate::db::Session::Fake(alive) = &session else { unreachable!() };
+        let alive = Arc::downgrade(alive);
+        fake.resolve("connect app", Ok(session));
+        cx.run_until_parked();
+        fake.resolve("databases app", Ok(databases.iter().map(|d| d.to_string()).collect::<Vec<_>>()));
+        cx.run_until_parked();
+        alive
+    }
+
+    #[gpui_kit::test]
+    fn editing_the_params_or_deleting_a_connected_connection_closes_its_sessions(cx: &mut gpui_kit::TestAppContext) {
+        use ConnectionStatus::*;
+        // (change, session closed, status after (None = deleted), rows after)
+        let cases: [(&str, bool, Option<ConnectionStatus>, &[&str]); 5] = [
+            ("password", true, Some(Disconnected), &["pg"]),
+            ("database", true, Some(Disconnected), &["pg"]),
+            ("delete", true, None, &[]),
+            ("name", false, Some(Connected), &["renamed", "app"]),
+            ("nothing", false, Some(Connected), &["pg", "app"]),
+        ];
+        for (change, closed, want, rows) in cases {
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            let session = connect_answered(&explorer, &fake, &mut cx, &["app"]);
+            assert_eq!(labels(&explorer, &cx), ["pg", "app"], "{change}: connected and open");
+            let id = crate::model::ConnectionId(1);
+            workspace.update(&mut cx, |ws, cx| {
+                match change {
+                    "password" => ws.edit(id, "pg".into(), 0, false, pg_params(Some("secret"), "app")),
+                    "database" => ws.edit(id, "pg".into(), 0, false, pg_params(None, "other")),
+                    "name" => ws.edit(id, "renamed".into(), 0, false, pg_params(None, "app")),
+                    "nothing" => ws.edit(id, "pg".into(), 0, false, pg_params(None, "app")),
+                    _ => drop(ws.delete(id)),
+                }
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert_eq!(session.upgrade().is_none(), closed, "{change}: session closed");
+            assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections.first().map(|c| c.status.clone())), want, "{change}: status");
+            assert_eq!(labels(&explorer, &cx), rows, "{change}: rows");
+            let collapsed = explorer.read_with(&cx, |e, _| e.nodes.first().is_none_or(|n| !n.expanded));
+            assert_eq!(collapsed, closed, "{change}: tree collapsed");
+        }
+    }
+
     #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
