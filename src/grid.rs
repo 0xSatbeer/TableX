@@ -1132,6 +1132,11 @@ impl Grid {
         self.all.row_count()
     }
 
+    /// Whether the grid has no columns at all, as a table tab has before its data can be read.
+    pub fn is_blank(&self) -> bool {
+        self.all.columns().is_empty()
+    }
+
     pub fn selection_key(&self) -> SelectionKey {
         let (rows, cols) = self.selection();
         let cols = cols.filter_map(|c| self.col_order.get(c).copied()).filter(|&s| !self.hidden[s]).collect();

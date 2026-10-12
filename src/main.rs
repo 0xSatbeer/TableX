@@ -234,11 +234,12 @@ impl Shell {
             this.tab_changed(cx);
         })
         .detach();
-        cx.subscribe(&explorer, |this, _, ev: &explorer::OpenObject, cx| {
-            // ponytail: every table shows a mock query result until drivers land (Phase 5)
-            let rows = match mock::run_query(&format!("SELECT * FROM {}", ev.name)) {
-                model::QueryOutcome::Rows(rs) => rs,
-                _ => mock::edge_cases(),
+        cx.subscribe(&explorer, move |this, _, ev: &explorer::OpenObject, cx| {
+            // Table data needs query execution (QX-033); until then only the demo shows rows.
+            let rows = match demo.then(|| mock::run_query(&format!("SELECT * FROM {}", ev.name))) {
+                None => model::ResultSet { columns: Vec::new(), rows: Vec::new() },
+                Some(model::QueryOutcome::Rows(rs)) => rs,
+                Some(_) => mock::edge_cases(),
             };
             let mut tab = grid_tab(ev.key.clone(), Rc::new(rows), cx);
             (tab.title, tab.origin, tab.preview) = (ev.name.clone(), Some(ev.origin.clone()), ev.preview);
@@ -752,6 +753,24 @@ impl Render for Shell {
         let panel_focused = focused(Some(self.bottom_panel.focus_handle(cx)), cx);
         let theme = cx.theme();
         let content = match self.tabs.active().map(|t| &t.content) {
+            // shortcut: a grid with no columns is a table tab's placeholder; QX-033 fills it with the table's rows
+            Some(TabContent::Grid(grid)) if grid.read(cx).is_blank() => v_flex()
+                .size_full()
+                .child(div().flex_1().child(grid.clone()))
+                .child(
+                    div()
+                        .debug_selector(|| "table-placeholder".into())
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(theme::ui_sm())
+                        .text_color(theme.muted_foreground)
+                        .child("Table data arrives in a later version"),
+                )
+                .relative()
+                .into_any_element(),
             Some(TabContent::Grid(grid)) => grid.clone().into_any_element(),
             Some(TabContent::Console) => {
                 let production = self.tabs.active().and_then(|t| t.origin.as_ref()).is_some_and(|o| o.production);
