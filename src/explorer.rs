@@ -774,14 +774,15 @@ impl Explorer {
         let Some(conn) = ws.connections.iter().find(|c| c.id.0.to_string() == segments[0]) else { return };
         let id = conn.id;
         let db = segments.get(1).cloned().unwrap_or_else(|| conn.params.database());
+        if matches!(self.loads.get(&key), Some(Load::Loading)) {
+            return;
+        }
         // Another Postgres database needs a session of its own, opened with the same settings.
         let open: crate::db::Reply<Session> = match self.sessions.get(&(id, db.clone())) {
             Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
             None => self.driver.connect(&on_database(&conn.params, &db)),
         };
-        if matches!(self.loads.insert(key.clone(), Load::Loading), Some(Load::Loading)) {
-            return;
-        }
+        self.loads.insert(key.clone(), Load::Loading);
         let generation = self.gens.get(&id).copied().unwrap_or_default();
         let driver = self.driver.clone();
         cx.spawn(async move |this, cx| {
