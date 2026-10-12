@@ -2800,4 +2800,27 @@ mod tests {
             assert_eq!(labels(&explorer, &cx), ["pg", "app"], "{status:?}: open on its databases");
         }
     }
+
+    #[gpui_kit::test]
+    fn a_failed_refresh_of_a_database_schema_or_table_shows_an_error_row_and_removes_the_previous_children(cx: &mut gpui_kit::TestAppContext) {
+        // (row refreshed, its load)
+        let cases = [("app", "schemas app"), ("public", "objects app/public"), ("t", "columns app/public/t")];
+        for (row, call) in cases {
+            let (mut cx, explorer, workspace, fake) = tables_open(cx);
+            expand(&explorer, &mut cx, "t");
+            answer(&fake, "columns app/public/t", Ok(()));
+            cx.run_until_parked();
+            refresh(&explorer, &mut cx, row);
+            answer(&fake, call, Err("permission denied"));
+            cx.run_until_parked();
+            assert_eq!(under(&explorer, &cx, row), ["Could not load: permission denied"], "{row}: error row under it");
+            assert_eq!(status_of(&workspace, &cx), ConnectionStatus::Connected, "{row}");
+            // The old children are gone, so Retry loads from nothing.
+            let ix = labels(&explorer, &cx).iter().position(|r| r.starts_with("Could not")).unwrap();
+            explorer.update_in(&mut cx, |e, _, cx| e.retry(ix, cx));
+            cx.run_until_parked();
+            assert_eq!(fake.pending(), [call], "{row}");
+            assert_eq!(under(&explorer, &cx, row), ["Loading…"], "{row}: previous children removed");
+        }
+    }
 }
