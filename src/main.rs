@@ -3013,6 +3013,42 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_normal_start_reads_connections_through_the_real_driver_not_the_samples(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus;
+        let (window, shell) = open_started(cx, super::Mode::Normal);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+        // The sample local.db: the mock driver would serve its tree, the real one finds no file there.
+        let mut local = crate::mock::workspaces().remove(0).connections.remove(2);
+        (local.status, local.databases) = (ConnectionStatus::Disconnected, None);
+        let path = match &local.params {
+            crate::model::ConnectionParams::Sqlite { path } => path.display().to_string(),
+            other => panic!("local.db is SQLite, got {other:?}"),
+        };
+        assert!(!std::path::Path::new(&path).exists(), "{path} must not exist");
+        workspace.update(&mut cx, |ws, cx| {
+            ws.connections.push(local);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let at = cx.debug_bounds("tree-label-0").expect("local.db row drawn").center();
+        cx.simulate_click(at, Default::default());
+        cx.simulate_keystrokes("right");
+        // The real driver answers from its own threads.
+        let status = |cx: &gpui_kit::VisualTestContext| workspace.read_with(cx, |ws, _| ws.connections[0].status.clone());
+        for _ in 0..250 {
+            cx.run_until_parked();
+            if status(&cx) != ConnectionStatus::Connecting {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(status(&cx), ConnectionStatus::Error(format!("No file at {path}")), "the real driver's answer");
+        let labels: Vec<String> = explorer.read_with(&cx, |e, _| e.row_labels().iter().map(|l| l.to_string()).collect());
+        assert!(!labels.iter().any(|l| l == "main"), "no sample databases, got {labels:?}");
+    }
+
+    #[gpui_kit::test]
     fn a_demo_start_shows_the_acme_workspace_the_sample_tabs_and_the_mock_log(cx: &mut gpui_kit::TestAppContext) {
         let (window, shell) = open_started(cx, super::Mode::Demo);
         let cx = gpui_kit::VisualTestContext::from_window(window, cx);
