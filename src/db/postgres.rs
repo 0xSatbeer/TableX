@@ -4,8 +4,6 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::FutureExt;
-
 use super::tls::Tls;
 use super::{Driver, Reply, Session, foreign, reason, spawn, timeout_reason};
 use crate::model::{Column, ConnectionParams, DbObject, ObjectKind, SslMode};
@@ -81,9 +79,6 @@ const KINDS: [ObjectKind; 7] = [
     ObjectKind::Type,
 ];
 
-fn not_yet<T: Send + 'static>() -> Reply<T> {
-    futures::future::ready(Err("not implemented".to_string())).boxed()
-}
 
 impl Driver for Postgres {
     fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
@@ -161,8 +156,30 @@ impl Driver for Postgres {
         })
     }
 
-    fn columns(&self, _session: &Session, _schema: &str, _object: &str) -> Reply<Vec<Column>> {
-        not_yet()
+    fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
+        let (schema, object) = (schema.to_string(), object.to_string());
+        read(session, |session| async move {
+            let sql = "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
+                         pg_get_expr(d.adbin, d.adrelid), coalesce(a.attnum = ANY (i.indkey), false) \
+                       FROM pg_attribute a \
+                       JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                       LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
+                       LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisprimary \
+                       WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped \
+                       ORDER BY a.attnum";
+            let rows = session.query(sql, &[&schema, &object]).await?;
+            Ok(rows
+                .iter()
+                .map(|row| Column {
+                    name: row.get(0),
+                    data_type: row.get(1),
+                    nullable: row.get(2),
+                    default: row.get(3),
+                    is_pk: row.get(4),
+                    enum_values: Vec::new(),
+                })
+                .collect())
+        })
     }
 }
 
