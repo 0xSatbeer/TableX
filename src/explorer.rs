@@ -2904,4 +2904,37 @@ mod tests {
             assert_eq!(fake.pending(), want, "{rows:?}");
         }
     }
+
+    #[gpui_kit::test]
+    fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_and_only_the_connection_edit_and_delete(cx: &mut gpui_kit::TestAppContext) {
+        let mut t = table("t");
+        t.columns = Some(vec![column("id")]);
+        let f = crate::model::DbObject { kind: ObjectKind::Function, ..table("f()") };
+        // (row right-clicked, Edit… shown, Delete shown, Refresh shown)
+        let cases = [
+            ("pg", true, true, true),
+            ("app", false, false, true),
+            ("public", false, false, true),
+            ("Tables", false, false, false),
+            ("t", false, false, true),
+            ("Columns", false, false, false),
+            ("id", false, false, false),
+            ("v", false, false, true),
+            ("f()", false, false, false),
+        ];
+        for (row, edit, delete, refresh) in cases {
+            let conn = loaded(pg(1, "pg", "app"), "app", "public", vec![t.clone(), view("v"), f.clone()]);
+            let (mut cx, explorer, _, _) = open_explorer(cx, vec![conn]);
+            for step in ["pg", "app", "public", "Tables", "t", "Columns", "Views", "Functions"] {
+                expand(&explorer, &mut cx, step);
+            }
+            let ix = labels(&explorer, &cx).iter().position(|l| l == row).unwrap_or_else(|| panic!("{row} row"));
+            let at = cx.debug_bounds(format!("tree-label-{ix}").leak()).unwrap_or_else(|| panic!("{row} row drawn")).center();
+            cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
+            cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
+            cx.run_until_parked();
+            let shown = ["menu-edit", "menu-delete", "menu-refresh"].map(|item| cx.debug_bounds(item).is_some());
+            assert_eq!(shown, [edit, delete, refresh], "{row}: Edit…, Delete, Refresh");
+        }
+    }
 }
