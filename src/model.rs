@@ -66,8 +66,14 @@ pub enum SslMode {
 }
 
 /// A password. In memory only, never written anywhere (QX-035 moves it to the keyring).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("***")
+    }
+}
 
 impl Secret {
     pub fn new(value: impl Into<String>) -> Self {
