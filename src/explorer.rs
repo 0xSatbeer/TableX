@@ -2413,6 +2413,20 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn expanding_a_database_again_while_it_loads_opens_no_second_session(cx: &mut gpui_kit::TestAppContext) {
+        // (database expanded, collapsed and expanded again while loading, the calls pending)
+        let cases = [("analytics", vec!["connect analytics"]), ("app", vec!["schemas app"])];
+        for (db, want) in cases {
+            let (mut cx, explorer, _, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            connect_answered(&explorer, &fake, &mut cx, &["analytics", "app"]);
+            expand(&explorer, &mut cx, db);
+            collapse(&explorer, &mut cx, db);
+            expand(&explorer, &mut cx, db);
+            assert_eq!(fake.pending(), want, "{db}");
+        }
+    }
+
+    #[gpui_kit::test]
     fn a_load_that_finds_its_session_closed_drops_it_and_retry_reconnects(cx: &mut gpui_kit::TestAppContext) {
         use crate::db::fake::{close, session};
         // (row whose load fails, that load, session closed by the server, the calls Retry makes in turn)
