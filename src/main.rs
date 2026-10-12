@@ -2920,6 +2920,32 @@ mod tests {
         assert_eq!(copied, "local.db", "only the selected row is copied, not new.db");
     }
 
+    /// The Shell as the app starts it in `mode`, parked.
+    fn open_started(cx: &mut gpui_kit::TestAppContext, mode: super::Mode) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        use gpui_kit::AppContext as _;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| super::Shell::new(mode, window, cx))).expect("open test window")
+        });
+        gpui_kit::VisualTestContext::from_window(window.into(), cx).run_until_parked();
+        (window.into(), shell)
+    }
+
+    #[gpui_kit::test]
+    fn a_normal_start_shows_no_connections_one_empty_console_and_empty_logs(cx: &mut gpui_kit::TestAppContext) {
+        let (window, shell) = open_started(cx, super::Mode::Normal);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        assert!(shell.read_with(&cx, |this, cx| this.workspace.read(cx).connections.is_empty()), "no connections");
+        assert!(cx.debug_bounds("explorer-empty").is_some(), "the explorer shows No connections yet");
+        let tabs = shell.read_with(&cx, |this, _| this.tabs.tabs.iter().map(|t| (t.title.to_string(), matches!(t.content, super::TabContent::Console), t.origin.is_none())).collect::<Vec<_>>());
+        assert_eq!(tabs, [("console-1".to_string(), true, true)], "one console tab, on no connection");
+        assert_eq!(shell.read_with(&cx, |this, cx| this.editor.read(cx).value()), "", "the console is empty");
+        assert!(shell.read_with(&cx, |this, cx| this.bottom_panel.read(cx).logged_connections().is_empty()), "Logs are empty");
+    }
+
     #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
