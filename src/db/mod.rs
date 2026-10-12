@@ -60,7 +60,7 @@ pub fn reason(err: &(dyn StdError + 'static)) -> String {
 
 /// The reason for our own connect timeout of `after`.
 pub fn timeout_reason(after: std::time::Duration) -> String {
-    String::new()
+    format!("timeout expired after {} s", after.as_secs_f64())
 }
 
 fn runtime() -> &'static tokio::runtime::Runtime {
