@@ -79,3 +79,57 @@ fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send +
 fn foreign<T: Send + 'static>() -> Reply<T> {
     futures::future::ready(Err("session belongs to another driver".to_string())).boxed()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// A server on a local port that answers the first startup message with an ErrorResponse
+    /// carrying `severity` and `message`, the way Postgres reports a failed login.
+    fn server_rejecting(severity: &'static str, code: &'static str, message: &'static str) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut len = [0; 4];
+            stream.read_exact(&mut len).unwrap();
+            let mut startup = vec![0; u32::from_be_bytes(len) as usize - 4];
+            stream.read_exact(&mut startup).unwrap();
+            let mut fields = Vec::new();
+            for (tag, value) in [(b'S', severity), (b'V', severity), (b'C', code), (b'M', message)] {
+                fields.push(tag);
+                fields.extend_from_slice(value.as_bytes());
+                fields.push(0);
+            }
+            fields.push(0);
+            let mut reply = vec![b'E'];
+            reply.extend_from_slice(&(fields.len() as u32 + 4).to_be_bytes());
+            reply.extend_from_slice(&fields);
+            stream.write_all(&reply).unwrap();
+        });
+        port
+    }
+
+    /// The tokio-postgres error a login to `port` as `user` fails with.
+    fn login_error(port: u16, user: &str) -> tokio_postgres::Error {
+        let mut config = tokio_postgres::Config::new();
+        config.host("127.0.0.1").port(port).user(user).ssl_mode(tokio_postgres::config::SslMode::Disable);
+        runtime().block_on(config.connect(tokio_postgres::NoTls)).err().expect("the login fails")
+    }
+
+    #[test]
+    fn reason_of_a_server_error_is_its_message_only() {
+        // (severity, SQLSTATE, server message, reason)
+        let cases = [
+            ("FATAL", "28P01", r#"password authentication failed for user "bob""#, r#"password authentication failed for user "bob""#),
+            ("FATAL", "3D000", r#"database "nope" does not exist"#, r#"database "nope" does not exist"#),
+            ("ERROR", "42501", "permission denied for schema app", "permission denied for schema app"),
+        ];
+        for (severity, code, message, want) in cases {
+            let err = login_error(server_rejecting(severity, code, message), "bob");
+            assert_eq!(reason(&err), want, "{severity} {message}");
+        }
+    }
+}
