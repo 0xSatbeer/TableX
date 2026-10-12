@@ -740,14 +740,14 @@ impl Explorer {
         // Before the already-open check: a failed connection stays open and still connects again.
         if open && matches!(node.kind, NodeKind::Connection(_)) && self.workspace.read(cx).connections[node.conn].status != ConnectionStatus::Connected {
             let ci = node.conn;
-            return self.connect(ci, cx);
+            return self.connect(ci, false, cx);
         }
         if node.expanded == open {
             return;
         }
         let key = node.key.clone();
         if open && node.unloaded {
-            self.load(key.clone(), cx);
+            self.load(key.clone(), false, cx);
         }
         if open {
             self.expanded.insert(key);
@@ -758,8 +758,8 @@ impl Explorer {
     }
 
     /// Connects connection `ci`, then lists its databases. Expanding a connection that is not
-    /// connected and Retry on a failed one both come here.
-    fn connect(&mut self, ci: usize, cx: &mut Context<Self>) {
+    /// connected and Retry on a failed one both come here. `all` expands everything it lists, as `*` does.
+    fn connect(&mut self, ci: usize, all: bool, cx: &mut Context<Self>) {
         let key = self.workspace.read(cx).connections[ci].id.0.to_string();
         // Opened even when a connect is already running, so an expand while Connecting isn't lost.
         self.expanded.insert(key.clone());
@@ -787,7 +787,7 @@ impl Explorer {
                     Ok(session) => {
                         this.sessions.insert((id, params.database()), session);
                         this.set_status(id, ConnectionStatus::Connected, cx);
-                        this.load(key, cx);
+                        this.load(key, all, cx);
                     }
                     Err(reason) => this.set_status(id, ConnectionStatus::Error(reason), cx),
                 }
@@ -829,8 +829,9 @@ impl Explorer {
         });
     }
 
-    /// Loads the children of the node `key` through its database's session.
-    fn load(&mut self, key: String, cx: &mut Context<Self>) {
+    /// Loads the children of the node `key` through its database's session. With `all` (`*`), the
+    /// databases, schemas and object groups it brings are expanded and loaded in turn; tables are not.
+    fn load(&mut self, key: String, all: bool, cx: &mut Context<Self>) {
         let segments = segments(&key);
         let ws = self.workspace.read(cx);
         let Some(conn) = ws.connections.iter().find(|c| c.id.0.to_string() == segments[0]) else { return };
@@ -882,11 +883,16 @@ impl Explorer {
                             let child = format!("{key}/{tail}");
                             this.expanded.retain(|k| *k != child && !k.starts_with(&format!("{child}/")));
                         }
+                        if all {
+                            // Databases and schemas open; a schema opens its object groups but not the objects.
+                            let open = new.iter().map(|tail| if segments.len() < 3 { tail.as_str() } else { tail.split('/').next().unwrap_or_default() });
+                            this.expanded.extend(open.map(|tail| format!("{key}/{tail}")));
+                        }
                         // Expanded children are re-read in turn, and so on down.
                         for tail in new {
                             let child = format!("{key}/{tail}");
                             if this.expanded.contains(&child) {
-                                this.load(child, cx);
+                                this.load(child, all, cx);
                             }
                         }
                     }
@@ -923,10 +929,10 @@ impl Explorer {
     fn retry(&mut self, ix: usize, cx: &mut Context<Self>) {
         let node = &self.nodes[ix];
         match node.kind {
-            NodeKind::ConnError => self.connect(node.conn, cx),
+            NodeKind::ConnError => self.connect(node.conn, false, cx),
             NodeKind::LoadError => {
                 let parent = node.key[..node.key.len() - ERROR.len() - 1].to_string();
-                self.load(parent, cx);
+                self.load(parent, false, cx);
             }
             _ => {}
         }
@@ -936,9 +942,9 @@ impl Explorer {
     fn refresh_row(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(node) = self.nodes.get(ix) else { return };
         if matches!(node.kind, NodeKind::Connection(_)) && self.workspace.read(cx).connections[node.conn].status != ConnectionStatus::Connected {
-            return self.connect(node.conn, cx);
+            return self.connect(node.conn, false, cx);
         }
-        self.load(node.key.clone(), cx);
+        self.load(node.key.clone(), false, cx);
     }
 
     /// Opens every ancestor of `key`, selects it and focuses the tree.
@@ -951,13 +957,25 @@ impl Explorer {
         window.focus(&self.focus, cx);
     }
 
-    /// `*`: opens the node and everything loaded under it.
+    /// `*`: opens the node and everything under it, loading the databases and schemas not loaded
+    /// yet, but leaves tables collapsed so no columns are fetched.
     fn expand_all_under(&mut self, ix: usize, cx: &mut Context<Self>) {
-        let Some(root) = self.nodes.get(ix).map(|n| n.key.clone()) else { return };
+        let Some(node) = self.nodes.get(ix) else { return };
+        if matches!(node.kind, NodeKind::Connection(_)) && self.workspace.read(cx).connections[node.conn].status != ConnectionStatus::Connected {
+            return self.connect(node.conn, true, cx);
+        }
+        let root = node.key.clone();
         let prefix = format!("{root}/");
         let all = flatten(self.workspace.read(cx), &HashSet::new(), &HashMap::new(), true);
-        for n in all.into_iter().filter(|n| n.expandable && (n.key.starts_with(&prefix) || n.key == root)) {
+        let mut unloaded = Vec::new();
+        for n in all.into_iter().filter(|n| n.expandable && !matches!(n.kind, NodeKind::Object(_)) && (n.key.starts_with(&prefix) || n.key == root)) {
+            if n.unloaded {
+                unloaded.push(n.key.clone());
+            }
             self.expanded.insert(n.key);
+        }
+        for key in unloaded {
+            self.load(key, true, cx);
         }
         self.refresh(cx);
     }
@@ -1967,8 +1985,11 @@ mod tests {
         let (mut cx, explorer, _, _) = open_explorer(cx, vec![conn]);
         explorer.update_in(&mut cx, |e, _, cx| {
             e.expand_all_under(0, cx);
-            let columns = e.nodes.iter().position(|n| n.label.as_ref() == "Columns").expect("Columns row");
-            e.set_expanded(columns, true, cx);
+            // `*` leaves tables collapsed.
+            for label in ["users", "Columns"] {
+                let ix = e.nodes.iter().position(|n| n.label.as_ref() == label).unwrap_or_else(|| panic!("{label} row"));
+                e.set_expanded(ix, true, cx);
+            }
         });
         // (row, key): segments are connection id, database, schema, kind, object, then the structure tail
         let cases = [
@@ -2389,7 +2410,7 @@ mod tests {
             Some("objects") => fake.resolve(label, result.map(|()| vec![table("t"), table("u")]).map_err(err)),
             Some("columns") => fake.resolve(label, result.map(|()| vec![column("id")]).map_err(err)),
             Some("databases") => fake.resolve(label, result.map(|()| strings(&["app"])).map_err(err)),
-            _ => fake.resolve(label, result.map(|()| crate::db::fake::session("app")).map_err(err)),
+            _ => fake.resolve(label, result.map(|()| crate::db::fake::session(label.split(' ').nth(1).unwrap_or_default())).map_err(err)),
         }
     }
 
