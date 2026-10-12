@@ -2550,4 +2550,41 @@ mod tests {
             assert_eq!(shown, tip, "{} chars at {width}px: tooltip shown", name.len());
         }
     }
+
+    /// Connected `pg` on database app, open down to schema public's tables t and u.
+    fn tables_open(cx: &mut gpui_kit::TestAppContext) -> (gpui_kit::VisualTestContext, gpui_kit::Entity<super::Explorer>, gpui_kit::Entity<crate::model::Workspace>, Arc<crate::db::fake::Fake>) {
+        let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+        connect_answered(&explorer, &fake, &mut cx, &["app"]);
+        for step in ["app", "public", "Tables"] {
+            expand(&explorer, &mut cx, step);
+            for pending in fake.pending() {
+                answer(&fake, &pending, Ok(()));
+            }
+            cx.run_until_parked();
+        }
+        (cx, explorer, workspace, fake)
+    }
+
+    /// Right-clicks the row labelled `label` and picks Refresh from its menu.
+    fn refresh(explorer: &gpui_kit::Entity<super::Explorer>, cx: &mut gpui_kit::VisualTestContext, label: &str) {
+        let ix = labels(explorer, cx).iter().position(|l| l == label).unwrap_or_else(|| panic!("{label} row"));
+        let at = cx.debug_bounds(format!("tree-label-{ix}").leak()).unwrap_or_else(|| panic!("{label} row drawn")).center();
+        cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
+        cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
+        cx.run_until_parked();
+        let item = cx.debug_bounds("menu-refresh").unwrap_or_else(|| panic!("Refresh in {label}'s menu"));
+        cx.simulate_click(item.center(), Default::default());
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn refreshing_a_schema_after_a_table_was_created_elsewhere_shows_it_sorted(cx: &mut gpui_kit::TestAppContext) {
+        let (mut cx, explorer, _, fake) = tables_open(cx);
+        assert_eq!(under(&explorer, &cx, "Tables"), ["t", "u"]);
+        refresh(&explorer, &mut cx, "public");
+        assert_eq!(fake.pending(), ["objects app/public"]);
+        fake.resolve("objects app/public", Ok(vec![table("t"), table("t2"), table("u")]));
+        cx.run_until_parked();
+        assert_eq!(under(&explorer, &cx, "Tables"), ["t", "t2", "u"]);
+    }
 }
