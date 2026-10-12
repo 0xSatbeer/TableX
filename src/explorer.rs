@@ -2672,4 +2672,28 @@ mod tests {
             assert_eq!(fake.pending(), Vec::<String>::new(), "t open {t_open}");
         }
     }
+
+    #[gpui_kit::test]
+    fn refreshing_a_schema_with_table_t_expanded_keeps_t_expanded_with_its_columns_re_read(cx: &mut gpui_kit::TestAppContext) {
+        // (row refreshed, the loads it runs before t's columns, answered with the sample)
+        let cases = [("public", vec!["objects app/public"]), ("app", vec!["schemas app", "objects app/public"])];
+        for (row, loads) in cases {
+            let (mut cx, explorer, _, fake) = tables_open(cx);
+            expand(&explorer, &mut cx, "t");
+            fake.resolve("columns app/public/t", Ok(vec![column("id")]));
+            cx.run_until_parked();
+            expand(&explorer, &mut cx, "Columns");
+            refresh(&explorer, &mut cx, row);
+            for call in loads {
+                assert_eq!(fake.pending(), [call], "{row}");
+                answer(&fake, call, Ok(()));
+                cx.run_until_parked();
+            }
+            assert_eq!(fake.pending(), ["columns app/public/t"], "{row}: t's columns are re-read");
+            assert!(is_expanded(&explorer, &cx, "t"), "{row}: t stays expanded");
+            fake.resolve("columns app/public/t", Ok(vec![column("id"), column("name")]));
+            cx.run_until_parked();
+            assert_eq!(under(&explorer, &cx, "t"), ["Columns", "id", "name"], "{row}");
+        }
+    }
 }
