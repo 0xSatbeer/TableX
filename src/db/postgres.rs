@@ -120,6 +120,11 @@ impl Driver for Postgres {
     fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>> {
         let schema = schema.to_string();
         read(session, |session| async move {
+            // The catalogs are readable without USAGE, so check it the way a query on the schema would.
+            let usage = session.query("SELECT has_schema_privilege($1, 'USAGE')", &[&schema]).await?;
+            if !usage[0].get::<_, bool>(0) {
+                return Err(format!("permission denied for schema {schema}"));
+            }
             // One statement for every kind, so a schema of any size costs one round trip.
             // Each branch names its catalog and oid, so objects an extension owns can be dropped.
             let sql = "SELECT k, name, estimate FROM ( \
