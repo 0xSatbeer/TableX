@@ -2288,6 +2288,29 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn testing_a_connected_connection_leaves_its_status_and_sessions_alone(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus::Connected;
+        // (the driver's answer to Test)
+        let cases: [Result<(), String>; 2] = [Ok(()), Err("password authentication failed".into())];
+        for answer in cases {
+            let (fake, window, shell) = open_with_fake(cx);
+            let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+            let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
+            workspace.update(&mut cx, |ws, _| ws.connections.iter_mut().find(|c| c.name == "prod-pg").unwrap().status = Connected);
+            let dialog = open_edit_dialog(&mut cx, &shell, "prod-pg");
+            click(&mut cx, "dialog-test");
+            assert_eq!(fake.pending().len(), 1, "{answer:?}: only the test call, no connect or disconnect");
+            let status = |cx: &gpui_kit::VisualTestContext| workspace.read_with(cx, |ws, _| ws.connections.iter().find(|c| c.name == "prod-pg").unwrap().status.clone());
+            assert_eq!(status(&cx), Connected, "{answer:?}: while testing");
+            answer_tests(&fake, answer.clone());
+            cx.run_until_parked();
+            assert_eq!(status(&cx), Connected, "{answer:?}: after the result");
+            assert!(fake.pending().is_empty(), "{answer:?}: nothing else was called");
+            assert!(dialog.read_with(&cx, |d, cx| d.test_line(cx)).is_some(), "{answer:?}: result shown");
+        }
+    }
+
+    #[gpui_kit::test]
     fn test_connection_is_enabled_only_while_the_connection_fields_are_valid(cx: &mut gpui_kit::TestAppContext) {
         // (edits, Test connection enabled)
         let cases: Vec<(Vec<(&str, &str)>, bool)> = vec![
