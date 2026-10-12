@@ -1,10 +1,11 @@
 //! The Postgres driver: tokio-postgres on the shared runtime.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
 
-use super::{Driver, Reply, Session};
+use super::{Driver, Reply, Session, reason, spawn, timeout_reason};
 use crate::model::{Column, ConnectionParams, DbObject};
 
 pub struct Postgres {
@@ -20,6 +21,29 @@ impl Default for Postgres {
 
 pub struct PgSession {
     client: tokio_postgres::Client,
+    /// Drives the socket; ends once the client is dropped and the server has been told goodbye.
+    io: tokio::task::JoinHandle<()>,
+}
+
+/// Connects with `params` and runs the first query, all within `timeout`.
+async fn open(params: ConnectionParams, timeout: Duration) -> Result<PgSession, String> {
+    let ConnectionParams::Postgres { host, port, user, password, database, .. } = params else {
+        return Err("not a Postgres connection".into());
+    };
+    let mut config = tokio_postgres::Config::new();
+    config.host(&host).port(port).user(&user).dbname(&database);
+    if let Some(password) = &password {
+        config.password(password.expose());
+    }
+    let connect = async {
+        let (client, connection) = config.connect(tokio_postgres::NoTls).await.map_err(|e| reason(&e))?;
+        let io = tokio::spawn(async move {
+            connection.await.ok();
+        });
+        client.simple_query("SELECT 1").await.map_err(|e| reason(&e))?;
+        Ok(PgSession { client, io })
+    };
+    tokio::time::timeout(timeout, connect).await.unwrap_or_else(|_| Err(timeout_reason(timeout)))
 }
 
 fn not_yet<T: Send + 'static>() -> Reply<T> {
@@ -27,12 +51,19 @@ fn not_yet<T: Send + 'static>() -> Reply<T> {
 }
 
 impl Driver for Postgres {
-    fn connect(&self, _params: &ConnectionParams) -> Reply<Session> {
-        not_yet()
+    fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
+        let open = open(params.clone(), self.timeout);
+        spawn(async move { Ok(Session::Postgres(Arc::new(open.await?))) })
     }
 
-    fn test(&self, _params: &ConnectionParams) -> Reply<()> {
-        not_yet()
+    fn test(&self, params: &ConnectionParams) -> Reply<()> {
+        let open = open(params.clone(), self.timeout);
+        spawn(async move {
+            let PgSession { client, io } = open.await?;
+            drop(client);
+            io.await.ok();
+            Ok(())
+        })
     }
 
     fn databases(&self, _session: &Session) -> Reply<Vec<String>> {
