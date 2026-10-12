@@ -1368,7 +1368,7 @@ impl Explorer {
                 Some(is_conn) => row
                     .context_menu(move |menu, _, _| {
                         let menu = if is_conn {
-                            menu.menu("Edit…", Box::new(crate::EditConnection)).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                            menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…")).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
                                 div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
                             })
                         } else {
