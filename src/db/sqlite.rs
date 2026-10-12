@@ -145,4 +145,31 @@ mod tests {
         let busy = std::time::Duration::from_secs(5);
         assert!(took >= busy && took < busy * 2, "took {took:?}");
     }
+
+    #[test]
+    fn objects_are_tables_and_views_sorted_by_name_without_internal_tables() {
+        use crate::model::ObjectKind::{Table, View};
+        let dir = tempfile::tempdir().unwrap();
+        // (schema sql, objects in main)
+        let cases = [
+            (
+                "CREATE TABLE b (x); CREATE TABLE a (id INTEGER PRIMARY KEY AUTOINCREMENT); CREATE VIEW v AS SELECT 1;",
+                vec![(Table, "a"), (Table, "b"), (View, "v")],
+            ),
+            ("", vec![]),
+            ("CREATE VIEW z AS SELECT 1; CREATE VIEW m AS SELECT 2;", vec![(View, "m"), (View, "z")]),
+            (
+                "CREATE TABLE t (x); CREATE INDEX t_x ON t (x); CREATE TRIGGER t_ai AFTER INSERT ON t BEGIN SELECT 1; END;",
+                vec![(Table, "t")],
+            ),
+            ("CREATE TABLE \"we/ird name\" (x); CREATE TABLE c (x);", vec![(Table, "c"), (Table, "we/ird name")]),
+        ];
+        for (i, (sql, want)) in cases.into_iter().enumerate() {
+            let session = block_on(Sqlite.connect(&params(&file(dir.path(), &format!("{i}.db"), sql)))).unwrap();
+            let objects = block_on(Sqlite.objects(&session, "main")).expect(sql);
+            let got: Vec<_> = objects.iter().map(|o| (o.kind, o.name.as_str())).collect();
+            assert_eq!(got, want, "{sql}");
+            assert!(objects.iter().all(|o| o.columns.is_empty() && o.row_estimate.is_none()), "{sql}");
+        }
+    }
 }
