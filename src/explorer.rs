@@ -2937,4 +2937,26 @@ mod tests {
             assert_eq!(shown, [edit, delete, refresh], "{row}: Edit…, Delete, Refresh");
         }
     }
+
+    #[gpui_kit::test]
+    fn refresh_never_fetches_table_rows(cx: &mut gpui_kit::TestAppContext) {
+        use std::{cell::RefCell, rc::Rc};
+        for row in ["pg", "app", "public", "t"] {
+            let (mut cx, explorer, _, fake) = tables_open(cx);
+            expand(&explorer, &mut cx, "t");
+            answer(&fake, "columns app/public/t", Ok(()));
+            cx.run_until_parked();
+            let opened = Rc::new(RefCell::new(0));
+            let sink = opened.clone();
+            let _sub = cx.update(|_, cx| cx.subscribe(&explorer, move |_, _: &super::OpenObject, _| *sink.borrow_mut() += 1));
+            refresh(&explorer, &mut cx, row);
+            // Answer everything the refresh reads, down the tree.
+            while let Some(call) = fake.pending().first().cloned() {
+                assert!(["databases ", "schemas ", "objects ", "columns "].iter().any(|p| call.starts_with(p)), "{row}: only introspection, got {call}");
+                answer(&fake, &call, Ok(()));
+                cx.run_until_parked();
+            }
+            assert_eq!(*opened.borrow(), 0, "{row}: no table opened, so no rows fetched");
+        }
+    }
 }
