@@ -2233,6 +2233,24 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn the_postgres_form_shows_a_masked_password_field_whose_text_reaches_the_params(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::Secret;
+        let (window, _shell) = open_plain(cx);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let dialog = open_add_dialog(&mut cx);
+        assert!(cx.debug_bounds("field-password").is_some(), "Postgres: Password field drawn");
+        assert!(dialog.read_with(&cx, |d, cx| d.password.read(cx).presentation().is_masked()), "masked");
+        fill(&mut cx, &dialog, &[("host", "h"), ("user", "u"), ("password", "hunter2")]);
+        let password = dialog.read_with(&cx, |d, cx| match d.form(cx).params() {
+            Ok(crate::model::ConnectionParams::Postgres { password, .. }) => password,
+            other => panic!("{other:?}"),
+        });
+        assert_eq!(password, Some(Secret::new("hunter2")));
+        click(&mut cx, "kind-sqlite");
+        assert!(cx.debug_bounds("field-password").is_none(), "SQLite: no Password field");
+    }
+
+    #[gpui_kit::test]
     fn test_connection_is_enabled_only_while_the_connection_fields_are_valid(cx: &mut gpui_kit::TestAppContext) {
         // (edits, Test connection enabled)
         let cases: Vec<(Vec<(&str, &str)>, bool)> = vec![

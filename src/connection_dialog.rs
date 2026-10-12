@@ -618,6 +618,17 @@ mod tests {
     }
 
     #[test]
+    fn the_password_reaches_the_params_as_a_secret_untrimmed_and_none_when_empty() {
+        let params = |password: &str, kind| Form { password: password.into(), kind, path: "/x.db".into(), ..ok_pg() }.params();
+        let cases = [("", None), ("hunter2", Some("hunter2")), (" pad ", Some(" pad ")), ("p@ss w0rd/\\", Some("p@ss w0rd/\\"))];
+        for (typed, want) in cases {
+            let Ok(ConnectionParams::Postgres { password, .. }) = params(typed, DbKind::Postgres) else { panic!("{typed:?}: valid") };
+            assert_eq!(password.as_ref().map(Secret::expose), want, "{typed:?}");
+        }
+        assert_eq!(params("hunter2", DbKind::Sqlite), Ok(ConnectionParams::Sqlite { path: PathBuf::from("/x.db") }), "SQLite ignores it");
+    }
+
+    #[test]
     fn button_state_cases() {
         let cases = [
             (false, true, (false, true)),
