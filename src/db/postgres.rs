@@ -206,7 +206,7 @@ pub(crate) mod testing {
 mod tests {
     use super::testing::{Scratch, admin, test_pg};
     use super::*;
-    use crate::model::Secret;
+    use crate::model::{Secret, SslMode};
     use futures::executor::block_on;
 
     /// `pg` logging in as `user` with `password`.
@@ -277,5 +277,33 @@ mod tests {
         let params = ConnectionParams::Postgres { host, port, user, password, database: missing.clone(), ssl };
         let got = block_on(Postgres::default().connect(&params)).map(drop);
         assert_eq!(got, Err(format!("database \"{missing}\" does not exist")));
+    }
+
+    fn local(host: &str, port: u16) -> ConnectionParams {
+        ConnectionParams::Postgres { host: host.into(), port, user: "u".into(), password: None, database: "d".into(), ssl: SslMode::Disable }
+    }
+
+    #[test]
+    fn connect_to_nothing_listening_or_an_unresolvable_host_fails_with_a_reason() {
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        // wording is the OS resolver's or socket's, so only a non-empty reason is asserted
+        let cases = [local("127.0.0.1", free), local("qx-nowhere.invalid", 5432)];
+        for params in cases {
+            match block_on(Postgres::default().connect(&params)) {
+                Err(reason) => assert!(!reason.is_empty(), "{params:?}"),
+                Ok(_) => panic!("{params:?} connected"),
+            }
+        }
+    }
+
+    #[test]
+    fn connect_to_a_server_that_never_answers_times_out() {
+        let stall = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let params = local("127.0.0.1", stall.local_addr().unwrap().port());
+        let started = std::time::Instant::now();
+        let got = block_on(Postgres { timeout: Duration::from_millis(200) }.connect(&params)).map(drop);
+        let took = started.elapsed();
+        assert_eq!(got, Err("timeout expired after 0.2 s".to_string()));
+        assert!(took >= Duration::from_millis(200) && took < Duration::from_secs(2), "took {took:?}");
     }
 }
