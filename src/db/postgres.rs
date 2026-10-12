@@ -160,7 +160,8 @@ impl Driver for Postgres {
         let (schema, object) = (schema.to_string(), object.to_string());
         read(session, |session| async move {
             let sql = "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
-                         pg_get_expr(d.adbin, d.adrelid), coalesce(a.attnum = ANY (i.indkey), false) \
+                         pg_get_expr(d.adbin, d.adrelid), coalesce(a.attnum = ANY (i.indkey), false), \
+                         ARRAY(SELECT e.enumlabel::text FROM pg_enum e WHERE e.enumtypid = a.atttypid ORDER BY e.enumsortorder) \
                        FROM pg_attribute a \
                        JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
                        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
@@ -176,7 +177,7 @@ impl Driver for Postgres {
                     nullable: row.get(2),
                     default: row.get(3),
                     is_pk: row.get(4),
-                    enum_values: Vec::new(),
+                    enum_values: row.get(5),
                 })
                 .collect())
         })
