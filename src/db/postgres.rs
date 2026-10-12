@@ -475,4 +475,28 @@ mod tests {
         assert_eq!(schemas(&db.name), Err(format!("permission denied for database \"{}\"", db.name)));
         assert_eq!(schemas("postgres"), Ok(vec!["public".to_string()]), "a database the role may connect to still lists");
     }
+
+    /// The objects of `schema` in the database `db` opens, and how many statements listing them took.
+    fn objects_of(db: &ConnectionParams, schema: &str) -> (Result<Vec<DbObject>, String>, usize) {
+        let session = session(db);
+        let Session::Postgres(pg) = &session else { unreachable!() };
+        let before = pg.statements.load(std::sync::atomic::Ordering::Relaxed);
+        let objects = block_on(Postgres::default().objects(&session, schema));
+        (objects, pg.statements.load(std::sync::atomic::Ordering::Relaxed) - before)
+    }
+
+    #[test]
+    fn a_schema_with_5000_tables_lists_them_all_in_at_most_2_statements() {
+        let Some(pg) = test_pg() else { return };
+        // Its own database, so dropping 5,000 tables never needs 5,000 locks at once.
+        let scratch = Scratch::new(&pg, "DATABASE", "");
+        let db = on(&pg, &scratch.name);
+        admin(&db, "DO $$ BEGIN FOR i IN 1..5000 LOOP EXECUTE format('CREATE TABLE t%s ()', i); \
+                      IF i % 500 = 0 THEN COMMIT; END IF; END LOOP; END $$");
+        let (objects, statements) = objects_of(&db, "public");
+        let objects = objects.expect("objects");
+        assert_eq!(objects.len(), 5000);
+        assert!(objects.iter().all(|o| o.kind == crate::model::ObjectKind::Table && o.name.starts_with('t')));
+        assert!(statements <= 2, "{statements} statements");
+    }
 }
