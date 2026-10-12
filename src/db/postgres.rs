@@ -515,4 +515,39 @@ mod tests {
         assert!(objects.iter().all(|o| o.kind == crate::model::ObjectKind::Table && o.name.starts_with('t')));
         assert!(statements <= 2, "{statements} statements");
     }
+
+    /// The (kind, name) of each object, names without their signature.
+    fn kinds_and_names(objects: &[DbObject]) -> Vec<(ObjectKind, &str)> {
+        objects.iter().map(|o| (o.kind, o.name.split('(').next().unwrap())).collect()
+    }
+
+    #[test]
+    fn objects_come_by_kind_each_sorted_by_name() {
+        let Some(pg) = test_pg() else { return };
+        let schema = Scratch::new(&pg, "SCHEMA", "");
+        let s = &schema.name;
+        // Created in reverse order, so a listing in creation order fails.
+        admin(&pg, &format!(
+            "SET search_path = {s};
+             CREATE TYPE tb AS ENUM ('x'); CREATE TYPE ta AS ENUM ('x');
+             CREATE PROCEDURE pb() LANGUAGE sql AS ''; CREATE PROCEDURE pa() LANGUAGE sql AS '';
+             CREATE FUNCTION fb() RETURNS int LANGUAGE sql AS 'SELECT 1'; CREATE FUNCTION fa() RETURNS int LANGUAGE sql AS 'SELECT 1';
+             CREATE SEQUENCE sb; CREATE SEQUENCE sa;
+             CREATE MATERIALIZED VIEW mb AS SELECT 1 AS x; CREATE MATERIALIZED VIEW ma AS SELECT 1 AS x;
+             CREATE VIEW vb AS SELECT 1 AS x; CREATE VIEW va AS SELECT 1 AS x;
+             CREATE TABLE b (); CREATE TABLE a (); CREATE TABLE \"B\" ();"
+        ));
+        use ObjectKind::*;
+        let want = [
+            (Table, "B"), (Table, "a"), (Table, "b"),
+            (View, "va"), (View, "vb"),
+            (MaterializedView, "ma"), (MaterializedView, "mb"),
+            (Sequence, "sa"), (Sequence, "sb"),
+            (Function, "fa"), (Function, "fb"),
+            (Procedure, "pa"), (Procedure, "pb"),
+            (Type, "ta"), (Type, "tb"),
+        ];
+        let (objects, _) = objects_of(&pg, s);
+        assert_eq!(kinds_and_names(&objects.expect("objects")), want);
+    }
 }
