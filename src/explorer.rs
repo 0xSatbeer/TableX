@@ -1848,6 +1848,37 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_failed_connection_connects_again_on_expand_or_retry(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::session;
+        use ConnectionStatus::*;
+        // (how, the connect's answer, status after)
+        let cases = [
+            ("expand", Ok(()), Connected),
+            ("expand", Err("password authentication failed for user \"u\""), Error("password authentication failed for user \"u\"".into())),
+            ("retry", Ok(()), Connected),
+            ("retry", Err("timeout expired after 10 s"), Error("timeout expired after 10 s".into())),
+            ("retry", Err("old"), Error("old".into())),
+        ];
+        for (how, answer, want) in cases {
+            let label = format!("{how} {answer:?}");
+            let conn = crate::model::Connection { status: Error("old".into()), ..pg(1, "pg", "app") };
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![conn]);
+            match how {
+                "expand" => expand_connection(&explorer, &mut cx),
+                _ => {
+                    explorer.update_in(&mut cx, |e, window, cx| e.reveal(&format!("1/{}", super::ERROR), window, cx));
+                    assert_eq!(explorer.read_with(&cx, |e, _| e.nodes[e.selected].kind), NodeKind::ConnError, "{label}");
+                    cx.simulate_keystrokes("enter");
+                }
+            }
+            assert_eq!(status_of(&workspace, &cx), Connecting, "{label}");
+            fake.resolve("connect app", answer.map(|()| session("app")).map_err(String::from));
+            cx.run_until_parked();
+            assert_eq!(status_of(&workspace, &cx), want, "{label}");
+        }
+    }
+
+    #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
         cx.update(gpui_kit::init);
