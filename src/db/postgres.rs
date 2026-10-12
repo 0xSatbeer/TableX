@@ -1,12 +1,13 @@
 //! The Postgres driver: tokio-postgres on the shared runtime.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
 
 use super::tls::Tls;
-use super::{Driver, Reply, Session, reason, spawn, timeout_reason};
+use super::{Driver, Reply, Session, foreign, reason, spawn, timeout_reason};
 use crate::model::{Column, ConnectionParams, DbObject, SslMode};
 
 pub struct Postgres {
@@ -24,6 +25,24 @@ pub struct PgSession {
     client: tokio_postgres::Client,
     /// Drives the socket; ends once the client is dropped and the server has been told goodbye.
     io: tokio::task::JoinHandle<()>,
+    /// Statements run through [`PgSession::query`], so tests can count an introspection's round trips.
+    statements: std::sync::atomic::AtomicUsize,
+}
+
+impl PgSession {
+    async fn query(&self, sql: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<Vec<tokio_postgres::Row>, String> {
+        self.statements.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.client.query(sql, params).await.map_err(|e| reason(&e))
+    }
+}
+
+/// Runs `read` on the session's runtime with `session`, or fails for another driver's session.
+fn read<T: Send + 'static, F>(session: &Session, read: impl FnOnce(Arc<PgSession>) -> F) -> Reply<T>
+where
+    F: Future<Output = Result<T, String>> + Send + 'static,
+{
+    let Session::Postgres(session) = session else { return foreign() };
+    spawn(read(session.clone()))
 }
 
 /// Connects with `params` and runs the first query, all within `timeout`.
@@ -46,7 +65,7 @@ async fn open(params: ConnectionParams, timeout: Duration) -> Result<PgSession, 
             connection.await.ok();
         });
         client.simple_query("SELECT 1").await.map_err(|e| reason(&e))?;
-        Ok(PgSession { client, io })
+        Ok(PgSession { client, io, statements: Default::default() })
     };
     tokio::time::timeout(timeout, connect).await.unwrap_or_else(|_| Err(timeout_reason(timeout)))
 }
@@ -64,15 +83,18 @@ impl Driver for Postgres {
     fn test(&self, params: &ConnectionParams) -> Reply<()> {
         let open = open(params.clone(), self.timeout);
         spawn(async move {
-            let PgSession { client, io } = open.await?;
+            let PgSession { client, io, .. } = open.await?;
             drop(client);
             io.await.ok();
             Ok(())
         })
     }
 
-    fn databases(&self, _session: &Session) -> Reply<Vec<String>> {
-        not_yet()
+    fn databases(&self, session: &Session) -> Reply<Vec<String>> {
+        read(session, |session| async move {
+            let sql = "SELECT datname::text FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY datname COLLATE \"C\"";
+            Ok(session.query(sql, &[]).await?.iter().map(|row| row.get(0)).collect())
+        })
     }
 
     fn schemas(&self, _session: &Session) -> Reply<Vec<String>> {
