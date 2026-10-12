@@ -1,10 +1,11 @@
 //! The SQLite driver: rusqlite on the shared runtime's blocking pool.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use futures::FutureExt;
+use futures::future::ready;
 
-use super::{Driver, Reply, Session};
+use super::{Driver, Reply, Session, blocking, foreign};
 use crate::model::{Column, ConnectionParams, DbObject};
 
 pub struct Sqlite;
@@ -19,21 +20,32 @@ fn not_yet<T: Send + 'static>() -> Reply<T> {
     futures::future::ready(Err("not implemented".to_string())).boxed()
 }
 
+/// Opens the file `params` names.
+fn open(params: &ConnectionParams) -> Result<SqliteSession, String> {
+    let ConnectionParams::Sqlite { path } = params else { return Err("not a SQLite connection".into()) };
+    let conn = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+    let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
+    Ok(SqliteSession { name, conn: Mutex::new(conn) })
+}
+
 impl Driver for Sqlite {
-    fn connect(&self, _params: &ConnectionParams) -> Reply<Session> {
-        not_yet()
+    fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
+        let params = params.clone();
+        blocking(move || Ok(Session::Sqlite(Arc::new(open(&params)?))))
     }
 
     fn test(&self, _params: &ConnectionParams) -> Reply<()> {
         not_yet()
     }
 
-    fn databases(&self, _session: &Session) -> Reply<Vec<String>> {
-        not_yet()
+    fn databases(&self, session: &Session) -> Reply<Vec<String>> {
+        let Session::Sqlite(session) = session else { return foreign() };
+        ready(Ok(vec![session.name.clone()])).boxed()
     }
 
-    fn schemas(&self, _session: &Session) -> Reply<Vec<String>> {
-        not_yet()
+    fn schemas(&self, session: &Session) -> Reply<Vec<String>> {
+        let Session::Sqlite(_) = session else { return foreign() };
+        ready(Ok(vec!["main".to_string()])).boxed()
     }
 
     fn objects(&self, _session: &Session, _schema: &str) -> Reply<Vec<DbObject>> {
