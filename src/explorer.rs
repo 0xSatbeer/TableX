@@ -2348,6 +2348,34 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_session_an_old_load_opens_after_an_edit_is_never_reused(cx: &mut gpui_kit::TestAppContext) {
+        use crate::db::fake::session;
+        // (the old session lands before or after the reconnect)
+        for after_reconnect in [false, true] {
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            connect_answered(&explorer, &fake, &mut cx, &["analytics", "app"]);
+            expand(&explorer, &mut cx, "analytics");
+            assert_eq!(fake.pending(), ["connect analytics"], "another database opens its own session");
+            workspace.update(&mut cx, |ws, cx| {
+                ws.edit(crate::model::ConnectionId(1), "pg".into(), 0, false, pg_params(Some("new"), "app"));
+                cx.notify();
+            });
+            cx.run_until_parked();
+            if !after_reconnect {
+                fake.resolve("connect analytics", Ok(session("analytics")));
+                cx.run_until_parked();
+            }
+            connect_answered(&explorer, &fake, &mut cx, &["analytics", "app"]);
+            if after_reconnect {
+                fake.resolve("connect analytics", Ok(session("analytics")));
+                cx.run_until_parked();
+            }
+            expand(&explorer, &mut cx, "analytics");
+            assert_eq!(fake.pending(), ["connect analytics"], "after reconnect {after_reconnect}: the old server's session is not reused");
+        }
+    }
+
+    #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
         cx.update(gpui_kit::init);
