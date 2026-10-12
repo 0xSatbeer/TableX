@@ -58,6 +58,11 @@ pub fn reason(err: &(dyn StdError + 'static)) -> String {
     }
 }
 
+/// The reason for our own connect timeout of `after`.
+pub fn timeout_reason(after: std::time::Duration) -> String {
+    String::new()
+}
+
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| {
@@ -177,5 +182,21 @@ mod tests {
         let io = std::iter::successors(Some(&err as &(dyn StdError + 'static)), |e| (*e).source()).last().unwrap().to_string();
         assert_eq!(reason(&err), io, "{err}");
         assert!(!reason(&err).contains("error connecting to server"), "{err}");
+    }
+
+    #[test]
+    fn reason_of_our_connect_timeout_names_the_seconds() {
+        use std::time::Duration;
+        // (timeout, reason)
+        let cases = [
+            (Duration::from_secs(10), "timeout expired after 10 s"),
+            (Duration::from_millis(200), "timeout expired after 0.2 s"),
+            (Duration::from_millis(1500), "timeout expired after 1.5 s"),
+            (Duration::from_millis(250), "timeout expired after 0.25 s"),
+            (Duration::from_secs(1), "timeout expired after 1 s"),
+        ];
+        for (after, want) in cases {
+            assert_eq!(timeout_reason(after), want, "{after:?}");
+        }
     }
 }
