@@ -2163,6 +2163,69 @@ mod tests {
         }
     }
 
+    /// Answers the pending call `label` with a sample of its level, or with `Err(reason)`.
+    fn answer(fake: &crate::db::fake::Fake, label: &str, result: Result<(), &str>) {
+        let err = |reason: &str| reason.to_string();
+        match label.split(' ').next() {
+            Some("schemas") => fake.resolve(label, result.map(|()| strings(&["public", "sibling"])).map_err(err)),
+            Some("objects") => fake.resolve(label, result.map(|()| vec![table("t"), table("u")]).map_err(err)),
+            Some("columns") => fake.resolve(label, result.map(|()| vec![column("id")]).map_err(err)),
+            Some("databases") => fake.resolve(label, result.map(|()| strings(&["app"])).map_err(err)),
+            _ => fake.resolve(label, result.map(|()| crate::db::fake::session("app")).map_err(err)),
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_load_shows_could_not_load_with_retry_under_that_node_only(cx: &mut gpui_kit::TestAppContext) {
+        // (row whose load fails, that load, how Retry is pressed, its rows once Retry succeeds)
+        let cases = [
+            ("public", "objects app/public", "enter", vec!["Tables"]),
+            ("public", "objects app/public", "click", vec!["Tables"]),
+            ("app", "schemas app", "enter", vec!["public", "sibling"]),
+            ("t", "columns app/public/t", "click", vec!["Columns"]),
+        ];
+        for (row, call, how, after) in cases {
+            let label = format!("{row} {how}");
+            let reason = format!("permission denied for {row}");
+            let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+            connect_answered(&explorer, &fake, &mut cx, &["app"]);
+            for step in ["app", "public", "Tables", "t"] {
+                expand(&explorer, &mut cx, step);
+                for pending in fake.pending() {
+                    answer(&fake, &pending, if pending == call { Err(&reason) } else { Ok(()) });
+                }
+                cx.run_until_parked();
+                if step == row {
+                    break;
+                }
+            }
+            let error = format!("Could not load: {reason}");
+            assert_eq!(under(&explorer, &cx, row), [error.clone()], "{label}: error row under {row}");
+            let rows = labels(&explorer, &cx);
+            assert_eq!(rows.iter().filter(|r| r.starts_with("Could not")).count(), 1, "{label}: under that node only: {rows:?}");
+            assert_eq!(status_style(&status_of(&workspace, &cx)).0, true, "{label}: the connection dot stays solid");
+
+            let ix = rows.iter().position(|r| *r == error).unwrap();
+            match how {
+                "enter" => {
+                    let key = explorer.read_with(&cx, |e, _| e.nodes[ix].key.clone());
+                    explorer.update_in(&mut cx, |e, window, cx| e.reveal(&key, window, cx));
+                    cx.simulate_keystrokes("enter");
+                }
+                _ => {
+                    let bounds = cx.debug_bounds(format!("retry-{ix}").leak()).unwrap_or_else(|| panic!("{label}: Retry drawn"));
+                    cx.simulate_click(bounds.center(), Default::default());
+                }
+            }
+            cx.run_until_parked();
+            assert_eq!(fake.pending(), [call], "{label}: Retry runs that node's load again");
+            answer(&fake, call, Ok(()));
+            cx.run_until_parked();
+            assert_eq!(under(&explorer, &cx, row), after, "{label}: the error row gives way to the children");
+            assert!(labels(&explorer, &cx).iter().all(|r| !r.starts_with("Could not")), "{label}: no error row left");
+        }
+    }
+
     #[gpui_kit::test]
     fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::{AppContext as _, Entity};
