@@ -2250,6 +2250,22 @@ mod tests {
         assert!(cx.debug_bounds("field-password").is_none(), "SQLite: no Password field");
     }
 
+    /// A fake driver and an app whose explorer and dialogs read through it.
+    fn open_with_fake(cx: &mut gpui_kit::TestAppContext) -> (std::sync::Arc<crate::db::fake::Fake>, gpui_kit::AnyWindowHandle, gpui_kit::Entity<super::Shell>) {
+        let fake = std::sync::Arc::new(crate::db::fake::Fake::default());
+        let (window, shell) = open_plain_with(cx, fake.clone());
+        (fake, window, shell)
+    }
+
+    /// Answers every pending Test call in order: the last with `last`, the earlier ones with Ok.
+    fn answer_tests(fake: &crate::db::fake::Fake, last: Result<(), String>) {
+        let labels = fake.pending();
+        assert!(!labels.is_empty() && labels.iter().all(|l| l.starts_with("test ")), "pending: {labels:?}");
+        for (ix, label) in labels.iter().enumerate() {
+            fake.resolve(label, if ix + 1 == labels.len() { last.clone() } else { Ok(()) });
+        }
+    }
+
     #[gpui_kit::test]
     fn the_edit_dialog_prefills_the_saved_password_masked_and_test_uses_it(cx: &mut gpui_kit::TestAppContext) {
         use crate::model::{ConnectionParams, Secret};
@@ -2302,46 +2318,34 @@ mod tests {
     #[gpui_kit::test]
     fn test_connection_reads_testing_while_it_runs_then_shows_the_outcome_line(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::component::ActiveTheme as _;
-        use std::time::Duration;
-        let file = std::env::current_exe().unwrap().display().to_string();
-        let dir = std::env::temp_dir().display().to_string();
-        let pg = |host: &'static str| vec![("host", host), ("user", "u")];
-        let sqlite = |path: String| vec![("kind-sqlite", ""), ("path", path.leak() as &str)];
-        // (edits, result line, success)
-        let cases: Vec<(Vec<(&str, &str)>, String, bool)> = vec![
-            (pg("db.local"), "Connection OK".into(), true),
-            (pg("db.invalid"), "Could not connect: Could not resolve host db.invalid".into(), false),
-            (pg("DB.INVALID"), "Could not connect: Could not resolve host DB.INVALID".into(), false),
-            (pg(" db.invalid "), "Could not connect: Could not resolve host db.invalid".into(), false),
-            (pg("invalid.db"), "Connection OK".into(), true),
-            (sqlite(file.clone()), "Connection OK".into(), true),
-            (sqlite(format!(" {file} ")), "Connection OK".into(), true),
-            (sqlite("/nope/x.db".into()), "Could not connect: No file at /nope/x.db".into(), false),
-            (sqlite(dir.clone()), format!("Could not connect: No file at {dir}"), false),
+        let pg = vec![("host", "db.local"), ("user", "u")];
+        let sqlite = |path: &'static str| vec![("kind-sqlite", ""), ("path", path)];
+        let wrong = r#"password authentication failed for user "u""#;
+        // (edits, driver's answer, result line, success)
+        let cases: Vec<(Vec<(&str, &str)>, Result<(), String>, String, bool)> = vec![
+            (pg.clone(), Ok(()), "Connection OK".into(), true),
+            (pg, Err(wrong.into()), format!("Could not connect: {wrong}"), false),
+            (sqlite("/data/app.db"), Ok(()), "Connection OK".into(), true),
+            (sqlite(" /data/app.db "), Ok(()), "Connection OK".into(), true),
+            (sqlite("/nope/x.db"), Err("No file at /nope/x.db".into()), "Could not connect: No file at /nope/x.db".into(), false),
+            (sqlite("/data/notes.txt"), Err("file is not a database".into()), "Could not connect: file is not a database".into(), false),
         ];
-        let latency = Duration::from_millis(1000);
-        crate::mock::set_latency(latency.as_millis() as u32);
-        let (window, _shell) = open_plain(cx);
+        let (fake, window, _shell) = open_with_fake(cx);
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
         let (success, danger) = cx.update(|_, cx| (cx.theme().success, cx.theme().danger));
-        for (edits, line, ok) in cases {
+        for (edits, answer, line, ok) in cases {
             cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
             let dialog = open_add_dialog(&mut cx);
             fill(&mut cx, &dialog, &edits);
             click(&mut cx, "dialog-test");
-            for _ in 0..2 {
-                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Testing…", false), "{edits:?}: running");
-                assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), None, "{edits:?}: no line yet");
-                cx.executor().advance_clock(latency / 2 - Duration::from_millis(1));
-                cx.run_until_parked();
-            }
-            cx.executor().advance_clock(Duration::from_millis(2));
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Testing…", false), "{edits:?}: running");
+            assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), None, "{edits:?}: no line yet");
+            answer_tests(&fake, answer);
             cx.run_until_parked();
             assert_eq!(dialog.read_with(&cx, |d, cx| d.test_button(cx)), ("Test connection", true), "{edits:?}: finished");
             assert_eq!(dialog.read_with(&cx, |d, cx| d.test_line(cx)), Some((line, if ok { success } else { danger })), "{edits:?}");
             assert!(cx.debug_bounds("test-result").is_some(), "{edits:?}: line drawn");
         }
-        crate::mock::set_latency(0);
     }
 
     #[gpui_kit::test]
@@ -2366,13 +2370,15 @@ mod tests {
             (pg, ("click", "kind-postgres"), true),
             (sqlite, ("click", "kind-sqlite"), true),
         ];
-        let (window, _shell) = open_plain(cx);
+        let (fake, window, _shell) = open_with_fake(cx);
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
         for (form, change, kept) in cases {
             cx.update(|window, cx| gpui_kit::component::WindowExt::close_all_dialogs(window, cx));
             let dialog = open_add_dialog(&mut cx);
             fill(&mut cx, &dialog, form);
             click(&mut cx, "dialog-test");
+            answer_tests(&fake, Ok(()));
+            cx.run_until_parked();
             let line = dialog.read_with(&cx, |d, cx| d.test_line(cx));
             assert!(line.is_some(), "{change:?}: line shown before the change");
             match change {
@@ -2396,7 +2402,6 @@ mod tests {
 
     #[gpui_kit::test]
     fn a_running_test_never_shows_its_result_after_a_field_change_save_or_close(cx: &mut gpui_kit::TestAppContext) {
-        use std::time::Duration;
         let form = [("name", "c"), ("host", "h"), ("user", "u")];
         // (what happens mid-test, then test again, line shown at the end, dialog open, connections added)
         let cases: [(&str, bool, Option<&str>, bool, usize); 10] = [
@@ -2411,18 +2416,15 @@ mod tests {
             ("escape", false, None, false, 0),
             ("click dialog-cancel", false, None, false, 0),
         ];
-        let latency = Duration::from_millis(1000);
-        crate::mock::set_latency(latency.as_millis() as u32);
         for (step, again, line, open, added) in cases {
             let label = format!("{step} again {again}");
-            let (window, shell) = open_plain(cx);
+            let (fake, window, shell) = open_with_fake(cx);
             let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
             let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
             let before = workspace.read_with(&cx, |ws, _| ws.connections.len());
             let dialog = open_add_dialog(&mut cx);
             fill(&mut cx, &dialog, &form);
             click(&mut cx, "dialog-test");
-            cx.executor().advance_clock(latency / 2);
             match step {
                 "host" => fill(&mut cx, &dialog, &[("host", "db.invalid")]),
                 "port" => fill(&mut cx, &dialog, &[("port", "5433")]),
@@ -2439,7 +2441,7 @@ mod tests {
             let held = if open || added > 0 { Some(dialog.clone()) } else { None };
             let weak = dialog.downgrade();
             drop(dialog);
-            cx.executor().advance_clock(latency);
+            answer_tests(&fake, if again { Err("Could not resolve host db.invalid".into()) } else { Ok(()) });
             cx.run_until_parked();
             let shown = weak.upgrade().and_then(|d| d.read_with(&cx, |d, cx| d.test_line(cx).map(|(text, _)| text)));
             assert_eq!(shown.as_deref(), line, "{label}: line");
@@ -2448,7 +2450,6 @@ mod tests {
             assert_eq!(workspace.read_with(&cx, |ws, _| ws.connections.len()), before + added, "{label}: connections added");
             drop(held);
         }
-        crate::mock::set_latency(0);
     }
 
     #[gpui_kit::test]

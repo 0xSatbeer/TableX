@@ -21,7 +21,7 @@ use gpui_kit::{AnyElement, App, AppContext as _, Context, Entity, EventEmitter, 
 use crate::db::Driver;
 use crate::explorer::validate_rename;
 use crate::model::*;
-use crate::{mock, theme};
+use crate::theme;
 
 /// The text fields, by the name the errors and tests use.
 const TEXT_FIELDS: [&str; 7] = ["name", "host", "port", "user", "password", "database", "path"];
@@ -229,15 +229,16 @@ impl ConnectionDialog {
         self.test_result = None;
     }
 
-    /// Starts Test connection on the current fields; its outcome lands after `mock::latency()`.
+    /// Starts Test connection on the current fields, through the driver.
     fn run_test(&mut self, cx: &mut Context<Self>) {
         let Ok(params) = self.form(cx).params() else { return };
         self.test_result = None;
+        let reply = self.driver.test(&params);
         self.test = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(mock::latency()).await;
+            let outcome = reply.await;
             this.update(cx, |this, cx| {
                 this.test = None;
-                this.test_result = Some(test_outcome(&params));
+                this.test_result = Some(outcome);
                 cx.notify();
             })
             .ok();
@@ -532,15 +533,6 @@ pub fn delete_enabled(name: &str, is_production: bool, typed: &str) -> bool {
     !is_production || typed == name
 }
 
-/// The Test connection result for valid params: `Ok` or the failure reason.
-pub fn test_outcome(params: &ConnectionParams) -> Result<(), String> {
-    match params {
-        ConnectionParams::Postgres { host, .. } => mock::test_connection(host),
-        ConnectionParams::Sqlite { path } if path.is_file() => Ok(()),
-        ConnectionParams::Sqlite { path } => Err(format!("No file at {}", path.display())),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -695,36 +687,6 @@ mod tests {
         ];
         for (name, prod, typed, want) in cases {
             assert_eq!(delete_enabled(name, prod, typed), want, "{name} {prod} {typed:?}");
-        }
-    }
-
-    #[test]
-    fn test_outcome_cases() {
-        let dir = std::env::temp_dir();
-        let file = std::env::current_exe().unwrap();
-        let postgres = |host: &str| ConnectionParams::Postgres {
-            host: host.into(),
-            port: 5432,
-            user: "u".into(),
-            password: None,
-            database: "d".into(),
-            ssl: SslMode::Prefer,
-        };
-        let sqlite = |path: &std::path::Path| ConnectionParams::Sqlite { path: path.to_path_buf() };
-        let no_file = |path: &std::path::Path| Err(format!("No file at {}", path.display()));
-        let missing = PathBuf::from("/nope/x.db");
-        let cases = [
-            (postgres("db.local"), Ok(())),
-            (postgres("db.invalid"), Err("Could not resolve host db.invalid".to_string())),
-            (postgres("DB.INVALID"), Err("Could not resolve host DB.INVALID".to_string())),
-            (postgres("invalid.db"), Ok(())),
-            (postgres("invalid"), Ok(())),
-            (sqlite(&file), Ok(())),
-            (sqlite(&missing), no_file(&missing)),
-            (sqlite(&dir), no_file(&dir)),
-        ];
-        for (params, want) in cases {
-            assert_eq!(test_outcome(&params), want, "{params:?}");
         }
     }
 }
