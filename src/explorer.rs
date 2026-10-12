@@ -2959,4 +2959,34 @@ mod tests {
             assert_eq!(*opened.borrow(), 0, "{row}: no table opened, so no rows fetched");
         }
     }
+
+    /// Answers every pending call with its sample until none is left; returns the calls made.
+    fn answer_all(fake: &crate::db::fake::Fake, cx: &mut gpui_kit::VisualTestContext, fail: &str) -> Vec<String> {
+        let mut calls = Vec::new();
+        while let Some(call) = fake.pending().first().cloned() {
+            answer(fake, &call, if call == fail { Err("permission denied") } else { Ok(()) });
+            cx.run_until_parked();
+            calls.push(call);
+        }
+        calls
+    }
+
+    /// The rows of one database expanded by `*`: its schemas, their object groups and objects.
+    const EXPANDED_DB: [&str; 8] = ["public", "Tables", "t", "u", "sibling", "Tables", "t", "u"];
+
+    #[gpui_kit::test]
+    fn star_on_a_connected_connection_with_two_unloaded_databases_expands_their_schemas_and_objects_but_never_tables(cx: &mut gpui_kit::TestAppContext) {
+        let (mut cx, explorer, _, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+        connect_answered(&explorer, &fake, &mut cx, &["analytics", "app"]);
+        explorer.update_in(&mut cx, |e, _, cx| e.expand_all_under(0, cx));
+        cx.run_until_parked();
+        let calls = answer_all(&fake, &mut cx, "");
+        assert!(calls.iter().all(|c| !c.starts_with("columns")), "no column fetch: {calls:?}");
+        for call in ["schemas analytics", "schemas app", "objects analytics/public", "objects analytics/sibling", "objects app/public", "objects app/sibling"] {
+            assert!(calls.iter().any(|c| c == call), "{call} fetched: {calls:?}");
+        }
+        let want: Vec<&str> = ["pg", "analytics"].iter().chain(&EXPANDED_DB).chain(&["app"]).chain(&EXPANDED_DB).copied().collect();
+        assert_eq!(labels(&explorer, &cx), want);
+        assert!(!is_expanded(&explorer, &cx, "t"), "tables stay collapsed");
+    }
 }
