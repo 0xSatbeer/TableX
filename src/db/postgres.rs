@@ -674,4 +674,24 @@ mod tests {
             assert_eq!(kinds_and_names(&objects.expect("objects")), want, "{schema}");
         }
     }
+
+    #[test]
+    fn objects_of_a_schema_without_usage_fail_with_the_reason() {
+        let Some(pg) = test_pg() else { return };
+        let role = Scratch::new(&pg, "ROLE", "LOGIN PASSWORD 'pw'");
+        let (closed, open) = (Scratch::new(&pg, "SCHEMA", ""), Scratch::new(&pg, "SCHEMA", ""));
+        admin(&pg, &format!("CREATE TABLE {0}.t (); CREATE TABLE {1}.t (); GRANT USAGE ON SCHEMA {1} TO {2}", closed.name, open.name, role.name));
+        let missing = super::testing::unique("qx_missing");
+        // (schema, objects or the reason)
+        let cases = [
+            (closed.name.as_str(), Err(format!("permission denied for schema {}", closed.name))),
+            (open.name.as_str(), Ok(vec![(ObjectKind::Table, "t".to_string())])),
+            (missing.as_str(), Err(format!("schema \"{missing}\" does not exist"))),
+        ];
+        let db = as_user(&pg, &role.name, Some("pw"));
+        for (schema, want) in cases {
+            let (objects, _) = objects_of(&db, schema);
+            assert_eq!(objects.map(|o| o.into_iter().map(|o| (o.kind, o.name)).collect()), want, "{schema}");
+        }
+    }
 }
