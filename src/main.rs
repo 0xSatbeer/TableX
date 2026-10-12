@@ -3061,6 +3061,50 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn in_demo_mode_expanding_notes_db_or_prod_pg_brings_the_sample_tree_from_the_mock_driver_after_the_latency(cx: &mut gpui_kit::TestAppContext) {
+        use crate::model::ConnectionStatus;
+        use std::time::Duration;
+        crate::mock::set_latency(500);
+        let (window, shell) = open_started(cx, super::Mode::Demo);
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        let (workspace, explorer) = shell.read_with(&cx, |this, _| (this.workspace.clone(), this.explorer.clone()));
+        // notes.db lives in the second sample workspace; add it here as a fresh connection.
+        let mut notes = crate::mock::workspaces().remove(1).connections.remove(1);
+        (notes.status, notes.databases) = (ConnectionStatus::Disconnected, None);
+        workspace.update(&mut cx, |ws, cx| {
+            ws.connections.push(notes);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let sample = |ws: usize, conn: usize| -> Vec<String> {
+            crate::mock::workspaces()[ws].connections[conn].databases.iter().flatten().map(|d| d.name.clone()).collect()
+        };
+        // (connection, its sample databases)
+        let cases = [("prod-pg", sample(0, 0)), ("notes.db", sample(1, 1))];
+        for (name, databases) in cases {
+            let under = |cx: &gpui_kit::VisualTestContext| {
+                let labels: Vec<String> = explorer.read_with(cx, |e, _| e.row_labels().iter().map(|l| l.to_string()).collect());
+                let at = labels.iter().position(|l| l == name).unwrap_or_else(|| panic!("{name} row"));
+                labels[at + 1..].iter().take_while(|l| !["prod-pg", "staging-pg", "local.db", "notes.db"].contains(&l.as_str())).cloned().collect::<Vec<_>>()
+            };
+            let row = explorer.read_with(&cx, |e, _| e.row_labels().iter().position(|l| l == name)).unwrap();
+            let at = cx.debug_bounds(format!("tree-label-{row}").leak()).unwrap_or_else(|| panic!("{name} row drawn")).center();
+            cx.simulate_click(at, Default::default());
+            cx.simulate_keystrokes("right");
+            cx.run_until_parked();
+            cx.executor().advance_clock(Duration::from_millis(499));
+            cx.run_until_parked();
+            assert!(!databases.iter().any(|d| under(&cx).contains(d)), "{name}: nothing before the latency, got {:?}", under(&cx));
+            cx.executor().advance_clock(Duration::from_secs(2));
+            cx.run_until_parked();
+            assert_eq!(under(&cx), databases, "{name}: the sample databases");
+            let status = workspace.read_with(&cx, |ws, _| ws.connections.iter().find(|c| c.name == name).unwrap().status.clone());
+            assert_eq!(status, ConnectionStatus::Connected, "{name}");
+        }
+        crate::mock::set_latency(0);
+    }
+
+    #[gpui_kit::test]
     fn deleting_the_last_connection_shows_no_connections_yet_with_an_add_connection_button(cx: &mut gpui_kit::TestAppContext) {
         // (filter typed once the workspace is empty)
         for filter in ["", "zzz"] {
