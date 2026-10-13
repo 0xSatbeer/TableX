@@ -16,8 +16,8 @@ use gpui_kit::*;
 
 use crate::db::{Driver, Opened, Session};
 use crate::model::{
-    ConnectionId, ConnectionParams, QueryError, QueryLogEntry, QuerySource, QueryStatus, ResultSet,
-    Workspace,
+    ColumnMeta, ConnectionId, ConnectionParams, QueryError, QueryLogEntry, QuerySource,
+    QueryStatus, ResultSet, Row, Workspace,
 };
 use crate::ui::{explorer, grid};
 use crate::{sql, theme};
@@ -25,8 +25,13 @@ use crate::{sql, theme};
 actions!(console, [RunStatement, RunScript, Rerun]);
 
 const CONTEXT: &str = "Console";
-/// Rows a result tab shows; paging past them comes later.
-const FETCH: usize = 500;
+/// Rows a result page shows and each fetch reads.
+const PAGE: usize = 500;
+/// Rows a result keeps in memory; past it the oldest pages are dropped.
+#[cfg(not(test))]
+const CAP: usize = 100_000;
+#[cfg(test)]
+const CAP: usize = 3 * PAGE;
 
 pub fn bind_keys(cx: &mut App) {
     // Matched at the editor's own depth, or its ctrl-enter (Enter { secondary }) wins.
@@ -60,12 +65,116 @@ pub struct Console {
     session: Option<Session>,
     last: Vec<String>,
     /// The last run's row-returning statements, in order.
-    pub results: Vec<Entity<grid::Grid>>,
+    pub results: Vec<Paged>,
     pub active_result: usize,
     pub messages: Vec<String>,
     /// Set by the shell: the editor's zoomed mono size.
     pub text_size: Pixels,
+    running: bool,
     _run: Option<Task<()>>,
+    _fetch: Option<Task<()>>,
+}
+
+/// One result tab: the rows read so far, shown a page at a time.
+pub struct Paged {
+    /// The current page's rows.
+    pub grid: Entity<grid::Grid>,
+    columns: Vec<ColumnMeta>,
+    rows: Vec<Row>,
+    /// Rows dropped from the front to stay under `CAP`.
+    dropped: usize,
+    page: usize,
+    /// Still open on the session, so Next can fetch more.
+    open: bool,
+    /// Every row has been read.
+    done: bool,
+    fetching: bool,
+}
+
+impl Paged {
+    fn new(rs: ResultSet, cx: &mut App) -> Self {
+        let done = rs.rows.len() < PAGE;
+        Self {
+            grid: cx.new(|cx| grid::Grid::new(Rc::new(rs.clone()), cx)),
+            columns: rs.columns,
+            rows: rs.rows,
+            dropped: 0,
+            page: 0,
+            open: !done,
+            done,
+            fetching: false,
+        }
+    }
+
+    fn total(&self) -> usize {
+        self.dropped + self.rows.len()
+    }
+
+    /// e.g. "501–1000 of 500+" while more rows may follow, "1001–1234 of 1234" once all are read.
+    pub fn label(&self) -> String {
+        let total = self.total();
+        if total == 0 {
+            return "No rows".into();
+        }
+        let start = self.page * PAGE;
+        let end = (start + PAGE).min(total);
+        match self.done {
+            true => format!("{}–{end} of {total}", start + 1),
+            false => format!("{}–{end} of {PAGE}+", start + 1),
+        }
+    }
+
+    /// Set when the page shown was dropped to save memory.
+    pub fn notice(&self) -> Option<String> {
+        (self.page * PAGE < self.dropped).then(|| {
+            format!(
+                "Rows before {} were dropped to save memory · Run again",
+                self.dropped + 1
+            )
+        })
+    }
+
+    pub fn can_prev(&self) -> bool {
+        self.page > 0
+    }
+
+    pub fn can_next(&self) -> bool {
+        (self.page + 1) * PAGE < self.total() || (self.open && !self.fetching)
+    }
+
+    /// Why Next is disabled on a result a later statement closed.
+    pub fn next_tip(&self) -> Option<&'static str> {
+        (!self.done && !self.open).then_some("Run this statement alone to page further")
+    }
+
+    /// Points the grid at the current page, unless it was dropped.
+    fn show(&mut self, cx: &mut App) {
+        let Some(start) = (self.page * PAGE).checked_sub(self.dropped) else {
+            return;
+        };
+        let end = (start + PAGE).min(self.rows.len());
+        let rs = ResultSet {
+            columns: self.columns.clone(),
+            rows: self.rows[start..end].to_vec(),
+        };
+        self.grid = cx.new(|cx| grid::Grid::new(Rc::new(rs), cx));
+    }
+
+    /// Appends a fetch's rows, moving to them, and drops whole pages from the front past `CAP`.
+    fn append(&mut self, rows: Vec<Row>, cx: &mut App) {
+        if rows.len() < PAGE {
+            (self.open, self.done) = (false, true);
+        }
+        if rows.is_empty() {
+            return;
+        }
+        self.rows.extend(rows);
+        let over = self.rows.len().saturating_sub(CAP).next_multiple_of(PAGE);
+        self.rows.drain(..over);
+        self.dropped += over;
+        self.page += 1;
+        self.show(cx);
+    }
 }
 
 impl EventEmitter<ConsoleEvent> for Console {}
@@ -98,7 +207,9 @@ impl Console {
             active_result: 0,
             messages: Vec::new(),
             text_size: theme::scaled(theme::MONO),
+            running: false,
             _run: None,
+            _fetch: None,
         }
     }
 
@@ -124,7 +235,7 @@ impl Console {
     }
 
     fn rerun(&mut self, _: &Rerun, _: &mut Window, cx: &mut Context<Self>) {
-        self.run(self.last.clone(), cx);
+        self.run_again(cx);
     }
 
     /// Runs `statements` one after another, stopping at the first error. Replaces the last run's output.
@@ -134,11 +245,13 @@ impl Console {
         }
         self.last = statements.clone();
         (self.results, self.active_result, self.messages) = (Vec::new(), 0, Vec::new());
+        self._fetch = None;
         cx.notify();
         let Some(params) = self.params(cx) else {
             self.messages.push("This console has no connection".into());
             return;
         };
+        self.running = true;
         let driver = self.target.driver.clone();
         let session = self.session.clone().filter(|s| !s.is_closed());
         self._run = Some(cx.spawn(async move |this, cx| {
@@ -186,11 +299,14 @@ impl Console {
         let Some(connection_id) = self.target.connection else {
             return false;
         };
+        // Each `open` closes the session's previous result.
+        for result in &mut self.results {
+            result.open = false;
+        }
         let (rows, status) = match step.result {
             Ok(Ran::Rows(rs)) => {
                 let n = rs.rows.len() as u64;
-                self.results
-                    .push(cx.new(|cx| grid::Grid::new(Rc::new(rs), cx)));
+                self.results.push(Paged::new(rs, cx));
                 (Some(n), QueryStatus::Ok)
             }
             Ok(Ran::Affected(n)) => {
@@ -218,9 +334,80 @@ impl Console {
     }
 
     fn finish(&mut self, error: Option<String>, cx: &mut Context<Self>) {
+        self.running = false;
         self.messages.extend(error);
         cx.emit(ConsoleEvent::Finished);
         cx.notify();
+    }
+}
+
+impl Console {
+    /// Shows result `ix`'s next page, fetching it when it isn't in memory yet.
+    pub fn next_page(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(result) = self.results.get_mut(ix) else {
+            return;
+        };
+        if !result.can_next() {
+            return;
+        }
+        if (result.page + 1) * PAGE < result.total() {
+            result.page += 1;
+            result.show(cx);
+            cx.notify();
+            return;
+        }
+        let Some(session) = self.session.clone().filter(|_| !self.running) else {
+            return;
+        };
+        result.fetching = true;
+        cx.notify();
+        let driver = self.target.driver.clone();
+        self._fetch = Some(cx.spawn(async move |this, cx| {
+            let rows = driver.fetch(&session, PAGE).await;
+            this.update(cx, |this, cx| this.fetched(ix, rows, cx)).ok();
+        }));
+    }
+
+    fn fetched(&mut self, ix: usize, rows: Result<Vec<Row>, QueryError>, cx: &mut Context<Self>) {
+        let Some(result) = self.results.get_mut(ix) else {
+            return;
+        };
+        result.fetching = false;
+        match rows {
+            Ok(rows) => result.append(rows, cx),
+            Err(error) => {
+                result.open = false;
+                self.messages.push(error.message);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Shows result `ix`'s previous page, from memory.
+    pub fn prev_page(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(result) = self.results.get_mut(ix).filter(|r| r.can_prev()) else {
+            return;
+        };
+        result.page -= 1;
+        result.show(cx);
+        cx.notify();
+    }
+
+    /// Re-runs the last run, as the dropped-rows notice offers.
+    pub fn run_again(&mut self, cx: &mut Context<Self>) {
+        self.run(self.last.clone(), cx);
+    }
+
+    /// Closes the session's open result, as when the console tab closes; a later run reconnects.
+    pub fn close_session(&mut self, cx: &mut Context<Self>) {
+        (self._run, self._fetch, self.running) = (None, None, false);
+        for result in &mut self.results {
+            (result.open, result.fetching) = (false, false);
+        }
+        if let Some(session) = self.session.take() {
+            cx.background_spawn(self.target.driver.close(&session))
+                .detach();
+        }
     }
 }
 
@@ -232,12 +419,12 @@ fn statements(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Opens `sql`; a row-returning statement's first `FETCH` rows are read.
+/// Opens `sql`; a row-returning statement's first `PAGE` rows are read.
 async fn run_one(driver: &dyn Driver, session: &Session, sql: String) -> Result<Ran, QueryError> {
     match driver.open(session, sql, true).await? {
         Opened::Affected(n) => Ok(Ran::Affected(n)),
         Opened::Rows(columns) => {
-            let rows = driver.fetch(session, FETCH).await?;
+            let rows = driver.fetch(session, PAGE).await?;
             Ok(Ran::Rows(ResultSet { columns, rows }))
         }
     }

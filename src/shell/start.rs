@@ -67,7 +67,11 @@ impl Shell {
         cx.subscribe(
             &explorer,
             |this, _, ev: &explorer::ConnectionDeleted, cx| {
-                this.tabs.drop_connection(ev.id);
+                for tab in this.tabs.drop_connection(ev.id) {
+                    if let TabContent::Console(console) = tab.content {
+                        console.update(cx, |console, cx| console.close_session(cx));
+                    }
+                }
                 this.tab_changed(cx);
             },
         )

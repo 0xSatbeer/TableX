@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Selectable as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::Input,
@@ -181,10 +181,30 @@ impl Render for BottomPanel {
     }
 }
 
-/// The console's result tabs as a strip over the active one's grid.
+/// The console's result tabs as a strip over the active one's page, with its page bar.
 fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
     let this = console.read(cx);
+    let ix = this.active_result;
+    let active = &this.results[ix];
+    let page = |id: &'static str, icon: IconName, tip: &'static str, next: bool| {
+        let console = console.clone();
+        Button::new(id)
+            .ghost()
+            .xsmall()
+            .icon(icon)
+            .tooltip(tip)
+            .accessibility_label(tip)
+            .on_click(move |_, _, cx| {
+                console.update(cx, |console, cx| {
+                    if next {
+                        console.next_page(ix, cx)
+                    } else {
+                        console.prev_page(ix, cx)
+                    }
+                })
+            })
+    };
     let strip = h_flex()
         .flex_none()
         .px(theme::space_8())
@@ -204,11 +224,51 @@ fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
                         cx.notify();
                     })
                 })
-        }));
-    v_flex().size_full().child(strip).child(
-        div()
-            .flex_1()
-            .min_h_0()
-            .child(this.results[this.active_result].clone()),
-    )
+        }))
+        .child(div().flex_1())
+        .child(
+            page("result-prev", IconName::ChevronLeft, "Previous page", false)
+                .disabled(!active.can_prev()),
+        )
+        .child(
+            div()
+                .text_size(theme::ui_sm())
+                .text_color(theme.muted_foreground)
+                .child(active.label()),
+        )
+        .child(
+            page(
+                "result-next",
+                IconName::ChevronRight,
+                active.next_tip().unwrap_or("Next page"),
+                true,
+            )
+            .disabled(!active.can_next()),
+        );
+    let body = match active.notice() {
+        Some(notice) => {
+            let console = console.clone();
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap(theme::space_8())
+                .text_color(theme.muted_foreground)
+                .child(notice)
+                .child(
+                    Button::new("result-run-again")
+                        .small()
+                        .label("Run again")
+                        .on_click(move |_, _, cx| {
+                            console.update(cx, |console, cx| console.run_again(cx))
+                        }),
+                )
+                .into_any_element()
+        }
+        None => active.grid.clone().into_any_element(),
+    };
+    v_flex()
+        .size_full()
+        .child(strip)
+        .child(div().flex_1().min_h_0().child(body))
 }

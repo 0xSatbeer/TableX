@@ -11,7 +11,7 @@ use crate::model::{
 
 /// A console on the mock workspace's first connection (app_db) holding `text`, its editor focused,
 /// and the log entries it emits.
-fn console(
+pub(super) fn console(
     cx: &mut gpui_kit::TestAppContext,
     text: &str,
 ) -> (
@@ -58,7 +58,7 @@ fn console(
     (fake, vcx, console, logged)
 }
 
-fn cols(name: &str) -> Vec<ColumnMeta> {
+pub(super) fn cols(name: &str) -> Vec<ColumnMeta> {
     vec![ColumnMeta {
         name: name.into(),
         data_type: "int4".into(),
@@ -81,7 +81,7 @@ fn answer_rows(fake: &Fake, cx: &mut VisualTestContext, name: &str, values: &[&s
     cx.run_until_parked();
 }
 
-fn connect(fake: &Fake, cx: &mut VisualTestContext) {
+pub(super) fn connect(fake: &Fake, cx: &mut VisualTestContext) {
     fake.resolve("connect app_db", Ok(session("app_db")));
     cx.run_until_parked();
 }
@@ -92,7 +92,7 @@ fn results(console: &Entity<Console>, cx: &VisualTestContext) -> Vec<(String, us
         c.results
             .iter()
             .map(|g| {
-                let g = g.read(cx);
+                let g = g.grid.read(cx);
                 (g.columns()[0].name.to_string(), g.row_count())
             })
             .collect()

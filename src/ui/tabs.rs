@@ -25,7 +25,8 @@ pub struct EditorTab<C> {
 pub struct Tabs<C> {
     pub tabs: Vec<EditorTab<C>>,
     pub active: usize,
-    closed: Vec<EditorTab<C>>,
+    /// Recently closed tabs, newest last, for reopening.
+    pub closed: Vec<EditorTab<C>>,
     /// Tab keys, most recently used first.
     mru: Vec<SharedString>,
     /// MRU position previewed by Ctrl+Tab while Ctrl is held.
@@ -187,7 +188,8 @@ impl<C> Tabs<C> {
     }
 
     /// Closes every tab from connection `id`, pinned ones too, and drops them from the reopen history.
-    pub fn drop_connection(&mut self, id: crate::model::ConnectionId) {
+    /// Returns the tabs it closed.
+    pub fn drop_connection(&mut self, id: crate::model::ConnectionId) -> Vec<EditorTab<C>> {
         let from = |t: &EditorTab<C>| t.origin.as_ref().is_some_and(|o| o.connection == id);
         // Set the history aside so these closes neither enter it nor evict other connections' tabs.
         let mut kept = std::mem::take(&mut self.closed);
@@ -195,7 +197,7 @@ impl<C> Tabs<C> {
         while let Some(ix) = self.tabs.iter().position(from) {
             self.close(ix);
         }
-        self.closed = kept;
+        std::mem::replace(&mut self.closed, kept)
     }
 
     pub fn activate(&mut self, ix: usize) {

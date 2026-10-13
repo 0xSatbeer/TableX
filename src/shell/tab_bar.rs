@@ -17,6 +17,12 @@ use super::{OVERFLOW_CONTEXT, Shell, TabContent, tab::TabDrag};
 impl Shell {
     /// Points the status bar at the active tab: its origin, and the cursor only for the console.
     pub(super) fn tab_changed(&mut self, cx: &mut Context<Self>) {
+        // Every close goes through here; a closed console gives back its session.
+        for tab in &self.tabs.closed {
+            if let TabContent::Console(console) = &tab.content {
+                console.update(cx, |console, cx| console.close_session(cx));
+            }
+        }
         let editor = match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Console(console)) => Some(console.read(cx).editor.clone()),
             _ => None,

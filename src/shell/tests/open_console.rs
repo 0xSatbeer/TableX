@@ -132,3 +132,49 @@ fn each_console_runs_on_its_own_session_and_logs_to_the_panel(cx: &mut gpui_kit:
     );
     assert_eq!(logged, [entry.clone(), entry]);
 }
+
+#[gpui_kit::test]
+fn closing_a_console_tab_closes_its_session(cx: &mut gpui_kit::TestAppContext) {
+    use crate::db::Opened;
+    let (fake, window, shell) = open_with_fake(cx);
+    cx.update(crate::ui::console::bind_keys);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    open_console(&mut cx, &shell, "1/app_db");
+    cx.simulate_input("update t set x = 1");
+    cx.simulate_keystrokes("ctrl-enter");
+    cx.run_until_parked();
+    fake.resolve("connect app_db", Ok(crate::db::fake::session("app_db")));
+    cx.run_until_parked();
+    fake.resolve_query("open app_db", Ok(Opened::Affected(1)));
+    cx.run_until_parked();
+    cx.dispatch_action(crate::CloseTab);
+    cx.run_until_parked();
+    assert!(fake.pending().contains(&"close app_db".to_string()));
+}
+
+#[gpui_kit::test]
+fn deleting_a_connection_closes_its_consoles_sessions(cx: &mut gpui_kit::TestAppContext) {
+    use crate::db::Opened;
+    let (fake, window, shell) = open_with_fake(cx);
+    cx.update(crate::ui::console::bind_keys);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    open_console(&mut cx, &shell, "1/app_db");
+    cx.simulate_input("update t set x = 1");
+    cx.simulate_keystrokes("ctrl-enter");
+    cx.run_until_parked();
+    fake.resolve("connect app_db", Ok(crate::db::fake::session("app_db")));
+    cx.run_until_parked();
+    fake.resolve_query("open app_db", Ok(Opened::Affected(1)));
+    cx.run_until_parked();
+    let (explorer, id) = shell.read_with(&cx, |this, cx| {
+        (
+            this.explorer.clone(),
+            this.workspace.read(cx).connections[0].id,
+        )
+    });
+    explorer.update(&mut cx, |_, cx| {
+        cx.emit(crate::ui::explorer::ConnectionDeleted { id })
+    });
+    cx.run_until_parked();
+    assert!(fake.pending().contains(&"close app_db".to_string()));
+}
