@@ -214,9 +214,9 @@ fn ssl_mode_follows_libpq() {
             };
             let sql = "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()";
             let rows = crate::db::runtime()
-                .block_on(session.client.query_one(sql, &[]))
+                .block_on(session.query(sql, &[]))
                 .unwrap();
-            rows.get::<_, bool>(0)
+            rows[0].get::<_, bool>(0)
         });
         match want {
             Some(tls) => assert_eq!(got, Ok(tls), "{ssl:?} via {server:?}"),

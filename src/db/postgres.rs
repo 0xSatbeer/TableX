@@ -2,13 +2,22 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use futures::lock::Mutex;
+
 use super::tls::Tls;
-use super::{Driver, Reply, Session, foreign, reason, spawn, timeout_reason};
-use crate::model::{
-    Column, ConnectionParams, DbObject, ForeignKey, Index, ObjectKind, Role, SslMode, TableDef,
+use super::{
+    Driver, Opened, QueryReply, Reply, Session, foreign, foreign_query, reason, spawn, spawn_query,
+    timeout_reason,
 };
+use crate::model::{
+    Column, ConnectionParams, DbObject, ForeignKey, Index, ObjectKind, ResultSet, Role, Row,
+    SslMode, TableDef,
+};
+
+mod query;
 
 pub struct Postgres {
     /// Wraps the whole connect: TCP, TLS, auth and the first query.
@@ -24,16 +33,25 @@ impl Default for Postgres {
 }
 
 pub struct PgSession {
-    client: tokio_postgres::Client,
+    /// Locked per call: binding or reading a portal needs the client exclusively.
+    conn: Mutex<Conn>,
+    cancel: tokio_postgres::CancelToken,
+    /// Set by `cancel`, so the query it stops fails as `Cancelled` rather than as a server error.
+    cancelled: AtomicBool,
     /// Drives the socket; ends once the client is dropped and the server has been told goodbye.
     io: tokio::task::JoinHandle<()>,
     /// Statements run through [`PgSession::query`], so tests can count an introspection's round trips.
     statements: std::sync::atomic::AtomicUsize,
 }
 
+struct Conn {
+    client: tokio_postgres::Client,
+    open: Option<query::Open>,
+}
+
 impl PgSession {
     pub fn is_closed(&self) -> bool {
-        self.client.is_closed()
+        self.io.is_finished()
     }
 
     async fn query(
@@ -43,14 +61,16 @@ impl PgSession {
     ) -> Result<Vec<tokio_postgres::Row>, String> {
         self.statements
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.client.query(sql, params).await.map_err(|e| reason(&e))
+        let conn = self.conn.lock().await;
+        conn.client.query(sql, params).await.map_err(|e| reason(&e))
     }
 
     /// Runs one statement without parameters, so DDL and transaction control work.
     async fn run(&self, sql: &str) -> Result<(), String> {
         self.statements
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.client.batch_execute(sql).await.map_err(|e| reason(&e))
+        let conn = self.conn.lock().await;
+        conn.client.batch_execute(sql).await.map_err(|e| reason(&e))
     }
 
     async fn run_all(&self, statements: &[String]) -> Result<(), String> {
@@ -74,6 +94,20 @@ impl PgSession {
         let rows = self.query(sql, &[&param]).await?;
         rows.first().map(|row| row.get(0)).ok_or(missing)
     }
+}
+
+/// `read` for query calls.
+fn run<T: Send + 'static, F>(
+    session: &Session,
+    run: impl FnOnce(Arc<PgSession>) -> F,
+) -> QueryReply<T>
+where
+    F: Future<Output = Result<T, crate::model::QueryError>> + Send + 'static,
+{
+    let Session::Postgres(session) = session else {
+        return foreign_query();
+    };
+    spawn_query(run(session.clone()))
 }
 
 /// Runs `read` on the session's runtime with `session`, or fails for another driver's session.
@@ -124,7 +158,9 @@ async fn open(params: ConnectionParams, timeout: Duration) -> Result<PgSession, 
             .await
             .map_err(|e| reason(&e))?;
         Ok(PgSession {
-            client,
+            cancel: client.cancel_token(),
+            conn: Mutex::new(Conn { client, open: None }),
+            cancelled: AtomicBool::new(false),
             io,
             statements: Default::default(),
         })
@@ -154,8 +190,8 @@ impl Driver for Postgres {
     fn test(&self, params: &ConnectionParams) -> Reply<()> {
         let open = open(params.clone(), self.timeout);
         spawn(async move {
-            let PgSession { client, io, .. } = open.await?;
-            drop(client);
+            let PgSession { conn, io, .. } = open.await?;
+            drop(conn);
             io.await.ok();
             Ok(())
         })
@@ -295,6 +331,37 @@ impl Driver for Postgres {
                 name: table,
             })
         })
+    }
+
+    fn open(&self, session: &Session, sql: String, autocommit: bool) -> QueryReply<Opened> {
+        run(session, |session| async move {
+            session.open(&sql, autocommit).await
+        })
+    }
+
+    fn fetch(&self, session: &Session, max: usize) -> QueryReply<Vec<Row>> {
+        run(session, |session| async move { session.fetch(max).await })
+    }
+
+    fn close(&self, session: &Session) -> Reply<()> {
+        read(session, |session| async move {
+            session.close().await.map_err(|e| e.message)
+        })
+    }
+
+    fn cancel(&self, session: &Session) -> Reply<()> {
+        read(session, |session| async move {
+            session.cancelled.store(true, Ordering::Relaxed);
+            let cancel = session.cancel.cancel_query(Tls::get()).await;
+            cancel.map_err(|e| reason(&e))
+        })
+    }
+
+    fn query(&self, session: &Session, sql: String) -> QueryReply<ResultSet> {
+        run(
+            session,
+            |session| async move { session.query_all(&sql).await },
+        )
     }
 }
 

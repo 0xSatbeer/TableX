@@ -6,8 +6,10 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt;
 use futures::future::ready;
 
-use super::{Driver, Reply, Session, blocking, foreign};
-use crate::model::{Column, ConnectionParams, DbObject, ObjectKind, Role, TableDef};
+use super::{Driver, Opened, QueryReply, Reply, Session, blocking, foreign, server_error};
+use crate::model::{
+    Column, ConnectionParams, DbObject, ObjectKind, ResultSet, Role, Row, TableDef,
+};
 
 pub struct Sqlite;
 
@@ -177,6 +179,31 @@ impl Driver for Sqlite {
     fn table_def(&self, _: &Session, _: &str, _: &str) -> Reply<TableDef> {
         unsupported()
     }
+
+    fn open(&self, _: &Session, _: String, _: bool) -> QueryReply<Opened> {
+        not_yet()
+    }
+
+    fn fetch(&self, _: &Session, _: usize) -> QueryReply<Vec<Row>> {
+        not_yet()
+    }
+
+    fn close(&self, _: &Session) -> Reply<()> {
+        ready(Ok(())).boxed()
+    }
+
+    fn cancel(&self, _: &Session) -> Reply<()> {
+        ready(Ok(())).boxed()
+    }
+
+    fn query(&self, _: &Session, _: String) -> QueryReply<ResultSet> {
+        not_yet()
+    }
+}
+
+// shortcut: query calls fail until ticket 03 brings SQLite's query API.
+fn not_yet<T: Send + 'static>() -> QueryReply<T> {
+    ready(Err(server_error("not yet supported"))).boxed()
 }
 
 fn unsupported<T: Send + 'static>() -> Reply<T> {

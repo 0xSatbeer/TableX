@@ -9,7 +9,10 @@ use futures::FutureExt;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
-use crate::model::{Column, ConnectionParams, DbObject, Role, TableDef};
+use crate::model::{
+    Column, ColumnMeta, ConnectionParams, DbObject, QueryError, QueryErrorKind, ResultSet, Role,
+    Row, TableDef,
+};
 
 #[cfg(test)]
 pub mod fake;
@@ -20,6 +23,18 @@ mod tls;
 
 /// A driver call's result, runtime-agnostic: awaiting it never needs tokio. `Err` holds the reason.
 pub type Reply<T> = BoxFuture<'static, Result<T, String>>;
+
+/// A query call's result; like `Reply`, but the failure says where and why.
+pub type QueryReply<T> = BoxFuture<'static, Result<T, QueryError>>;
+
+/// What `open` produced for one statement.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Opened {
+    /// A row-returning statement; its rows wait on the server for `fetch`.
+    Rows(Vec<ColumnMeta>),
+    /// Any other statement, run to completion: rows affected (0 when the server gives none).
+    Affected(u64),
+}
 
 /// One open session, opened by the driver that reads from it.
 #[derive(Clone)]
@@ -64,6 +79,22 @@ pub trait Driver: Send + Sync {
     fn database_owner(&self, session: &Session) -> Reply<String>;
     fn schema_owner(&self, session: &Session, schema: &str) -> Reply<String>;
     fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef>;
+    /// Runs one statement. Row-returning statements stay open for `fetch`. With `autocommit`,
+    /// Postgres opens the portal inside an implicit transaction that commits on close/exhaustion.
+    #[allow(dead_code)] // the query methods' callers, the console and table views, come in later tickets
+    fn open(&self, session: &Session, sql: String, autocommit: bool) -> QueryReply<Opened>;
+    /// Up to `max` more rows of the open result; fewer than `max` means it is exhausted and closed.
+    #[allow(dead_code)]
+    fn fetch(&self, session: &Session, max: usize) -> QueryReply<Vec<Row>>;
+    /// Closes the open result, if any. Never fails on a session with nothing open.
+    #[allow(dead_code)]
+    fn close(&self, session: &Session) -> Reply<()>;
+    /// Stops whatever `session` is running; that call fails with `QueryErrorKind::Cancelled`.
+    #[allow(dead_code)]
+    fn cancel(&self, session: &Session) -> Reply<()>;
+    /// Runs one row-returning statement to completion (table pages, counts). Never leaves a result open.
+    #[allow(dead_code)]
+    fn query(&self, session: &Session, sql: String) -> QueryReply<ResultSet>;
 }
 
 /// The real drivers: Postgres or SQLite, picked by the params or the session.
@@ -132,6 +163,26 @@ impl Driver for Live {
     fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef> {
         self.on(session).table_def(session, schema, table)
     }
+
+    fn open(&self, session: &Session, sql: String, autocommit: bool) -> QueryReply<Opened> {
+        self.on(session).open(session, sql, autocommit)
+    }
+
+    fn fetch(&self, session: &Session, max: usize) -> QueryReply<Vec<Row>> {
+        self.on(session).fetch(session, max)
+    }
+
+    fn close(&self, session: &Session) -> Reply<()> {
+        self.on(session).close(session)
+    }
+
+    fn cancel(&self, session: &Session) -> Reply<()> {
+        self.on(session).cancel(session)
+    }
+
+    fn query(&self, session: &Session, sql: String) -> QueryReply<ResultSet> {
+        self.on(session).query(session, sql)
+    }
 }
 
 /// The reason we show for a failure: a server's own message without severity or prefixes,
@@ -176,6 +227,16 @@ fn spawn<T: Send + 'static>(
         .boxed()
 }
 
+/// `spawn` for query calls.
+fn spawn_query<T: Send + 'static>(
+    work: impl Future<Output = Result<T, QueryError>> + Send + 'static,
+) -> QueryReply<T> {
+    let (tx, rx) = oneshot::channel();
+    runtime().spawn(async move { tx.send(work.await).ok() });
+    rx.map(|result| result.unwrap_or_else(|_| Err(server_error("the database task stopped"))))
+        .boxed()
+}
+
 /// Runs blocking `work` (SQLite) on the database runtime's blocking pool.
 fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -186,9 +247,24 @@ fn blocking<T: Send + 'static>(
         .boxed()
 }
 
+/// A query failure the server or file gave as a plain reason.
+fn server_error(message: impl Into<String>) -> QueryError {
+    QueryError {
+        kind: QueryErrorKind::Server,
+        message: message.into(),
+        position: None,
+        statement: 0,
+    }
+}
+
 /// A session of the wrong driver: a caller bug, reported instead of panicking.
 fn foreign<T: Send + 'static>() -> Reply<T> {
     futures::future::ready(Err("session belongs to another driver".to_string())).boxed()
+}
+
+/// `foreign` for query calls.
+fn foreign_query<T: Send + 'static>() -> QueryReply<T> {
+    futures::future::ready(Err(server_error("session belongs to another driver"))).boxed()
 }
 
 #[cfg(test)]

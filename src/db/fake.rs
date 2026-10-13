@@ -8,8 +8,10 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt;
 use futures::channel::oneshot;
 
-use super::{Driver, Reply, Session};
-use crate::model::{Column, ConnectionParams, DbObject, Role, TableDef};
+use super::{Driver, Opened, QueryReply, Reply, Session, server_error};
+use crate::model::{
+    Column, ConnectionParams, DbObject, QueryError, ResultSet, Role, Row, TableDef,
+};
 
 type Answer = Result<Box<dyn Any + Send>, String>;
 
@@ -85,6 +87,18 @@ impl Fake {
             .ok();
     }
 
+    /// `resolve` for the query calls (`open`, `fetch`, `query`), which fail with a [`QueryError`].
+    #[track_caller]
+    pub fn resolve_query<T: Send + 'static>(&self, label: &str, result: Result<T, QueryError>) {
+        self.resolve(label, Ok(result));
+    }
+
+    fn call_query<T: Send + 'static>(&self, label: String) -> QueryReply<T> {
+        self.call::<Result<T, QueryError>>(label)
+            .map(|answer| answer.unwrap_or_else(|reason| Err(server_error(reason))))
+            .boxed()
+    }
+
     fn call<T: Send + 'static>(&self, label: String) -> Reply<T> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().push((label.clone(), tx));
@@ -157,6 +171,26 @@ impl Driver for Fake {
 
     fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef> {
         self.call(format!("table_def {}/{schema}/{table}", on(session)))
+    }
+
+    fn open(&self, session: &Session, _: String, _: bool) -> QueryReply<Opened> {
+        self.call_query(format!("open {}", on(session)))
+    }
+
+    fn fetch(&self, session: &Session, _: usize) -> QueryReply<Vec<Row>> {
+        self.call_query(format!("fetch {}", on(session)))
+    }
+
+    fn close(&self, session: &Session) -> Reply<()> {
+        self.call(format!("close {}", on(session)))
+    }
+
+    fn cancel(&self, session: &Session) -> Reply<()> {
+        self.call(format!("cancel {}", on(session)))
+    }
+
+    fn query(&self, session: &Session, _: String) -> QueryReply<ResultSet> {
+        self.call_query(format!("query {}", on(session)))
     }
 }
 
@@ -290,5 +324,31 @@ mod tests {
         );
         fake.resolve("execute app", Ok(()));
         assert_eq!((&mut execute).now_or_never(), Some(Ok(())));
+    }
+
+    #[test]
+    fn query_calls_are_labelled_and_resolve_with_a_query_error() {
+        let fake = Fake::default();
+        let session = session("app");
+        let mut open = fake.open(&session, "SELECT 1".into(), true);
+        let mut fetch = fake.fetch(&session, 500);
+        let _close = fake.close(&session);
+        let _cancel = fake.cancel(&session);
+        let _query = fake.query(&session, "SELECT 1".into());
+        assert_eq!(
+            fake.pending(),
+            [
+                "open app",
+                "fetch app",
+                "close app",
+                "cancel app",
+                "query app"
+            ]
+        );
+        fake.resolve_query("open app", Ok(Opened::Affected(3)));
+        assert_eq!((&mut open).now_or_never(), Some(Ok(Opened::Affected(3))));
+        let error = server_error("boom");
+        fake.resolve_query::<Vec<Row>>("fetch app", Err(error.clone()));
+        assert_eq!((&mut fetch).now_or_never(), Some(Err(error)));
     }
 }

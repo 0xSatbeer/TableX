@@ -8,6 +8,7 @@ mod columns;
 mod connect;
 mod ddl;
 mod objects;
+mod query;
 
 /// `pg` logging in as `user` with `password`.
 fn as_user(pg: &ConnectionParams, user: &str, password: Option<&str>) -> ConnectionParams {

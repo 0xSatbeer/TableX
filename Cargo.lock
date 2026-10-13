@@ -5326,6 +5326,7 @@ dependencies = [
 name = "queryx"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "futures",
  "gpui-kit",

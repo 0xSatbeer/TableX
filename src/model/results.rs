@@ -110,6 +110,27 @@ pub enum QueryOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum QueryErrorKind {
+    /// The server or SQLite rejected the statement.
+    Server,
+    /// Stopped by `Driver::cancel`.
+    Cancelled,
+    /// The session is gone (socket closed, server restarted); the session can't be used again.
+    Disconnected,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueryError {
+    pub kind: QueryErrorKind,
+    /// The reason, as `db::reason` gives it today.
+    pub message: String,
+    /// Byte offset into the statement's SQL where the error is, when the server says (PG `position`).
+    pub position: Option<usize>,
+    /// Index of the failing statement within the batch; 0 for single-statement calls.
+    pub statement: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum QueryStatus {
     Ok,
     Err(String),

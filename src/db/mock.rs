@@ -1,13 +1,15 @@
 //! The `--demo` driver: serves the trees of `mock::workspaces()` after `mock::latency()`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use gpui_kit::BackgroundExecutor;
 
-use super::{Driver, Reply, Session, foreign};
+use super::{Driver, Opened, QueryReply, Reply, Session, foreign, foreign_query, server_error};
 use crate::model::{
-    Column, ConnectionParams, Database, DbObject, ForeignKey, Index, Key, Role, TableDef,
+    Column, ConnectionParams, Database, DbObject, ForeignKey, Index, Key, QueryError, QueryOutcome,
+    ResultSet, Role, Row, TableDef,
 };
 
 pub struct Mock {
@@ -19,6 +21,8 @@ pub struct Mock {
 pub struct MockSession {
     database: String,
     tree: Vec<Database>,
+    /// The rows of the open result not fetched yet.
+    open: Mutex<Option<std::vec::IntoIter<Row>>>,
 }
 
 impl Mock {
@@ -27,7 +31,10 @@ impl Mock {
     }
 
     /// `result`, delivered after the latency set on the calling (UI) thread.
-    fn after_latency<T: Send + 'static>(&self, result: Result<T, String>) -> Reply<T> {
+    fn after_latency<T: Send + 'static, E: Send + 'static>(
+        &self,
+        result: Result<T, E>,
+    ) -> BoxFuture<'static, Result<T, E>> {
         let timer = self.executor.timer(crate::mock::latency());
         async move {
             timer.await;
@@ -44,6 +51,17 @@ impl Mock {
         match session {
             Session::Mock(session) => self.after_latency(read(session)),
             _ => foreign(),
+        }
+    }
+
+    fn on_query<T: Send + 'static>(
+        &self,
+        session: &Session,
+        run: impl FnOnce(&MockSession) -> Result<T, QueryError>,
+    ) -> QueryReply<T> {
+        match session {
+            Session::Mock(session) => self.after_latency(run(session)),
+            _ => foreign_query(),
         }
     }
 }
@@ -100,6 +118,7 @@ impl Driver for Mock {
             Session::Mock(Arc::new(MockSession {
                 database: params.database(),
                 tree: tree(params),
+                open: Mutex::default(),
             }))
         });
         self.after_latency(session)
@@ -172,6 +191,54 @@ impl Driver for Mock {
             object
                 .map(|o| table_def(schema, o))
                 .ok_or_else(|| format!("relation \"{schema}.{table}\" does not exist"))
+        })
+    }
+
+    fn open(&self, session: &Session, sql: String, _: bool) -> QueryReply<Opened> {
+        self.on_query(session, |s| {
+            let mut open = s.open.lock().unwrap();
+            *open = None;
+            match crate::mock::run_query(&sql) {
+                QueryOutcome::Rows(rs) => {
+                    *open = Some(rs.rows.into_iter());
+                    Ok(Opened::Rows(rs.columns))
+                }
+                QueryOutcome::Affected(n) => Ok(Opened::Affected(n)),
+                QueryOutcome::Error(e) => Err(server_error(e)),
+            }
+        })
+    }
+
+    fn fetch(&self, session: &Session, max: usize) -> QueryReply<Vec<Row>> {
+        self.on_query(session, |s| {
+            let mut open = s.open.lock().unwrap();
+            let rows: Vec<Row> = open.iter_mut().flat_map(|rows| rows.take(max)).collect();
+            if rows.len() < max {
+                *open = None;
+            }
+            Ok(rows)
+        })
+    }
+
+    fn close(&self, session: &Session) -> Reply<()> {
+        self.on(session, |s| {
+            *s.open.lock().unwrap() = None;
+            Ok(())
+        })
+    }
+
+    fn cancel(&self, _: &Session) -> Reply<()> {
+        self.after_latency(Ok(()))
+    }
+
+    fn query(&self, session: &Session, sql: String) -> QueryReply<ResultSet> {
+        self.on_query(session, |_| match crate::mock::run_query(&sql) {
+            QueryOutcome::Rows(rs) => Ok(rs),
+            QueryOutcome::Affected(_) => Ok(ResultSet {
+                columns: Vec::new(),
+                rows: Vec::new(),
+            }),
+            QueryOutcome::Error(e) => Err(server_error(e)),
         })
     }
 }
