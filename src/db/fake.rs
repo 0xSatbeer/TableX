@@ -27,7 +27,10 @@ impl FakeSession {
 
 /// A session on `database`, to resolve a connect with.
 pub fn session(database: &str) -> Session {
-    Session::Fake(Arc::new(FakeSession { database: database.into(), closed: AtomicBool::new(false) }))
+    Session::Fake(Arc::new(FakeSession {
+        database: database.into(),
+        closed: AtomicBool::new(false),
+    }))
 }
 
 /// Closes `session` from the server's side, as a server restart would.
@@ -49,7 +52,12 @@ pub struct Fake {
 impl Fake {
     /// The labels of the calls still waiting, oldest first.
     pub fn pending(&self) -> Vec<String> {
-        self.pending.lock().unwrap().iter().map(|(label, _)| label.clone()).collect()
+        self.pending
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(label, _)| label.clone())
+            .collect()
     }
 
     /// The params of every `test` call so far, oldest first.
@@ -67,14 +75,19 @@ impl Fake {
             panic!("no pending call {label:?}; waiting: {waiting:?}");
         };
         let (_, tx) = pending.remove(ix);
-        tx.send(result.map(|value| Box::new(value) as Box<dyn Any + Send>)).ok();
+        tx.send(result.map(|value| Box::new(value) as Box<dyn Any + Send>))
+            .ok();
     }
 
     fn call<T: Send + 'static>(&self, label: String) -> Reply<T> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().push((label.clone(), tx));
         rx.map(move |answer| match answer {
-            Ok(answer) => answer.map(|value| *value.downcast::<T>().unwrap_or_else(|_| panic!("{label} resolved with the wrong type"))),
+            Ok(answer) => answer.map(|value| {
+                *value
+                    .downcast::<T>()
+                    .unwrap_or_else(|_| panic!("{label} resolved with the wrong type"))
+            }),
             Err(_) => Err("the database task stopped".into()),
         })
         .boxed()
@@ -122,39 +135,83 @@ mod tests {
     use std::path::PathBuf;
 
     fn pg(database: &str) -> ConnectionParams {
-        ConnectionParams::Postgres { host: "h".into(), port: 5432, user: "u".into(), password: None, database: database.into(), ssl: SslMode::Prefer }
+        ConnectionParams::Postgres {
+            host: "h".into(),
+            port: 5432,
+            user: "u".into(),
+            password: None,
+            database: database.into(),
+            ssl: SslMode::Prefer,
+        }
     }
 
     fn table(name: &str) -> DbObject {
-        DbObject { kind: ObjectKind::Table, name: name.into(), columns: None, keys: Vec::new(), indexes: Vec::new(), row_estimate: None }
+        DbObject {
+            kind: ObjectKind::Table,
+            name: name.into(),
+            columns: None,
+            keys: Vec::new(),
+            indexes: Vec::new(),
+            row_estimate: None,
+        }
     }
 
     #[test]
     fn calls_stay_pending_until_the_test_resolves_them() {
         let fake = Fake::default();
         let mut connect = fake.connect(&pg("app"));
-        let mut test = fake.test(&ConnectionParams::Sqlite { path: PathBuf::from("/x/local.db") });
-        assert!((&mut connect).now_or_never().is_none(), "connect waits for the test");
+        let mut test = fake.test(&ConnectionParams::Sqlite {
+            path: PathBuf::from("/x/local.db"),
+        });
+        assert!(
+            (&mut connect).now_or_never().is_none(),
+            "connect waits for the test"
+        );
         assert_eq!(fake.pending(), ["connect app", "test local.db"]);
 
         fake.resolve("connect app", Ok(session("app")));
-        let session = (&mut connect).now_or_never().expect("resolved").expect("Ok");
+        let session = (&mut connect)
+            .now_or_never()
+            .expect("resolved")
+            .expect("Ok");
         assert!(matches!(&session, Session::Fake(fake) if fake.database == "app"));
         fake.resolve::<()>("test local.db", Err("No file at /x/local.db".into()));
-        assert_eq!((&mut test).now_or_never(), Some(Err("No file at /x/local.db".to_string())));
+        assert_eq!(
+            (&mut test).now_or_never(),
+            Some(Err("No file at /x/local.db".to_string()))
+        );
 
         let mut databases = fake.databases(&session);
         let mut first = fake.schemas(&session);
         let mut second = fake.schemas(&session);
         let mut objects = fake.objects(&session, "public");
         let mut columns = fake.columns(&session, "public", "t");
-        assert_eq!(fake.pending(), ["databases app", "schemas app", "schemas app", "objects app/public", "columns app/public/t"]);
+        assert_eq!(
+            fake.pending(),
+            [
+                "databases app",
+                "schemas app",
+                "schemas app",
+                "objects app/public",
+                "columns app/public/t"
+            ]
+        );
 
         fake.resolve("schemas app", Ok(vec!["public".to_string()]));
-        assert_eq!((&mut first).now_or_never(), Some(Ok(vec!["public".to_string()])), "the oldest call with a label resolves first");
+        assert_eq!(
+            (&mut first).now_or_never(),
+            Some(Ok(vec!["public".to_string()])),
+            "the oldest call with a label resolves first"
+        );
         assert!((&mut second).now_or_never().is_none());
-        fake.resolve::<Vec<String>>("schemas app", Err("permission denied for database app".into()));
-        assert_eq!((&mut second).now_or_never(), Some(Err("permission denied for database app".to_string())));
+        fake.resolve::<Vec<String>>(
+            "schemas app",
+            Err("permission denied for database app".into()),
+        );
+        assert_eq!(
+            (&mut second).now_or_never(),
+            Some(Err("permission denied for database app".to_string()))
+        );
         fake.resolve("objects app/public", Ok(vec![table("t")]));
         assert_eq!((&mut objects).now_or_never(), Some(Ok(vec![table("t")])));
         fake.resolve::<Vec<Column>>("columns app/public/t", Ok(Vec::new()));
@@ -162,8 +219,17 @@ mod tests {
         assert!((&mut databases).now_or_never().is_none());
         assert_eq!(fake.pending(), ["databases app"]);
 
-        let unknown = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fake.resolve::<()>("connect nope", Ok(()))));
-        assert!(unknown.is_err(), "resolving a call nobody made is a test bug");
-        assert_eq!(fake.pending(), ["databases app"], "and leaves the fake usable");
+        let unknown = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fake.resolve::<()>("connect nope", Ok(()))
+        }));
+        assert!(
+            unknown.is_err(),
+            "resolving a call nobody made is a test bug"
+        );
+        assert_eq!(
+            fake.pending(),
+            ["databases app"],
+            "and leaves the fake usable"
+        );
     }
 }

@@ -3,14 +3,31 @@ use std::borrow::Cow;
 use gpui_kit::{AssetSource, Result, SharedString, assets::icon_assets};
 
 // Lucide icons beyond gpui-kit's default 101, embedded one by one so we don't pay for all 1,830.
-icon_assets!(LucideExtras, [ArrowDownWideNarrow, ChevronFirst, ChevronLast, Columns3, Database, Funnel, KeyRound, Layers, Square, SquareCheck]);
+icon_assets!(
+    LucideExtras,
+    [
+        ArrowDownWideNarrow,
+        ChevronFirst,
+        ChevronLast,
+        Columns3,
+        Database,
+        Funnel,
+        KeyRound,
+        Layers,
+        Square,
+        SquareCheck
+    ]
+);
 
 pub const POSTGRES_ICON: &str = "icons/brand/postgresql.svg";
 pub const SQLITE_ICON: &str = "icons/brand/sqlite.svg";
 
 macro_rules! own {
     ($path:literal) => {
-        (concat!("icons/", $path), include_bytes!(concat!("../assets/icons/", $path)))
+        (
+            concat!("icons/", $path),
+            include_bytes!(concat!("../assets/icons/", $path)),
+        )
     };
 }
 
@@ -60,7 +77,11 @@ impl AssetSource for Assets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(LucideExtras.list(path)?);
-        paths.extend(OWN.iter().filter(|(p, _)| p.starts_with(path)).map(|(p, _)| (*p).into()));
+        paths.extend(
+            OWN.iter()
+                .filter(|(p, _)| p.starts_with(path))
+                .map(|(p, _)| (*p).into()),
+        );
         paths.sort();
         paths.dedup();
         Ok(paths)
@@ -74,7 +95,14 @@ mod tests {
 
     #[test]
     fn every_icon_we_use_resolves() {
-        let lucide = [Lucide::Database, Lucide::Layers, Lucide::Folder, Lucide::FolderOpen, Lucide::PanelLeft, Lucide::PanelBottom];
+        let lucide = [
+            Lucide::Database,
+            Lucide::Layers,
+            Lucide::Folder,
+            Lucide::FolderOpen,
+            Lucide::PanelLeft,
+            Lucide::PanelBottom,
+        ];
         let objects = crate::model::ObjectKind::ALL
             .into_iter()
             .map(|k| k.as_str())
@@ -86,7 +114,10 @@ mod tests {
             .chain([POSTGRES_ICON.into(), SQLITE_ICON.into()])
             .chain(objects);
         for path in paths {
-            let bytes = Assets.load(&path).unwrap().unwrap_or_else(|| panic!("missing icon {path}"));
+            let bytes = Assets
+                .load(&path)
+                .unwrap()
+                .unwrap_or_else(|| panic!("missing icon {path}"));
             assert!(bytes.starts_with(b"<svg"), "{path} is not an svg");
         }
     }

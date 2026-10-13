@@ -34,7 +34,11 @@ impl Mock {
         .boxed()
     }
 
-    fn on<T: Send + 'static>(&self, session: &Session, read: impl FnOnce(&MockSession) -> Result<T, String>) -> Reply<T> {
+    fn on<T: Send + 'static>(
+        &self,
+        session: &Session,
+        read: impl FnOnce(&MockSession) -> Result<T, String>,
+    ) -> Reply<T> {
         match session {
             Session::Mock(session) => self.after_latency(read(session)),
             _ => foreign(),
@@ -45,7 +49,10 @@ impl Mock {
 /// The server or file `params` point at, ignoring the database, which a session picks itself.
 fn server(params: &ConnectionParams) -> ConnectionParams {
     let mut params = params.clone();
-    if let ConnectionParams::Postgres { database, password, .. } = &mut params {
+    if let ConnectionParams::Postgres {
+        database, password, ..
+    } = &mut params
+    {
         (*database, *password) = (String::new(), None);
     }
     params
@@ -53,7 +60,10 @@ fn server(params: &ConnectionParams) -> ConnectionParams {
 
 /// The sample tree of the connection at `params`' server, or none for a server the samples lack.
 fn tree(params: &ConnectionParams) -> Vec<Database> {
-    let conn = crate::mock::workspaces().into_iter().flat_map(|ws| ws.connections).find(|c| server(&c.params) == server(params));
+    let conn = crate::mock::workspaces()
+        .into_iter()
+        .flat_map(|ws| ws.connections)
+        .find(|c| server(&c.params) == server(params));
     conn.and_then(|c| c.databases).unwrap_or_default()
 }
 
@@ -68,18 +78,28 @@ fn reach(params: &ConnectionParams) -> Result<(), String> {
 impl MockSession {
     /// The database the session is open on; a SQLite file's one database is its first.
     fn database(&self) -> Option<&Database> {
-        self.tree.iter().find(|d| d.name == self.database).or(self.tree.first())
+        self.tree
+            .iter()
+            .find(|d| d.name == self.database)
+            .or(self.tree.first())
     }
 
     fn objects(&self, schema: &str) -> Vec<DbObject> {
-        let schema = self.database().and_then(|d| d.schemas.iter().flatten().find(|s| s.name == schema));
+        let schema = self
+            .database()
+            .and_then(|d| d.schemas.iter().flatten().find(|s| s.name == schema));
         schema.and_then(|s| s.objects.clone()).unwrap_or_default()
     }
 }
 
 impl Driver for Mock {
     fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
-        let session = reach(params).map(|()| Session::Mock(Arc::new(MockSession { database: params.database(), tree: tree(params) })));
+        let session = reach(params).map(|()| {
+            Session::Mock(Arc::new(MockSession {
+                database: params.database(),
+                tree: tree(params),
+            }))
+        });
         self.after_latency(session)
     }
 
@@ -88,18 +108,35 @@ impl Driver for Mock {
     }
 
     fn databases(&self, session: &Session) -> Reply<Vec<String>> {
-        self.on(session, |s| Ok(s.tree.iter().map(|d| d.name.clone()).collect()))
+        self.on(session, |s| {
+            Ok(s.tree.iter().map(|d| d.name.clone()).collect())
+        })
     }
 
     fn schemas(&self, session: &Session) -> Reply<Vec<String>> {
-        self.on(session, |s| Ok(s.database().map(|d| d.schemas.iter().flatten().map(|s| s.name.clone()).collect()).unwrap_or_default()))
+        self.on(session, |s| {
+            Ok(s.database()
+                .map(|d| d.schemas.iter().flatten().map(|s| s.name.clone()).collect())
+                .unwrap_or_default())
+        })
     }
 
     fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>> {
-        self.on(session, |s| Ok(s.objects(schema).into_iter().map(|o| DbObject { columns: None, ..o }).collect()))
+        self.on(session, |s| {
+            Ok(s.objects(schema)
+                .into_iter()
+                .map(|o| DbObject { columns: None, ..o })
+                .collect())
+        })
     }
 
     fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
-        self.on(session, |s| Ok(s.objects(schema).into_iter().find(|o| o.name == object).and_then(|o| o.columns).unwrap_or_default()))
+        self.on(session, |s| {
+            Ok(s.objects(schema)
+                .into_iter()
+                .find(|o| o.name == object)
+                .and_then(|o| o.columns)
+                .unwrap_or_default())
+        })
     }
 }

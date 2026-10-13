@@ -21,17 +21,20 @@ pub struct Tls(Arc<ClientConfig>);
 impl Tls {
     pub fn get() -> Self {
         static CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
-        Self(CONFIG.get_or_init(|| {
-            let provider = Arc::new(rustls::crypto::ring::default_provider());
-            let config = ClientConfig::builder_with_provider(provider.clone())
-                .with_safe_default_protocol_versions()
-                .expect("ring supports the default TLS versions")
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(AnyCertificate(provider)))
-                .with_no_client_auth();
-            Arc::new(config)
-        })
-        .clone())
+        Self(
+            CONFIG
+                .get_or_init(|| {
+                    let provider = Arc::new(rustls::crypto::ring::default_provider());
+                    let config = ClientConfig::builder_with_provider(provider.clone())
+                        .with_safe_default_protocol_versions()
+                        .expect("ring supports the default TLS versions")
+                        .dangerous()
+                        .with_custom_certificate_verifier(Arc::new(AnyCertificate(provider)))
+                        .with_no_client_auth();
+                    Arc::new(config)
+                })
+                .clone(),
+        )
     }
 }
 
@@ -41,7 +44,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> MakeTlsConnect<S> for T
     type Error = InvalidDnsNameError;
 
     fn make_tls_connect(&mut self, domain: &str) -> Result<Connect, InvalidDnsNameError> {
-        Ok(Connect(self.0.clone(), ServerName::try_from(domain.to_string())?))
+        Ok(Connect(
+            self.0.clone(),
+            ServerName::try_from(domain.to_string())?,
+        ))
     }
 }
 
@@ -53,7 +59,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> TlsConnect<S> for Conne
     type Future = BoxFuture<'static, io::Result<TlsStream<S>>>;
 
     fn connect(self, stream: S) -> Self::Future {
-        Box::pin(async move { tokio_rustls::TlsConnector::from(self.0).connect(self.1, stream).await.map(TlsStream) })
+        Box::pin(async move {
+            tokio_rustls::TlsConnector::from(self.0)
+                .connect(self.1, stream)
+                .await
+                .map(TlsStream)
+        })
     }
 }
 
@@ -66,13 +77,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin> tokio_postgres::tls::TlsStream for TlsSt
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsStream<S> {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.0).poll_read(cx, buf)
     }
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncWrite for TlsStream<S> {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.0).poll_write(cx, buf)
     }
 
@@ -107,7 +126,12 @@ impl ServerCertVerifier for AnyCertificate {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+        verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
     }
 
     fn verify_tls13_signature(
@@ -116,7 +140,12 @@ impl ServerCertVerifier for AnyCertificate {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+        verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
@@ -129,6 +158,9 @@ mod tests {
     #[test]
     fn tls_is_ring_only() {
         let lock = include_str!("../../Cargo.lock");
-        assert!(!lock.contains("aws-lc"), "Cargo.lock pulls in aws-lc; keep rustls and tokio-rustls on ring");
+        assert!(
+            !lock.contains("aws-lc"),
+            "Cargo.lock pulls in aws-lc; keep rustls and tokio-rustls on ring"
+        );
     }
 }
