@@ -3,7 +3,7 @@
 mod filter;
 mod render;
 mod row;
-mod sql;
+pub(crate) mod sql;
 
 use std::collections::BTreeSet;
 

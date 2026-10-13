@@ -115,12 +115,14 @@ fn two_columns_an_index_and_an_fk_run_atomically_and_refresh_the_schema(
     let (b, b_type) = editor.read_with(&cx, |e, _| (e.rows[1].name.clone(), e.rows[1].ty.clone()));
     type_into(&mut cx, b, "b");
     type_into(&mut cx, b_type, "int");
+    click(&mut cx, "tab-indexes");
     click(&mut cx, "index-add");
     let (index_name, index_columns) = editor.read_with(&cx, |e, _| {
         (e.indexes[0].name.clone(), e.indexes[0].columns.clone())
     });
     type_into(&mut cx, index_name, "n_a_idx");
     type_into(&mut cx, index_columns, "a");
+    click(&mut cx, "tab-fks");
     click(&mut cx, "fk-add");
     let fk = editor.read_with(&cx, |e, _| {
         let f = &e.foreign_keys[0];

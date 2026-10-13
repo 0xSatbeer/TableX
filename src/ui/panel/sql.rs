@@ -43,7 +43,7 @@ const KEYWORDS: &[&str] = &[
 ];
 
 /// Byte ranges of keywords, strings and numbers in `sql`, tagged with their `highlight.syntax` key.
-pub(super) fn sql_spans(sql: &str) -> Vec<(std::ops::Range<usize>, &'static str)> {
+pub(crate) fn sql_spans(sql: &str) -> Vec<(std::ops::Range<usize>, &'static str)> {
     let bytes = sql.as_bytes();
     let mut spans = Vec::new();
     let mut i = 0;

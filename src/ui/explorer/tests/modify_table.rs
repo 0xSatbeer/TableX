@@ -122,9 +122,12 @@ fn renames_a_type_change_an_added_and_a_removed_column_run_atomically_and_refres
     let name = editor.read_with(&cx, |e, _| e.name.clone());
     type_into(&mut cx, name, "t2");
     let (a, id_type) = editor.read_with(&cx, |e, _| (e.rows[1].name.clone(), e.rows[0].ty.clone()));
+    click(&mut cx, "column-1");
     type_into(&mut cx, a, "a2");
+    click(&mut cx, "column-0");
     type_into(&mut cx, id_type, "bigint");
-    click(&mut cx, "column-remove-2");
+    click(&mut cx, "column-2");
+    click(&mut cx, "column-remove");
     click(&mut cx, "column-add");
     let (c, c_type) = editor.read_with(&cx, |e, _| (e.rows[2].name.clone(), e.rows[2].ty.clone()));
     type_into(&mut cx, c, "c");
@@ -188,7 +191,12 @@ fn the_editor_shows_the_indexes_and_fks_from_table_def(cx: &mut gpui_kit::TestAp
     });
     assert_eq!(index, ["t_a_idx", "a"]);
     assert_eq!(fk, ["t_b_fk", "b", "public", "u", "id"]);
-    for selector in ["index-0", "fk-0", "index-add", "fk-add"] {
+    click(&mut cx, "tab-indexes");
+    for selector in ["index-0", "index-add"] {
+        assert!(cx.debug_bounds(selector).is_some(), "{selector} drawn");
+    }
+    click(&mut cx, "tab-fks");
+    for selector in ["fk-0", "fk-add"] {
         assert!(cx.debug_bounds(selector).is_some(), "{selector} drawn");
     }
 }
@@ -198,14 +206,17 @@ fn an_added_unique_index_and_cascading_fk_and_a_removed_index_run_in_alter_table
     cx: &mut gpui_kit::TestAppContext,
 ) {
     let (mut cx, editor, fake) = open_editor(cx);
-    click(&mut cx, "index-remove-0");
+    click(&mut cx, "tab-indexes");
+    click(&mut cx, "index-0");
+    click(&mut cx, "index-remove");
     click(&mut cx, "index-add");
-    click(&mut cx, "index-unique-0");
+    click(&mut cx, "index-unique");
     let (name, columns) = editor.read_with(&cx, |e, _| {
         (e.indexes[0].name.clone(), e.indexes[0].columns.clone())
     });
     type_into(&mut cx, name, "t_ab_key");
     type_into(&mut cx, columns, "a, b");
+    click(&mut cx, "tab-fks");
     click(&mut cx, "fk-add");
     let fk = editor.read_with(&cx, |e, _| {
         let f = &e.foreign_keys[1];

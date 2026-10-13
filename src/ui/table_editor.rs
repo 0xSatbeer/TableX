@@ -2,6 +2,7 @@
 //! edits live in a `TableForm`; the view keeps it in step with its inputs.
 
 mod form;
+mod lines;
 
 pub use form::*;
 
@@ -9,22 +10,27 @@ use std::sync::Arc;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IndexPath, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, IndexPath, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
+    tab::{Tab, TabBar},
     h_flex,
     input::{Input, InputEvent, InputState},
     select::{Select, SelectEvent, SelectState},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
+    KeyDownEvent, StyledText,
+    IntoElement, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
+    Window, div, px,
 };
 
 use crate::db::{Driver, Reply, Session};
 use crate::model::{ForeignKey, Index};
 use crate::theme;
+use lines::Spans;
 use crate::ui::object_dialog::{Apply, ProductionConfirm, error_line, field, footer, sql_preview};
 
 /// One column row's inputs; its nullable flag lives in the form.
@@ -54,6 +60,8 @@ pub struct FkInputs {
     pub on_update: ActionSelect,
 }
 
+const DIALOG_W: f32 = 900.;
+
 pub struct TableEditor {
     schema: String,
     pub name: Entity<InputState>,
@@ -66,6 +74,12 @@ pub struct TableEditor {
     /// Waiting for the explorer to run the last Apply.
     applying: bool,
     pub error: Option<String>,
+    /// The selected tab: columns, indexes, foreign keys, SQL.
+    tab: usize,
+    /// The selected row of the columns, indexes and foreign keys lists.
+    selected: [Option<usize>; 3],
+    /// The lists take keys: up/down select, Delete removes, Enter edits.
+    list_focus: FocusHandle,
 }
 
 impl EventEmitter<Apply> for TableEditor {}
@@ -107,6 +121,7 @@ impl TableEditor {
             let on_apply = body.clone();
             dialog
                 .title(title.clone())
+                .w(px(DIALOG_W))
                 .child(body.clone())
                 .footer(footer(enabled, move |_, cx| {
                     on_apply.update(cx, |d, cx| d.apply(cx))
@@ -164,6 +179,9 @@ impl TableEditor {
             confirm: ProductionConfirm::new(table, is_production, window, cx),
             applying: false,
             error: None,
+            tab: 0,
+            selected: [None; 3],
+            list_focus: cx.focus_handle(),
         }
     }
 
@@ -200,6 +218,12 @@ impl TableEditor {
             .iter()
             .map(|f| Self::fk_row(f, window, cx))
             .collect();
+        self.selected = [
+            form.columns.len(),
+            form.indexes.len(),
+            form.foreign_keys.len(),
+        ]
+        .map(|n| (n > 0).then_some(0));
         self.form = Some(form);
         // A name typed while the definition loaded wins over the one it brought.
         self.sync(cx);
@@ -207,16 +231,16 @@ impl TableEditor {
 
     fn row(c: &crate::model::Column, window: &mut Window, cx: &mut Context<Self>) -> ColumnInputs {
         ColumnInputs {
-            name: Self::input(&c.name, "name", window, cx),
-            ty: Self::input(&c.data_type, "type", window, cx),
-            default: Self::input(c.default.as_deref().unwrap_or(""), "default", window, cx),
+            name: Self::input(&c.name, "column_name", window, cx),
+            ty: Self::input(&c.data_type, "e.g. integer", window, cx),
+            default: Self::input(c.default.as_deref().unwrap_or(""), "", window, cx),
         }
     }
 
     fn index_row(i: &Index, window: &mut Window, cx: &mut Context<Self>) -> IndexInputs {
         IndexInputs {
             name: Self::input(&i.name, "name", window, cx),
-            columns: Self::input(&i.columns.join(", "), "columns", window, cx),
+            columns: Self::input(&i.columns.join(", "), "a, b", window, cx),
         }
     }
 
@@ -287,7 +311,10 @@ impl TableEditor {
         let Some(form) = &mut self.form else { return };
         form.add_column();
         let row = Self::row(&form.columns[form.columns.len() - 1].1, window, cx);
+        // Ready to type the new row's name.
+        row.name.update(cx, |input, cx| input.focus(window, cx));
         self.rows.push(row);
+        self.selected[0] = Some(self.rows.len() - 1);
         cx.notify();
     }
 
@@ -295,6 +322,7 @@ impl TableEditor {
         let Some(form) = &mut self.form else { return };
         form.columns.remove(ix);
         self.rows.remove(ix);
+        self.selected[0] = self.rows.len().checked_sub(1).map(|last| ix.min(last));
         cx.notify();
     }
 
@@ -308,7 +336,10 @@ impl TableEditor {
         let Some(form) = &mut self.form else { return };
         form.add_index();
         let row = Self::index_row(&form.indexes[form.indexes.len() - 1], window, cx);
+        // Ready to type the new row's name.
+        row.name.update(cx, |input, cx| input.focus(window, cx));
         self.indexes.push(row);
+        self.selected[1] = Some(self.indexes.len() - 1);
         cx.notify();
     }
 
@@ -316,6 +347,7 @@ impl TableEditor {
         let Some(form) = &mut self.form else { return };
         form.indexes.remove(ix);
         self.indexes.remove(ix);
+        self.selected[1] = self.indexes.len().checked_sub(1).map(|last| ix.min(last));
         cx.notify();
     }
 
@@ -330,7 +362,10 @@ impl TableEditor {
         form.add_foreign_key(&self.schema);
         let fks = &form.foreign_keys;
         let row = Self::fk_row(&fks[fks.len() - 1], window, cx);
+        // Ready to type the new row's name.
+        row.name.update(cx, |input, cx| input.focus(window, cx));
         self.foreign_keys.push(row);
+        self.selected[2] = Some(self.foreign_keys.len() - 1);
         cx.notify();
     }
 
@@ -338,6 +373,7 @@ impl TableEditor {
         let Some(form) = &mut self.form else { return };
         form.foreign_keys.remove(ix);
         self.foreign_keys.remove(ix);
+        self.selected[2] = self.foreign_keys.len().checked_sub(1).map(|last| ix.min(last));
         cx.notify();
     }
 
@@ -368,6 +404,165 @@ impl TableEditor {
         cx.notify();
     }
 
+    fn select(&mut self, list: usize, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected[list] = Some(ix);
+        window.focus(&self.list_focus, cx);
+        cx.notify();
+    }
+
+    fn len(&self, list: usize) -> usize {
+        [self.rows.len(), self.indexes.len(), self.foreign_keys.len()][list]
+    }
+
+    fn add(&mut self, list: usize, window: &mut Window, cx: &mut Context<Self>) {
+        match list {
+            0 => self.add_column(window, cx),
+            1 => self.add_index(window, cx),
+            _ => self.add_foreign_key(window, cx),
+        }
+    }
+
+    fn remove_selected(&mut self, list: usize, cx: &mut Context<Self>) {
+        let Some(ix) = self.selected[list] else { return };
+        match list {
+            0 => self.remove_column(ix, cx),
+            1 => self.remove_index(ix, cx),
+            _ => self.remove_foreign_key(ix, cx),
+        }
+    }
+
+    /// The selected row's name input, where Enter takes you.
+    fn selected_name(&self, list: usize) -> Option<Entity<InputState>> {
+        let ix = self.selected[list]?;
+        match list {
+            0 => self.rows.get(ix).map(|r| r.name.clone()),
+            1 => self.indexes.get(ix).map(|r| r.name.clone()),
+            _ => self.foreign_keys.get(ix).map(|r| r.name.clone()),
+        }
+    }
+
+    fn on_list_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let list = self.tab;
+        let last = self.len(list).checked_sub(1);
+        match ev.keystroke.key.as_str() {
+            "up" => {
+                if let Some(ix) = self.selected[list] {
+                    self.select(list, ix.saturating_sub(1), window, cx);
+                }
+            }
+            "down" => {
+                if let (Some(ix), Some(last)) = (self.selected[list], last) {
+                    self.select(list, (ix + 1).min(last), window, cx);
+                }
+            }
+            "delete" => self.remove_selected(list, cx),
+            "enter" => {
+                if let Some(name) = self.selected_name(list) {
+                    name.update(cx, |input, cx| input.focus(window, cx));
+                }
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+
+    /// The `+ −` toolbar, the list of one-line summaries, and the selected row's form.
+    fn render_list(
+        &self,
+        list: usize,
+        lines: Vec<(String, Spans, bool)>,
+        detail: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = ["column", "index", "fk"][list];
+        let noun = ["column", "index", "foreign key"][list];
+        let theme = cx.theme();
+        let rows = lines
+            .into_iter()
+            .enumerate()
+            .map(|(ix, (text, spans, is_pk))| {
+                let selected = self.selected[list] == Some(ix);
+                let highlights: Vec<_> = spans
+                    .into_iter()
+                    .filter_map(|(r, key)| Some((r, theme.highlight_theme.style(key)?)))
+                    .collect();
+                let line = div()
+                    .when(is_pk, |d| d.debug_selector(move || format!("column-pk-{ix}")))
+                    .child(StyledText::new(text).with_highlights(highlights));
+                div()
+                    .id((id, ix))
+                    .debug_selector(move || format!("{id}-{ix}"))
+                    .px(theme::space_8())
+                    .py(theme::space_2())
+                    .whitespace_nowrap()
+                    .when(selected, |d| d.bg(theme.list_active))
+                    .when(!selected, |d| d.hover(|d| d.bg(theme.list_hover)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select(list, ix, window, cx)
+                    }))
+                    .child(line)
+            })
+            .collect::<Vec<_>>();
+        let empty = rows.is_empty();
+        let tool = |name: &'static str, icon: Lucide, tip: String| {
+            Button::new(name)
+                .debug_selector(move || name.into())
+                .ghost()
+                .xsmall()
+                .icon(icon)
+                .tooltip(tip)
+        };
+        let add = format!("{id}-add").leak();
+        let remove = format!("{id}-remove").leak();
+        v_flex()
+            .gap(theme::space_8())
+            .child(
+                v_flex()
+                    .rounded(theme.radius)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(
+                        h_flex()
+                            .gap(theme::space_2())
+                            .p(theme::space_2())
+                            .border_b_1()
+                            .border_color(theme.border)
+                            .child(tool(add, Lucide::Plus, format!("Add {noun}")).on_click(
+                                cx.listener(move |this, _, window, cx| this.add(list, window, cx)),
+                            ))
+                            .child(
+                                tool(remove, Lucide::Minus, format!("Remove {noun} (Delete)"))
+                                    .disabled(self.selected[list].is_none())
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_selected(list, cx)
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id(("table-editor-list", list))
+                            .track_focus(&self.list_focus)
+                            .on_key_down(cx.listener(Self::on_list_key))
+                            .h(px(LIST_H))
+                            .overflow_y_scroll()
+                            .py(theme::space_2())
+                            .font_family(theme.mono_font_family.clone())
+                            .text_size(theme::mono())
+                            .when(empty, |d| {
+                                d.child(
+                                    div()
+                                        .p(theme::space_8())
+                                        .text_color(theme::text_secondary(theme))
+                                        .child(format!("No {noun}s. Press + to add one.")),
+                                )
+                            })
+                            .children(rows),
+                    ),
+            )
+            .child(div().min_h(px(DETAIL_H)).children(detail))
+            .into_any_element()
+    }
+
     fn render_columns(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(form) = &self.form else {
             return div()
@@ -377,243 +572,211 @@ impl TableEditor {
                 .child("Loading columns…")
                 .into_any_element();
         };
+        let pad = lines::pad(form.columns.iter().map(|(_, c)| c.name.as_str()));
         let rows = form
             .columns
             .iter()
-            .zip(&self.rows)
-            .enumerate()
-            .map(|(ix, ((_, c), inputs))| self.render_row(ix, c, inputs, cx))
-            .collect::<Vec<_>>();
-        v_flex()
-            .gap(theme::space_4())
-            .children(rows)
-            .child(
-                div().debug_selector(|| "column-add".into()).child(
-                    Button::new("column-add")
-                        .ghost()
-                        .small()
-                        .label("Add column")
-                        .on_click(cx.listener(|this, _, window, cx| this.add_column(window, cx))),
-                ),
-            )
-            .into_any_element()
-    }
-
-    fn render_row(
-        &self,
-        ix: usize,
-        c: &crate::model::Column,
-        inputs: &ColumnInputs,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let key = div().flex_none().w(theme::space_12());
-        let key = if c.is_pk {
-            key.debug_selector(move || format!("column-pk-{ix}")).child(
-                Icon::new(Lucide::KeyRound)
-                    .xsmall()
-                    .text_color(cx.theme().muted_foreground),
-            )
-        } else {
-            key
-        };
-        h_flex()
-            .debug_selector(move || format!("column-{ix}"))
-            .gap(theme::space_6())
-            .child(key)
-            .child(div().w(px(160.)).child(Input::new(&inputs.name).small()))
-            .child(div().w(px(140.)).child(Input::new(&inputs.ty).small()))
-            .child(
-                Checkbox::new(SharedString::from(format!("column-null-{ix}")))
-                    .label("Null")
-                    .checked(c.nullable)
-                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                        this.set_nullable(ix, *checked, cx)
-                    })),
-            )
-            .child(div().w(px(140.)).child(Input::new(&inputs.default).small()))
-            .child(
-                div()
-                    .debug_selector(move || format!("column-remove-{ix}"))
+            .map(|(_, c)| {
+                let (text, spans) = lines::column_line(c, pad);
+                (text, spans, c.is_pk)
+            })
+            .collect();
+        let detail = self.selected[0].and_then(|ix| {
+            let (inputs, (_, c)) = (self.rows.get(ix)?, form.columns.get(ix)?);
+            Some(
+                v_flex()
+                    .gap(theme::space_8())
                     .child(
-                        Button::new(("column-remove", ix))
-                            .ghost()
-                            .small()
-                            .label("Remove")
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.remove_column(ix, cx)),
-                            ),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_indexes(&self, indexes: &[Index], cx: &mut Context<Self>) -> AnyElement {
-        let rows = indexes
-            .iter()
-            .zip(&self.indexes)
-            .enumerate()
-            .map(|(ix, (i, inputs))| {
-                h_flex()
-                    .debug_selector(move || format!("index-{ix}"))
-                    .gap(theme::space_6())
-                    .child(div().w(px(160.)).child(Input::new(&inputs.name).small()))
-                    .child(div().w(px(200.)).child(Input::new(&inputs.columns).small()))
+                        h_flex()
+                            .gap(theme::space_8())
+                            .child(labeled("Name", Input::new(&inputs.name).small(), cx))
+                            .child(labeled("Type", Input::new(&inputs.ty).small(), cx)),
+                    )
                     .child(
-                        div()
-                            .debug_selector(move || format!("index-unique-{ix}"))
+                        h_flex()
+                            .gap(theme::space_8())
+                            .items_end()
+                            .child(labeled("Default", Input::new(&inputs.default).small(), cx))
                             .child(
-                                Checkbox::new(SharedString::from(format!("index-unique-{ix}")))
-                                    .label("Unique")
-                                    .checked(i.unique)
-                                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                        this.set_unique(ix, *checked, cx)
-                                    })),
+                                div().flex_1().pb(theme::space_4()).child(
+                                    Checkbox::new("column-not-null")
+                                        .debug_selector(|| "column-not-null".into())
+                                        .label("Not null")
+                                        .checked(!c.nullable)
+                                        .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                            this.set_nullable(ix, !*checked, cx)
+                                        })),
+                                ),
                             ),
                     )
-                    .child(remove_button(
-                        "index-remove",
-                        ix,
-                        cx.listener(move |this, _, _, cx| this.remove_index(ix, cx)),
-                    ))
+                    .into_any_element(),
+            )
+        });
+        self.render_list(0, rows, detail, cx)
+    }
+
+    fn render_indexes(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(form) = &self.form else {
+            return div().into_any_element();
+        };
+        let pad = lines::pad(form.indexes.iter().map(|i| i.name.as_str()));
+        let rows = form
+            .indexes
+            .iter()
+            .map(|i| {
+                let (text, spans) = lines::index_line(i, pad);
+                (text, spans, false)
             })
-            .collect::<Vec<_>>();
-        v_flex()
-            .gap(theme::space_4())
-            .children(rows)
-            .child(add_button(
-                "index-add",
-                "Add index",
-                cx.listener(|this, _, window, cx| this.add_index(window, cx)),
-            ))
-            .into_any_element()
+            .collect();
+        let detail = self.selected[1].and_then(|ix| {
+            let (inputs, i) = (self.indexes.get(ix)?, form.indexes.get(ix)?);
+            Some(
+                h_flex()
+                    .gap(theme::space_8())
+                    .items_end()
+                    .child(labeled("Name", Input::new(&inputs.name).small(), cx))
+                    .child(labeled(
+                        "Columns (comma-separated)",
+                        Input::new(&inputs.columns).small(),
+                        cx,
+                    ))
+                    .child(
+                        div().flex_none().pb(theme::space_4()).child(
+                            Checkbox::new("index-unique")
+                                .debug_selector(|| "index-unique".into())
+                                .label("Unique")
+                                .checked(i.unique)
+                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                    this.set_unique(ix, *checked, cx)
+                                })),
+                        ),
+                    )
+                    .into_any_element(),
+            )
+        });
+        self.render_list(1, rows, detail, cx)
     }
 
     fn render_foreign_keys(&self, cx: &mut Context<Self>) -> AnyElement {
-        let rows = self
+        let Some(form) = &self.form else {
+            return div().into_any_element();
+        };
+        let pad = lines::pad(form.foreign_keys.iter().map(|f| f.name.as_str()));
+        let rows = form
             .foreign_keys
             .iter()
-            .enumerate()
-            .map(|(ix, inputs)| {
-                let input =
-                    |i: &Entity<InputState>, w: f32| div().w(px(w)).child(Input::new(i).small());
-                v_flex()
-                    .debug_selector(move || format!("fk-{ix}"))
-                    .gap(theme::space_4())
-                    .child(
-                        h_flex()
-                            .gap(theme::space_6())
-                            .child(input(&inputs.name, 160.))
-                            .child(input(&inputs.columns, 140.))
-                            .child("→")
-                            .child(input(&inputs.ref_schema, 100.))
-                            .child(input(&inputs.ref_table, 120.))
-                            .child(input(&inputs.ref_columns, 140.)),
-                    )
-                    .child(
-                        h_flex()
-                            .gap(theme::space_6())
-                            .child("On delete")
-                            .child(
-                                div()
-                                    .w(px(140.))
-                                    .child(Select::new(&inputs.on_delete).small()),
-                            )
-                            .child("On update")
-                            .child(
-                                div()
-                                    .w(px(140.))
-                                    .child(Select::new(&inputs.on_update).small()),
-                            )
-                            .child(remove_button(
-                                "fk-remove",
-                                ix,
-                                cx.listener(move |this, _, _, cx| this.remove_foreign_key(ix, cx)),
-                            )),
-                    )
+            .map(|f| {
+                let (text, spans) = lines::fk_line(f, pad);
+                (text, spans, false)
             })
-            .collect::<Vec<_>>();
-        v_flex()
-            .gap(theme::space_6())
-            .children(rows)
-            .child(add_button(
-                "fk-add",
-                "Add foreign key",
-                cx.listener(|this, _, window, cx| this.add_foreign_key(window, cx)),
-            ))
+            .collect();
+        let detail = self.selected[2].and_then(|ix| {
+            let inputs = self.foreign_keys.get(ix)?;
+            let input = |label, i: &Entity<InputState>| labeled(label, Input::new(i).small(), cx);
+            let select = |label, s: &ActionSelect| labeled(label, Select::new(s).small(), cx);
+            Some(
+                v_flex()
+                    .gap(theme::space_8())
+                    .child(
+                        h_flex()
+                            .gap(theme::space_8())
+                            .child(input("Name", &inputs.name))
+                            .child(input("Columns", &inputs.columns)),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(theme::space_8())
+                            .child(input("References schema", &inputs.ref_schema))
+                            .child(input("Table", &inputs.ref_table))
+                            .child(input("Columns", &inputs.ref_columns)),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(theme::space_8())
+                            .child(select("On delete", &inputs.on_delete))
+                            .child(select("On update", &inputs.on_update))
+                            // Keeps the selects as wide as the inputs above them.
+                            .child(div().flex_1()),
+                    )
+                    .into_any_element(),
+            )
+        });
+        self.render_list(2, rows, detail, cx)
+    }
+
+    fn render_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+        let form = self.form.as_ref();
+        let count = |n: Option<usize>| n.map_or(String::new(), |n| format!(" ({n})"));
+        let labels = [
+            ("tab-columns", format!("Columns{}", count(form.map(|f| f.columns.len())))),
+            ("tab-indexes", format!("Indexes{}", count(form.map(|f| f.indexes.len())))),
+            ("tab-fks", format!("Foreign keys{}", count(form.map(|f| f.foreign_keys.len())))),
+            ("tab-sql", format!("SQL{}", count(Some(self.statements().len()).filter(|n| *n > 0)))),
+        ];
+        TabBar::new("table-editor-tabs")
+            .underline()
+            .small()
+            .selected_index(self.tab)
+            .children(labels.map(|(id, label)| {
+                Tab::new().label(label).debug_selector(move || id.into())
+            }))
+            .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                this.tab = *ix;
+                cx.notify();
+            }))
             .into_any_element()
     }
 }
 
-/// A ghost "Add …" button, drawn as `id` for tests.
-fn add_button(
-    id: &'static str,
-    label: &'static str,
-    on_click: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
-) -> AnyElement {
-    div()
-        .debug_selector(move || id.into())
+/// A small label over `control`, taking an equal share of its row.
+fn labeled(label: &'static str, control: impl IntoElement, cx: &App) -> gpui_kit::Div {
+    v_flex()
+        .flex_1()
+        .min_w_0()
+        .gap(theme::space_2())
         .child(
-            Button::new(id)
-                .ghost()
-                .small()
-                .label(label)
-                .on_click(on_click),
+            div()
+                .text_size(theme::ui_sm())
+                .text_color(theme::text_secondary(cx.theme()))
+                .child(label),
         )
-        .into_any_element()
-}
-
-/// Row `ix`'s Remove button, drawn as `<id>-<ix>` for tests.
-fn remove_button(
-    id: &'static str,
-    ix: usize,
-    on_click: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
-) -> AnyElement {
-    div()
-        .debug_selector(move || format!("{id}-{ix}"))
-        .child(
-            Button::new((id, ix))
-                .ghost()
-                .small()
-                .label("Remove")
-                .on_click(on_click),
-        )
-        .into_any_element()
+        .child(control)
 }
 
 impl Render for TableEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let columns = self.render_columns(cx);
-        let keys = self
-            .form
-            .as_ref()
-            .map(|f| f.indexes.clone())
-            .map(|indexes| {
-                (
-                    self.render_indexes(&indexes, cx),
-                    self.render_foreign_keys(cx),
-                )
-            });
+        let body = match self.tab {
+            1 => self.render_indexes(cx),
+            2 => self.render_foreign_keys(cx),
+            3 => div()
+                .id("table-editor-sql")
+                .h(px(LIST_H + DETAIL_H + LIST_CHROME))
+                .overflow_y_scroll()
+                .child(sql_preview(&self.statements(), cx))
+                .into_any_element(),
+            _ => self.render_columns(cx),
+        };
         v_flex()
             .gap(theme::space_12())
             .child(field(
                 "name",
-                "Name".into(),
+                "Table".into(),
                 Input::new(&self.name).small(),
                 cx,
             ))
-            .child(field("columns", "Columns".into(), columns, cx))
-            .children(
-                keys.map(|(indexes, fks)| {
-                    [
-                        field("indexes", "Indexes".into(), indexes, cx),
-                        field("foreign-keys", "Foreign keys".into(), fks, cx),
-                    ]
-                })
-                .into_iter()
-                .flatten(),
+            .child(
+                v_flex()
+                    .gap(theme::space_8())
+                    .child(self.render_tabs(cx))
+                    .child(body),
             )
-            .child(sql_preview(&self.statements(), cx))
             .children(self.confirm.render(cx))
             .children(error_line(self.error.as_deref(), cx))
     }
 }
+
+const LIST_H: f32 = 280.;
+/// Room for the largest form (foreign keys), so switching rows or tabs never resizes the dialog.
+const DETAIL_H: f32 = 150.;
+/// The toolbar and borders around the list, so the SQL tab matches the others' height.
+const LIST_CHROME: f32 = 40.;
