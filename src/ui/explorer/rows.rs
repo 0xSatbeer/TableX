@@ -28,6 +28,14 @@ pub(super) fn click_action(kind: NodeKind, hit: Hit) -> Click {
     }
 }
 
+/// A row's menu: a connection's, a Postgres database's, or Refresh alone.
+#[derive(Clone, Copy)]
+enum Menu {
+    Connection,
+    Database,
+    Refresh,
+}
+
 /// Table-like objects open in a tab and expand into their structure.
 pub(super) fn opens_tab(kind: NodeKind) -> bool {
     matches!(
@@ -46,13 +54,17 @@ impl Explorer {
         let theme = cx.theme();
         let focused = self.focus.contains_focused(window, cx);
         let ws = self.workspace.read(cx);
-        // Each row's menu: Some(true) for a connection's, Some(false) for Refresh alone, None for no menu.
-        let menus: Vec<Option<bool>> = range
+        let menus: Vec<Option<Menu>> = range
             .clone()
             .map(|ix| match self.nodes[ix].kind {
-                NodeKind::Connection(_) => Some(true),
-                NodeKind::Database | NodeKind::Schema => Some(false),
-                kind if opens_tab(kind) => Some(false),
+                NodeKind::Connection(_) => Some(Menu::Connection),
+                NodeKind::Database
+                    if ws.connections[self.nodes[ix].conn].kind() == DbKind::Postgres =>
+                {
+                    Some(Menu::Database)
+                }
+                NodeKind::Database | NodeKind::Schema => Some(Menu::Refresh),
+                kind if opens_tab(kind) => Some(Menu::Refresh),
                 _ => None,
             })
             .collect();
@@ -214,14 +226,14 @@ impl Explorer {
             })
             .zip(menus)
             .map(|(row, menu)| match menu {
-                Some(is_conn) => row
+                Some(kind) => row
                     .context_menu(move |menu, _, _| {
-                        let menu = if is_conn {
-                            menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…")).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                        let menu = match kind {
+                            Menu::Connection => menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…")).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
                                 div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
-                            })
-                        } else {
-                            menu
+                            }),
+                            Menu::Database => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
+                            Menu::Refresh => menu,
                         };
                         menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
                     })

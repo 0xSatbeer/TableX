@@ -30,7 +30,7 @@ fn refresh_while_a_refresh_of_the_same_node_is_running_starts_no_second_load(
 }
 
 #[gpui_kit::test]
-fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_and_only_the_connection_edit_and_delete(
+fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the_connection_edit_and_delete_and_only_a_postgres_database_modify(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     let mut t = table("t");
@@ -39,25 +39,29 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_and_only
         kind: ObjectKind::Function,
         ..table("f()")
     };
-    // (row right-clicked, Edit… shown, Delete shown, Refresh shown)
+    // (Postgres connection, row right-clicked, Edit… shown, Delete shown, Refresh shown, Modify… shown)
     let cases = [
-        ("pg", true, true, true),
-        ("app", false, false, true),
-        ("public", false, false, true),
-        ("Tables", false, false, false),
-        ("t", false, false, true),
-        ("Columns", false, false, false),
-        ("id", false, false, false),
-        ("v", false, false, true),
-        ("f()", false, false, false),
+        (true, "pg", true, true, true, false),
+        (true, "app", false, false, true, true),
+        (true, "public", false, false, true, false),
+        (true, "Tables", false, false, false, false),
+        (true, "t", false, false, true, false),
+        (true, "Columns", false, false, false, false),
+        (true, "id", false, false, false, false),
+        (true, "v", false, false, true, false),
+        (true, "f()", false, false, false, false),
+        (false, "pg", true, true, true, false),
+        (false, "app", false, false, true, false),
+        (false, "public", false, false, true, false),
+        (false, "t", false, false, true, false),
     ];
-    for (row, edit, delete, refresh) in cases {
-        let conn = loaded(
-            pg(1, "pg", "app"),
-            "app",
-            "public",
-            vec![t.clone(), view("v"), f.clone()],
-        );
+    for (postgres, row, edit, delete, refresh, modify) in cases {
+        let base = if postgres {
+            pg(1, "pg", "app")
+        } else {
+            sqlite(1, "pg", "/x/app.db")
+        };
+        let conn = loaded(base, "app", "public", vec![t.clone(), view("v"), f.clone()]);
         let (mut cx, explorer, _, _) = open_explorer(cx, vec![conn]);
         for step in [
             "pg",
@@ -82,12 +86,12 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_and_only
         cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
         cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
         cx.run_until_parked();
-        let shown = ["menu-edit", "menu-delete", "menu-refresh"]
+        let shown = ["menu-edit", "menu-delete", "menu-refresh", "menu-modify"]
             .map(|item| cx.debug_bounds(item).is_some());
         assert_eq!(
             shown,
-            [edit, delete, refresh],
-            "{row}: Edit…, Delete, Refresh"
+            [edit, delete, refresh, modify],
+            "{row} (postgres {postgres}): Edit…, Delete, Refresh, Modify…"
         );
     }
 }

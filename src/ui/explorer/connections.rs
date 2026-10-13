@@ -170,6 +170,101 @@ impl Explorer {
         }
     }
 
+    /// Opens Modify database for the selected Postgres database row (Modify… in its menu, `ModifyObject`).
+    pub fn modify_object(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self
+            .nodes
+            .get(self.selected)
+            .filter(|n| n.kind == NodeKind::Database)
+        else {
+            return;
+        };
+        let conn = self.workspace.read(cx).connections[node.conn].clone();
+        if conn.kind() != DbKind::Postgres {
+            return;
+        }
+        let db = node.label.to_string();
+        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
+            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
+            None => self.driver.connect(&on_database(&conn.params, &db)),
+        };
+        let dialog = DatabaseDialog::open(
+            self.driver.clone(),
+            open,
+            &db,
+            conn.is_production,
+            window,
+            cx,
+        );
+        cx.subscribe_in(
+            &dialog,
+            window,
+            move |this, dialog, Apply(statements), window, cx| {
+                this.apply(
+                    conn.id,
+                    &db,
+                    dialog.downgrade(),
+                    statements.clone(),
+                    window,
+                    cx,
+                )
+            },
+        )
+        .detach();
+    }
+
+    /// Runs a Modify dialog's `statements` on connection `id`'s `postgres` database, after dropping
+    /// the session on `db` so a rename isn't blocked by it. Success closes the dialog and re-reads
+    /// the connection; a failure goes back to the dialog.
+    fn apply(
+        &mut self,
+        id: ConnectionId,
+        db: &str,
+        dialog: WeakEntity<DatabaseDialog>,
+        statements: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(params) = self.params.get(&id).cloned() else {
+            return;
+        };
+        self.sessions.remove(&(id, db.to_string()));
+        let at = (id, "postgres".to_string());
+        let open: crate::db::Reply<Session> = match self.sessions.get(&at) {
+            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
+            None => self.driver.connect(&on_database(&params, "postgres")),
+        };
+        let generation = *self.gens.entry(id).or_default();
+        let driver = self.driver.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = match open.await {
+                Ok(session) => {
+                    this.update(cx, |this, _| {
+                        if this.gens.get(&id) == Some(&generation) {
+                            this.sessions.entry(at).or_insert_with(|| session.clone());
+                        }
+                    })
+                    .ok();
+                    driver.execute(&session, statements, false).await
+                }
+                Err(reason) => Err(reason),
+            };
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(()) => {
+                    window.close_dialog(cx);
+                    if this.gens.get(&id) == Some(&generation) {
+                        this.load(id.0.to_string(), false, cx);
+                    }
+                }
+                Err(reason) => {
+                    dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(super) fn open_dialog(
         &mut self,
         editing: Option<ConnectionId>,

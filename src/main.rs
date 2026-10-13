@@ -37,7 +37,8 @@ actions!(
         AddConnection,
         EditConnection,
         DeleteConnection,
-        RefreshNode
+        RefreshNode,
+        ModifyObject
     ]
 );
 

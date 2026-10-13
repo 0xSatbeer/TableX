@@ -4,6 +4,7 @@ pub mod connection_dialog;
 pub mod explorer;
 pub mod gallery;
 pub mod grid;
+pub mod object_dialog;
 pub mod panel;
 pub mod split;
 pub mod statusbar;

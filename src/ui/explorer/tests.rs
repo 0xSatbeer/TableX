@@ -15,6 +15,7 @@ mod connect;
 mod drive;
 mod filter;
 mod load;
+mod modify_database;
 mod refresh;
 mod refresh_errors;
 mod refresh_menu;

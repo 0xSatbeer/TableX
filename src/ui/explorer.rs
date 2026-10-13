@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _,
+    ActiveTheme as _, Icon, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -26,6 +26,7 @@ use crate::model::{
     DbObject, Key, ObjectKind, Schema, Workspace,
 };
 use crate::ui::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
+use crate::ui::object_dialog::{Apply, DatabaseDialog};
 use crate::ui::tabs::Origin;
 use crate::{assets, theme};
 
