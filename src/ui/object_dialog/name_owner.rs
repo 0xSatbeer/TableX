@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::db::{Driver, Reply, Session};
-use crate::ddl::{alter_database, alter_schema};
+use crate::ddl::{alter_database, alter_schema, create_database};
 
 /// What a `NameOwnerDialog` modifies.
 #[derive(Clone, Copy, PartialEq)]
@@ -11,9 +11,11 @@ pub enum Owned {
     Schema,
 }
 
-/// Modify database or schema: its name and owner.
+/// Modify database or schema, or New database: its name and owner.
 pub struct NameOwnerDialog {
     kind: Owned,
+    /// New database rather than Modify.
+    create: bool,
     original: String,
     pub name: Entity<InputState>,
     /// Every role's name, once loaded.
@@ -42,13 +44,44 @@ impl NameOwnerDialog {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        let view = cx.new(|cx| Self::new(driver, open, kind, name, is_production, window, cx));
-        let body = view.clone();
         let noun = match kind {
             Owned::Database => "database",
             Owned::Schema => "schema",
         };
         let title = format!("Modify {noun} {name}");
+        let view =
+            cx.new(|cx| Self::new(driver, open, kind, name, None, is_production, window, cx));
+        Self::show(view, title, window, cx)
+    }
+
+    /// Opens New database over `window`, owned by `user` unless another role is picked, listing
+    /// the roles through the session `open` resolves to.
+    pub fn create(
+        driver: Arc<dyn Driver>,
+        open: Reply<Session>,
+        user: &str,
+        is_production: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        let view = cx.new(|cx| {
+            let user = Some(user.to_string());
+            Self::new(
+                driver,
+                open,
+                Owned::Database,
+                "",
+                user,
+                is_production,
+                window,
+                cx,
+            )
+        });
+        Self::show(view, "New database".into(), window, cx)
+    }
+
+    fn show(view: Entity<Self>, title: String, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        let body = view.clone();
         window.open_dialog(cx, move |dialog, _, cx| {
             let enabled = body.read(cx).apply_enabled(cx);
             let on_apply = body.clone();
@@ -66,26 +99,37 @@ impl NameOwnerDialog {
         view
     }
 
+    /// Creating, with `user` as the default owner, when `user` is given.
+    #[allow(clippy::too_many_arguments)]
     fn new(
         driver: Arc<dyn Driver>,
         open: Reply<Session>,
         kind: Owned,
         name: &str,
+        user: Option<String>,
         is_production: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let create = user.is_some();
         let input = cx.new(|cx| InputState::new(window, cx).default_value(name.to_string()));
-        cx.subscribe(&input, |_, _, _: &InputEvent, cx| cx.notify())
-            .detach();
+        cx.subscribe(&input, move |this: &mut Self, input, _: &InputEvent, cx| {
+            // On production a new database's confirmation is its new name.
+            if create {
+                this.confirm.name = input.read(cx).value().to_string();
+            }
+            cx.notify()
+        })
+        .detach();
         let schema = name.to_string();
         cx.spawn_in(window, async move |this, cx| {
             // The session is dropped once read, so it doesn't block a rename.
             let loaded = async {
                 let session = open.await?;
-                let owner = match kind {
-                    Owned::Database => driver.database_owner(&session),
-                    Owned::Schema => driver.schema_owner(&session, &schema),
+                let owner = match (kind, user) {
+                    (_, Some(user)) => Box::pin(futures::future::ready(Ok(user))),
+                    (Owned::Database, None) => driver.database_owner(&session),
+                    (Owned::Schema, None) => driver.schema_owner(&session, &schema),
                 };
                 let (roles, owner) = futures::join!(driver.roles(&session), owner);
                 Ok::<_, String>((roles?, owner?))
@@ -103,6 +147,7 @@ impl NameOwnerDialog {
         .detach();
         Self {
             kind,
+            create,
             original: name.into(),
             name: input,
             roles: Vec::new(),
@@ -144,6 +189,13 @@ impl NameOwnerDialog {
             .selected_value()
             .cloned()
             .unwrap_or_else(|| self.owner_was.clone());
+        if self.create {
+            let name = self.name.read(cx).value();
+            if name.is_empty() || new_owner.is_empty() {
+                return Vec::new();
+            }
+            return create_database(&name, &new_owner);
+        }
         let build = match self.kind {
             Owned::Database => alter_database,
             Owned::Schema => alter_schema,

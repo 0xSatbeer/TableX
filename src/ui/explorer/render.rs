@@ -26,6 +26,11 @@ impl Render for Explorer {
                 this.modify_object(window, cx)
             }))
             .on_action(
+                cx.listener(|this, _: &crate::NewDatabase, window, cx| {
+                    this.new_database(window, cx)
+                }),
+            )
+            .on_action(
                 cx.listener(|this, _: &crate::NewRole, window, cx| {
                     this.new_role(false, window, cx)
                 }),

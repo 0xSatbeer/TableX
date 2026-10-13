@@ -39,6 +39,7 @@ actions!(
         DeleteConnection,
         RefreshNode,
         ModifyObject,
+        NewDatabase,
         NewRole,
         NewUser
     ]

@@ -232,6 +232,57 @@ impl Explorer {
         .detach();
     }
 
+    /// Opens New Database for the selected Postgres database, schema or table row (+ New in its
+    /// menu). Apply runs non-atomically on the row's database and refreshes the connection.
+    pub fn new_database(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected) else {
+            return;
+        };
+        if !matches!(
+            node.kind,
+            NodeKind::Database | NodeKind::Schema | NodeKind::Object(ObjectKind::Table)
+        ) {
+            return;
+        }
+        let conn = self.workspace.read(cx).connections[node.conn].clone();
+        let ConnectionParams::Postgres { user, .. } = &conn.params else {
+            return;
+        };
+        let db = segments(&node.key)[1].clone();
+        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
+            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
+            None => self.driver.connect(&on_database(&conn.params, &db)),
+        };
+        let dialog = NameOwnerDialog::create(
+            self.driver.clone(),
+            open,
+            user,
+            conn.is_production,
+            window,
+            cx,
+        );
+        cx.subscribe_in(
+            &dialog,
+            window,
+            move |this, dialog, Apply(statements), window, cx| {
+                let dialog = dialog.downgrade();
+                this.apply(
+                    conn.id,
+                    &db,
+                    false,
+                    Some(conn.id.0.to_string()),
+                    move |reason, cx| {
+                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    },
+                    statements.clone(),
+                    window,
+                    cx,
+                )
+            },
+        )
+        .detach();
+    }
+
     /// Opens New Role, or New User when `login`, for the selected Postgres database, schema or
     /// table row (+ New in its menu). Apply runs atomically on the row's database.
     pub fn new_role(&mut self, login: bool, window: &mut Window, cx: &mut Context<Self>) {

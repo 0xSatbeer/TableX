@@ -248,7 +248,8 @@ impl Explorer {
                         };
                         let menu = if new {
                             menu.submenu("+ New", window, cx, |menu, _, _| {
-                                menu.menu_element(Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
+                                menu.menu_element(Box::new(crate::NewDatabase), |_, _| div().debug_selector(|| "menu-new-database".into()).child("Database"))
+                                    .menu_element(Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
                                     .menu_element(Box::new(crate::NewUser), |_, _| div().debug_selector(|| "menu-new-user".into()).child("User"))
                             })
                         } else {
