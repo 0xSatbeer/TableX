@@ -98,20 +98,43 @@ impl Render for Explorer {
                             .flex_1()
                             .items_center()
                             .justify_center()
-                            .gap(theme::space_8())
+                            .px(theme::space_24())
+                            .gap(theme::space_4())
                             .child(
                                 div()
-                                    .text_size(theme::ui_sm())
+                                    .size(theme::space_24() + theme::space_16())
+                                    .mb(theme::space_8())
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(theme::radius_lg())
+                                    .bg(theme.muted)
                                     .text_color(theme.muted_foreground)
+                                    .child(Icon::new(Lucide::Database).size(theme::space_16() + theme::space_4())),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme::ui())
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.foreground)
                                     .child("No connections yet"),
                             )
                             .child(
                                 div()
+                                    .text_size(theme::ui_sm())
+                                    .text_color(theme.muted_foreground)
+                                    .text_center()
+                                    .child("Connect to PostgreSQL or SQLite to browse schemas and run queries."),
+                            )
+                            .child(
+                                div()
+                                    .mt(theme::space_12())
                                     .debug_selector(|| "empty-add-connection".into())
                                     .child(
                                         Button::new("empty-add-connection")
                                             .primary()
                                             .small()
+                                            .icon(Lucide::Plus)
                                             .label("Add connection")
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.add_connection(window, cx)
