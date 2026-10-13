@@ -4,6 +4,7 @@ mod ddl;
 mod mock;
 mod model;
 mod shell;
+mod sql;
 mod theme;
 mod ui;
 
