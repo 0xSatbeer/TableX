@@ -582,8 +582,8 @@ pub(crate) mod tests {
             ("table.head.foreground", "table.head.background"),
             ("popover.foreground", "popover.background"),
             ("primary.foreground", "primary.background"),
-            ("danger.foreground", "background"),
-            ("danger.foreground", "sidebar.background"),
+            // gpui-kit draws danger.foreground on a danger fill (titlebar close hover), not on the page.
+            ("danger.foreground", "danger.background"),
             ("background", "danger.background"),
             ("foreground", "muted.background"),
             ("foreground", "list.hover.background"),
@@ -591,7 +591,7 @@ pub(crate) mod tests {
             ("muted.foreground", "sidebar.accent.background"),
         ];
         // Status text on the surfaces it is drawn on, hover rows included.
-        let status = ["success", "warning", "info", "danger"];
+        let status = ["success", "warning", "info"];
         let surfaces = ["background", "sidebar.background", "muted.background", "list.hover.background", "table.hover.background"];
         let text: Vec<(String, &str)> = text.iter().map(|&(f, b)| (f.to_string(), b)).chain(
             status.iter().flat_map(|s| surfaces.iter().map(move |b| (format!("{s}.foreground"), *b))),

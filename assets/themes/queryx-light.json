@@ -41,7 +41,7 @@
         "warning.background": "#B26B00",
         "warning.foreground": "#9A5C00",
         "danger.background": "#C93434",
-        "danger.foreground": "#C53333",
+        "danger.foreground": "#FCFCFD",
         "info.background": "#1C7FA6",
         "info.foreground": "#197295",
 

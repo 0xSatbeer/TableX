@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _,
+    ActiveTheme as _, Icon, Sizable as _, spinner::Spinner,
     menu::ContextMenuExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -955,6 +955,13 @@ impl Explorer {
         self.load(node.key.clone(), false, cx);
     }
 
+    /// Whether a Refresh is re-reading anything under the connection keyed `conn`.
+    fn refreshing(&self, conn: &str) -> bool {
+        self.loads.iter().any(|(key, load)| {
+            *load == Load::Refreshing && key.strip_prefix(conn).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
+    }
+
     /// Opens every ancestor of `key`, selects it and focuses the tree.
     pub fn reveal(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.expanded.extend(ancestors(key).into_iter().map(String::from));
@@ -1269,7 +1276,7 @@ impl Explorer {
                         },
                         theme.muted_foreground,
                     ),
-                    NodeKind::Loading => (Icon::new(Lucide::LoaderCircle), theme.muted_foreground),
+                    NodeKind::Loading => (Icon::empty(), theme.muted_foreground),
                     NodeKind::ConnError | NodeKind::LoadError => (Icon::new(Lucide::CircleAlert), theme.danger),
                 };
                 let conn = &ws.connections[node.conn];
@@ -1340,7 +1347,10 @@ impl Explorer {
                             )
                         }),
                     )
-                    .child(icon.small().text_color(color))
+                    .map(|d| match node.kind {
+                        NodeKind::Loading => d.child(Spinner::new().small().color(color)),
+                        _ => d.child(icon.small().text_color(color)),
+                    })
                     .when(is_conn, |d| {
                         // Solid = connected, 2px ring otherwise; an error also has its own row below.
                         let color = theme::connection_color(conn.color, theme);
@@ -1384,6 +1394,14 @@ impl Explorer {
                     .when(node.pk, |d| d.child(div().flex_none().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child("PK")))
                     .when_some(node.count, |d, n| {
                         d.child(div().text_size(theme::ui_sm()).text_color(theme.muted_foreground).child(n.to_string()))
+                    })
+                    .when(is_conn && self.refreshing(&node.key), |d| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .debug_selector(move || format!("conn-refreshing-{ix}"))
+                                .child(Spinner::new().xsmall().color(theme.muted_foreground)),
+                        )
                     })
                     .when(is_conn && conn.is_production, |d| {
                         d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
@@ -2833,6 +2851,30 @@ mod tests {
             refresh(&explorer, &mut cx, row);
             assert_eq!(fake.pending(), [call], "{row}");
             assert_eq!(under(&explorer, &cx, row), before, "{row}: the old children stay until the new ones arrive");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_connection_row_shows_a_refresh_icon_while_a_refresh_under_it_is_in_flight(cx: &mut gpui_kit::TestAppContext) {
+        // (row refreshed, its load)
+        let cases = [("pg", "databases app"), ("app", "schemas app"), ("public", "objects app/public"), ("t", "columns app/public/t")];
+        for (row, call) in cases {
+            let (mut cx, explorer, _, fake) = tables_open(cx);
+            expand(&explorer, &mut cx, "t");
+            answer(&fake, "columns app/public/t", Ok(()));
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("conn-refreshing-0").is_none(), "{row}: no icon before the refresh");
+            refresh(&explorer, &mut cx, row);
+            assert!(cx.debug_bounds("conn-refreshing-0").is_some(), "{row}: icon while in flight");
+            answer(&fake, call, Ok(()));
+            cx.run_until_parked();
+            while !fake.pending().is_empty() {
+                for pending in fake.pending() {
+                    answer(&fake, &pending, Ok(()));
+                }
+                cx.run_until_parked();
+            }
+            assert!(cx.debug_bounds("conn-refreshing-0").is_none(), "{row}: icon gone once the refresh lands");
         }
     }
 
