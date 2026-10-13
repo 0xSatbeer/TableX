@@ -257,3 +257,30 @@ fn columns_come_in_ordinal_order_with_type_nullability_default_and_pk() {
         );
     }
 }
+
+#[test]
+fn ddl_and_metadata_calls_are_not_supported() {
+    let dir = tempfile::tempdir().unwrap();
+    let session =
+        block_on(Sqlite.connect(&params(&file(dir.path(), "a.db", "CREATE TABLE t (a)")))).unwrap();
+    let want = Err("not supported on SQLite".to_string());
+    assert_eq!(
+        block_on(Sqlite.execute(&session, vec!["DROP TABLE t".into()], true)),
+        want
+    );
+    assert_eq!(block_on(Sqlite.roles(&session)).map(drop), want);
+    assert_eq!(block_on(Sqlite.database_owner(&session)).map(drop), want);
+    assert_eq!(
+        block_on(Sqlite.schema_owner(&session, "main")).map(drop),
+        want
+    );
+    assert_eq!(
+        block_on(Sqlite.table_def(&session, "main", "t")).map(drop),
+        want
+    );
+    assert_eq!(
+        block_on(Sqlite.columns(&session, "main", "t")).map(|c| c.len()),
+        Ok(1),
+        "nothing ran"
+    );
+}

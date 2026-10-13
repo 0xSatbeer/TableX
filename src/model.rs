@@ -246,6 +246,32 @@ pub struct Index {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Role {
+    pub name: String,
+    pub can_login: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForeignKey {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub ref_schema: String,
+    pub ref_table: String,
+    pub ref_columns: Vec<String>,
+    /// SQL keyword: "NO ACTION" | "RESTRICT" | "CASCADE" | "SET NULL" | "SET DEFAULT"
+    pub on_delete: String,
+    pub on_update: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableDef {
+    pub name: String,
+    pub columns: Vec<Column>, // existing Column; is_pk read-only, enum_values ignored
+    pub indexes: Vec<Index>,  // existing Index; excludes PK/constraint-backing indexes
+    pub foreign_keys: Vec<ForeignKey>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Key {
     Primary {
         name: String,

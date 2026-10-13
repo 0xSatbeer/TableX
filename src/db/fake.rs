@@ -9,7 +9,7 @@ use futures::FutureExt;
 use futures::channel::oneshot;
 
 use super::{Driver, Reply, Session};
-use crate::model::{Column, ConnectionParams, DbObject};
+use crate::model::{Column, ConnectionParams, DbObject, Role, TableDef};
 
 type Answer = Result<Box<dyn Any + Send>, String>;
 
@@ -47,6 +47,7 @@ pub fn close(session: &Session) {
 pub struct Fake {
     pending: Mutex<Vec<(String, oneshot::Sender<Answer>)>>,
     tested: Mutex<Vec<ConnectionParams>>,
+    executed: Mutex<Vec<(String, Vec<String>, bool)>>,
 }
 
 impl Fake {
@@ -63,6 +64,11 @@ impl Fake {
     /// The params of every `test` call so far, oldest first.
     pub fn tested(&self) -> Vec<ConnectionParams> {
         self.tested.lock().unwrap().clone()
+    }
+
+    /// The (database, statements, atomic) of every `execute` call so far, oldest first.
+    pub fn executed(&self) -> Vec<(String, Vec<String>, bool)> {
+        self.executed.lock().unwrap().clone()
     }
 
     /// Resolves the oldest pending call labelled `label` with `result`.
@@ -125,6 +131,32 @@ impl Driver for Fake {
 
     fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
         self.call(format!("columns {}/{schema}/{object}", on(session)))
+    }
+
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()> {
+        let database = on(session).to_string();
+        let label = format!("execute {database}");
+        self.executed
+            .lock()
+            .unwrap()
+            .push((database, statements, atomic));
+        self.call(label)
+    }
+
+    fn roles(&self, session: &Session) -> Reply<Vec<Role>> {
+        self.call(format!("roles {}", on(session)))
+    }
+
+    fn database_owner(&self, session: &Session) -> Reply<String> {
+        self.call(format!("database_owner {}", on(session)))
+    }
+
+    fn schema_owner(&self, session: &Session, schema: &str) -> Reply<String> {
+        self.call(format!("schema_owner {}/{schema}", on(session)))
+    }
+
+    fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef> {
+        self.call(format!("table_def {}/{schema}/{table}", on(session)))
     }
 }
 
@@ -231,5 +263,32 @@ mod tests {
             ["databases app"],
             "and leaves the fake usable"
         );
+    }
+
+    #[test]
+    fn ddl_calls_are_labelled_and_executes_are_recorded() {
+        let fake = Fake::default();
+        let session = session("app");
+        let mut execute = fake.execute(&session, vec!["DROP TABLE t".into()], true);
+        let _roles = fake.roles(&session);
+        let _db = fake.database_owner(&session);
+        let _schema = fake.schema_owner(&session, "public");
+        let _def = fake.table_def(&session, "public", "t");
+        assert_eq!(
+            fake.pending(),
+            [
+                "execute app",
+                "roles app",
+                "database_owner app",
+                "schema_owner app/public",
+                "table_def app/public/t"
+            ]
+        );
+        assert_eq!(
+            fake.executed(),
+            [("app".to_string(), vec!["DROP TABLE t".to_string()], true)]
+        );
+        fake.resolve("execute app", Ok(()));
+        assert_eq!((&mut execute).now_or_never(), Some(Ok(())));
     }
 }

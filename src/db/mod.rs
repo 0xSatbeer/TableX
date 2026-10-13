@@ -9,7 +9,7 @@ use futures::FutureExt;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
-use crate::model::{Column, ConnectionParams, DbObject};
+use crate::model::{Column, ConnectionParams, DbObject, Role, TableDef};
 
 #[cfg(test)]
 pub mod fake;
@@ -56,6 +56,14 @@ pub trait Driver: Send + Sync {
     fn objects(&self, session: &Session, schema: &str) -> Reply<Vec<DbObject>>;
     /// The columns of table or view `object`, in ordinal order.
     fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>>;
+    /// Runs `statements` in order; in one transaction when `atomic`, else each on its own.
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()>;
+    /// Every role on the server, sorted by name.
+    fn roles(&self, session: &Session) -> Reply<Vec<Role>>;
+    /// The owner of the database `session` is open on.
+    fn database_owner(&self, session: &Session) -> Reply<String>;
+    fn schema_owner(&self, session: &Session, schema: &str) -> Reply<String>;
+    fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef>;
 }
 
 /// The real drivers: Postgres or SQLite, picked by the params or the session.
@@ -103,6 +111,26 @@ impl Driver for Live {
 
     fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
         self.on(session).columns(session, schema, object)
+    }
+
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()> {
+        self.on(session).execute(session, statements, atomic)
+    }
+
+    fn roles(&self, session: &Session) -> Reply<Vec<Role>> {
+        self.on(session).roles(session)
+    }
+
+    fn database_owner(&self, session: &Session) -> Reply<String> {
+        self.on(session).database_owner(session)
+    }
+
+    fn schema_owner(&self, session: &Session, schema: &str) -> Reply<String> {
+        self.on(session).schema_owner(session, schema)
+    }
+
+    fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef> {
+        self.on(session).table_def(session, schema, table)
     }
 }
 

@@ -7,7 +7,7 @@ use futures::FutureExt;
 use futures::future::ready;
 
 use super::{Driver, Reply, Session, blocking, foreign};
-use crate::model::{Column, ConnectionParams, DbObject, ObjectKind};
+use crate::model::{Column, ConnectionParams, DbObject, ObjectKind, Role, TableDef};
 
 pub struct Sqlite;
 
@@ -156,6 +156,30 @@ impl Driver for Sqlite {
                 .map_err(|e| session.fail(e))
         })
     }
+
+    fn execute(&self, _: &Session, _: Vec<String>, _: bool) -> Reply<()> {
+        unsupported()
+    }
+
+    fn roles(&self, _: &Session) -> Reply<Vec<Role>> {
+        unsupported()
+    }
+
+    fn database_owner(&self, _: &Session) -> Reply<String> {
+        unsupported()
+    }
+
+    fn schema_owner(&self, _: &Session, _: &str) -> Reply<String> {
+        unsupported()
+    }
+
+    fn table_def(&self, _: &Session, _: &str, _: &str) -> Reply<TableDef> {
+        unsupported()
+    }
+}
+
+fn unsupported<T: Send + 'static>() -> Reply<T> {
+    ready(Err("not supported on SQLite".into())).boxed()
 }
 
 #[cfg(test)]

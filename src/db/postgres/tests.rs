@@ -6,6 +6,7 @@ use futures::executor::block_on;
 mod catalogs;
 mod columns;
 mod connect;
+mod ddl;
 mod objects;
 
 /// `pg` logging in as `user` with `password`.

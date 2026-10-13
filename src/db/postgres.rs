@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use super::tls::Tls;
 use super::{Driver, Reply, Session, foreign, reason, spawn, timeout_reason};
-use crate::model::{Column, ConnectionParams, DbObject, ObjectKind, SslMode};
+use crate::model::{
+    Column, ConnectionParams, DbObject, ForeignKey, Index, ObjectKind, Role, SslMode, TableDef,
+};
 
 pub struct Postgres {
     /// Wraps the whole connect: TCP, TLS, auth and the first query.
@@ -42,6 +44,35 @@ impl PgSession {
         self.statements
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.client.query(sql, params).await.map_err(|e| reason(&e))
+    }
+
+    /// Runs one statement without parameters, so DDL and transaction control work.
+    async fn run(&self, sql: &str) -> Result<(), String> {
+        self.statements
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.client.batch_execute(sql).await.map_err(|e| reason(&e))
+    }
+
+    async fn run_all(&self, statements: &[String]) -> Result<(), String> {
+        for sql in statements {
+            self.run(sql).await?;
+        }
+        Ok(())
+    }
+
+    async fn run_atomic(&self, statements: &[String]) -> Result<(), String> {
+        self.run("BEGIN").await?;
+        if let Err(err) = self.run_all(statements).await {
+            self.run("ROLLBACK").await.ok();
+            return Err(err);
+        }
+        self.run("COMMIT").await
+    }
+
+    /// The owner named by `sql`'s one row, or `missing` when there is none.
+    async fn owner(&self, sql: &str, param: &str, missing: String) -> Result<String, String> {
+        let rows = self.query(sql, &[&param]).await?;
+        rows.first().map(|row| row.get(0)).ok_or(missing)
     }
 }
 
@@ -205,29 +236,154 @@ impl Driver for Postgres {
     fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>> {
         let (schema, object) = (schema.to_string(), object.to_string());
         read(session, |session| async move {
-            let sql = "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
-                         pg_get_expr(d.adbin, d.adrelid), coalesce(a.attnum = ANY (i.indkey), false), \
-                         ARRAY(SELECT e.enumlabel::text FROM pg_enum e WHERE e.enumtypid = a.atttypid ORDER BY e.enumsortorder) \
-                       FROM pg_attribute a \
-                       JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
-                       LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
-                       LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisprimary \
-                       WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped \
-                       ORDER BY a.attnum";
-            let rows = session.query(sql, &[&schema, &object]).await?;
-            Ok(rows
+            columns(&session, &schema, &object).await
+        })
+    }
+
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()> {
+        read(session, |session| async move {
+            match atomic {
+                true => session.run_atomic(&statements).await,
+                false => session.run_all(&statements).await,
+            }
+        })
+    }
+
+    fn roles(&self, session: &Session) -> Reply<Vec<Role>> {
+        read(session, |session| async move {
+            let sql =
+                "SELECT rolname::text, rolcanlogin FROM pg_roles ORDER BY rolname COLLATE \"C\"";
+            Ok(session
+                .query(sql, &[])
+                .await?
                 .iter()
-                .map(|row| Column {
+                .map(|row| Role {
                     name: row.get(0),
-                    data_type: row.get(1),
-                    nullable: row.get(2),
-                    default: row.get(3),
-                    is_pk: row.get(4),
-                    enum_values: row.get(5),
+                    can_login: row.get(1),
                 })
                 .collect())
         })
     }
+
+    fn database_owner(&self, session: &Session) -> Reply<String> {
+        read(session, |session| async move {
+            let sql = "SELECT pg_get_userbyid(datdba)::text FROM pg_database WHERE datname = current_database()";
+            let rows = session.query(sql, &[]).await?;
+            Ok(rows[0].get(0))
+        })
+    }
+
+    fn schema_owner(&self, session: &Session, schema: &str) -> Reply<String> {
+        let schema = schema.to_string();
+        read(session, |session| async move {
+            let sql = "SELECT pg_get_userbyid(nspowner)::text FROM pg_namespace WHERE nspname = $1";
+            let missing = format!("schema \"{schema}\" does not exist");
+            session.owner(sql, &schema, missing).await
+        })
+    }
+
+    fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef> {
+        let (schema, table) = (schema.to_string(), table.to_string());
+        read(session, |session| async move {
+            Ok(TableDef {
+                columns: columns(&session, &schema, &table).await?,
+                indexes: indexes(&session, &schema, &table).await?,
+                foreign_keys: foreign_keys(&session, &schema, &table).await?,
+                name: table,
+            })
+        })
+    }
+}
+
+async fn columns(session: &PgSession, schema: &str, object: &str) -> Result<Vec<Column>, String> {
+    let sql = "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
+                 pg_get_expr(d.adbin, d.adrelid), coalesce(a.attnum = ANY (i.indkey), false), \
+                 ARRAY(SELECT e.enumlabel::text FROM pg_enum e WHERE e.enumtypid = a.atttypid ORDER BY e.enumsortorder) \
+               FROM pg_attribute a \
+               JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+               LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
+               LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisprimary \
+               WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped \
+               ORDER BY a.attnum";
+    let rows = session.query(sql, &[&schema, &object]).await?;
+    Ok(rows
+        .iter()
+        .map(|row| Column {
+            name: row.get(0),
+            data_type: row.get(1),
+            nullable: row.get(2),
+            default: row.get(3),
+            is_pk: row.get(4),
+            enum_values: row.get(5),
+        })
+        .collect())
+}
+
+/// The table's indexes with their key columns in order, minus those backing a PK, unique or
+/// exclusion constraint (expression parts have no column and are left out).
+async fn indexes(session: &PgSession, schema: &str, table: &str) -> Result<Vec<Index>, String> {
+    let sql = "SELECT ic.relname::text, x.indisunique, \
+                 ARRAY(SELECT a.attname::text FROM unnest(x.indkey::int2[]) WITH ORDINALITY k(num, ord) \
+                   JOIN pg_attribute a ON a.attrelid = x.indrelid AND a.attnum = k.num \
+                   WHERE k.ord <= x.indnkeyatts ORDER BY k.ord) \
+               FROM pg_index x JOIN pg_class ic ON ic.oid = x.indexrelid \
+               JOIN pg_class c ON c.oid = x.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+               WHERE n.nspname = $1 AND c.relname = $2 AND NOT EXISTS (SELECT FROM pg_constraint k \
+                 WHERE k.conrelid = x.indrelid AND k.conindid = x.indexrelid AND k.contype IN ('p', 'u', 'x')) \
+               ORDER BY ic.relname COLLATE \"C\"";
+    let rows = session.query(sql, &[&schema, &table]).await?;
+    Ok(rows
+        .iter()
+        .map(|row| Index {
+            name: row.get(0),
+            unique: row.get(1),
+            columns: row.get(2),
+        })
+        .collect())
+}
+
+async fn foreign_keys(
+    session: &PgSession,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<ForeignKey>, String> {
+    let sql = "SELECT k.conname::text, \
+                 ARRAY(SELECT a.attname::text FROM unnest(k.conkey) WITH ORDINALITY u(num, ord) \
+                   JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = u.num ORDER BY u.ord), \
+                 rn.nspname::text, rc.relname::text, \
+                 ARRAY(SELECT a.attname::text FROM unnest(k.confkey) WITH ORDINALITY u(num, ord) \
+                   JOIN pg_attribute a ON a.attrelid = k.confrelid AND a.attnum = u.num ORDER BY u.ord), \
+                 k.confdeltype::text, k.confupdtype::text \
+               FROM pg_constraint k \
+               JOIN pg_class c ON c.oid = k.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+               JOIN pg_class rc ON rc.oid = k.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
+               WHERE k.contype = 'f' AND n.nspname = $1 AND c.relname = $2 \
+               ORDER BY k.conname COLLATE \"C\"";
+    let rows = session.query(sql, &[&schema, &table]).await?;
+    Ok(rows
+        .iter()
+        .map(|row| ForeignKey {
+            name: row.get(0),
+            columns: row.get(1),
+            ref_schema: row.get(2),
+            ref_table: row.get(3),
+            ref_columns: row.get(4),
+            on_delete: action(row.get(5)),
+            on_update: action(row.get(6)),
+        })
+        .collect())
+}
+
+/// The SQL keyword for a `pg_constraint` referential action code.
+fn action(code: &str) -> String {
+    match code {
+        "r" => "RESTRICT",
+        "c" => "CASCADE",
+        "n" => "SET NULL",
+        "d" => "SET DEFAULT",
+        _ => "NO ACTION",
+    }
+    .into()
 }
 
 /// Helpers for tests against the compose Postgres (`QUERYX_TEST_PG`); T02's listing tests use them too.
