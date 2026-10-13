@@ -59,8 +59,8 @@ pub fn pad<'a>(names: impl Iterator<Item = &'a str>) -> usize {
         .unwrap_or(0)
 }
 
-/// `id  integer default nextval('s') not null -- part of primary key`.
-pub fn column_line(c: &Column, pad: usize) -> (String, Spans) {
+/// `id  integer default nextval('s') not null identity unique -- part of primary key`.
+pub fn column_line(c: &Column, unique: bool, pad: usize) -> (String, Spans) {
     let mut line = Line::default();
     line.name(&c.name, pad).push(&c.data_type, Some("type"));
     if let Some(default) = &c.default {
@@ -68,6 +68,12 @@ pub fn column_line(c: &Column, pad: usize) -> (String, Spans) {
     }
     if !c.nullable {
         line.push(" not null", Some("keyword"));
+    }
+    if c.identity {
+        line.push(" identity", Some("keyword"));
+    }
+    if unique {
+        line.push(" unique", Some("keyword"));
     }
     if c.is_pk {
         line.push(" -- part of primary key", Some("comment"));
@@ -84,6 +90,15 @@ pub fn index_line(i: &Index, pad: usize) -> (String, Spans) {
     }
     line.push(&format!("({})", i.columns.join(", ")), None)
         .done()
+}
+
+/// `t_ab_key  unique (a, b) -- constraint`: a multi-column UNIQUE constraint.
+pub fn constraint_line(u: &Index, pad: usize) -> (String, Spans) {
+    let (mut text, mut spans) = index_line(u, pad);
+    let start = text.len();
+    text.push_str(" -- constraint");
+    spans.push((start..text.len(), "comment"));
+    (text, spans)
 }
 
 /// `t_b_fk  (b) references public.users (id) on delete cascade`.
@@ -132,10 +147,13 @@ mod tests {
 
     #[test]
     fn column_lines_pad_the_name_and_color_type_default_and_pk() {
-        // (column, text, colored spans)
-        let cases: [(Column, &str, &[(&str, &str)]); 4] = [
+        let mut flagged = column("n", "int", false, None, true);
+        flagged.identity = true;
+        // (column, unique, text, colored spans)
+        let cases: [(Column, bool, &str, &[(&str, &str)]); 5] = [
             (
                 column("id", "integer", false, Some("nextval('s'::regclass)"), true),
+                false,
                 "id    integer default nextval('s'::regclass) not null -- part of primary key",
                 &[
                     ("integer", "type"),
@@ -147,22 +165,37 @@ mod tests {
             ),
             (
                 column("code", "varchar(255)", true, None, false),
+                false,
                 "code  varchar(255)",
                 &[("varchar(255)", "type")],
             ),
             (
                 column("", "", true, None, false),
+                false,
                 "(unnamed) ",
                 &[("(unnamed) ", "comment")],
             ),
             (
                 column("n", "int", true, Some("1"), false),
+                false,
                 "n     int default 1",
                 &[("int", "type"), (" default ", "keyword"), ("1", "number")],
             ),
+            (
+                flagged,
+                true,
+                "n     int not null identity unique -- part of primary key",
+                &[
+                    ("int", "type"),
+                    (" not null", "keyword"),
+                    (" identity", "keyword"),
+                    (" unique", "keyword"),
+                    (" -- part of primary key", "comment"),
+                ],
+            ),
         ];
-        for (c, text, spans) in cases {
-            let line = column_line(&c, 5);
+        for (c, unique, text, spans) in cases {
+            let line = column_line(&c, unique, 5);
             assert_eq!(line.0, text);
             assert_eq!(keyed(&line), spans, "{text}");
         }
@@ -176,6 +209,9 @@ mod tests {
             unique: true,
         };
         assert_eq!(index_line(&i, 4).0, "t_ab unique (a, b)");
+        let line = constraint_line(&i, 4);
+        assert_eq!(line.0, "t_ab unique (a, b) -- constraint");
+        assert_eq!(keyed(&line)[1], (" -- constraint", "comment"));
         let f = ForeignKey {
             name: "t_b_fk".into(),
             columns: vec!["b".into()],

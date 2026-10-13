@@ -330,7 +330,7 @@ impl TableEditor {
 
     fn remove_column(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(form) = &mut self.form else { return };
-        form.columns.remove(ix);
+        form.remove_column(ix);
         self.rows.remove(ix);
         self.selected[0] = self.rows.len().checked_sub(1).map(|last| ix.min(last));
         self.editing[0] = None;
@@ -340,6 +340,24 @@ impl TableEditor {
     fn set_nullable(&mut self, ix: usize, nullable: bool, cx: &mut Context<Self>) {
         let Some(form) = &mut self.form else { return };
         form.columns[ix].1.nullable = nullable;
+        cx.notify();
+    }
+
+    fn set_pk(&mut self, ix: usize, is_pk: bool, cx: &mut Context<Self>) {
+        let Some(form) = &mut self.form else { return };
+        form.set_pk(ix, is_pk);
+        cx.notify();
+    }
+
+    fn set_identity(&mut self, ix: usize, identity: bool, cx: &mut Context<Self>) {
+        let Some(form) = &mut self.form else { return };
+        form.columns[ix].1.identity = identity;
+        cx.notify();
+    }
+
+    fn set_column_unique(&mut self, ix: usize, unique: bool, cx: &mut Context<Self>) {
+        let Some(form) = &mut self.form else { return };
+        form.set_unique(ix, unique);
         cx.notify();
     }
 
@@ -355,11 +373,17 @@ impl TableEditor {
         cx.notify();
     }
 
+    /// Removes index row `ix`, or the UNIQUE constraint listed after the indexes.
     fn remove_index(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(form) = &mut self.form else { return };
-        form.indexes.remove(ix);
-        self.indexes.remove(ix);
-        self.selected[1] = self.indexes.len().checked_sub(1).map(|last| ix.min(last));
+        match ix.checked_sub(form.indexes.len()) {
+            Some(n) => _ = form.unique_keys.remove(form.listed_uniques()[n]),
+            None => {
+                form.indexes.remove(ix);
+                self.indexes.remove(ix);
+            }
+        }
+        self.selected[1] = self.len(1).checked_sub(1).map(|last| ix.min(last));
         self.editing[1] = None;
         cx.notify();
     }
@@ -433,18 +457,20 @@ impl TableEditor {
         cx.notify();
     }
 
-    /// Opens row `ix` as a form, its name focused.
+    /// Opens row `ix` as a form, its name focused; a row with no form (a constraint) is selected.
     fn edit(&mut self, list: usize, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(name) = self.name_input(list, ix) else {
+            return self.select(list, ix, window, cx);
+        };
         self.selected[list] = Some(ix);
         self.editing[list] = Some(ix);
-        if let Some(name) = self.selected_name(list) {
-            name.update(cx, |input, cx| input.focus(window, cx));
-        }
+        name.update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
     }
 
     fn len(&self, list: usize) -> usize {
-        [self.rows.len(), self.indexes.len(), self.foreign_keys.len()][list]
+        let constraints = self.form.as_ref().map_or(0, |f| f.listed_uniques().len());
+        [self.rows.len(), self.indexes.len() + constraints, self.foreign_keys.len()][list]
     }
 
     fn add(&mut self, list: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -466,9 +492,8 @@ impl TableEditor {
         }
     }
 
-    /// The selected row's name input, where Enter takes you.
-    fn selected_name(&self, list: usize) -> Option<Entity<InputState>> {
-        let ix = self.selected[list]?;
+    /// Row `ix`'s name input, where Enter takes you.
+    fn name_input(&self, list: usize, ix: usize) -> Option<Entity<InputState>> {
         match list {
             0 => self.rows.get(ix).map(|r| r.name.clone()),
             1 => self.indexes.get(ix).map(|r| r.name.clone()),
@@ -660,8 +685,9 @@ impl TableEditor {
         let rows = form
             .columns
             .iter()
-            .map(|(_, c)| {
-                let (text, spans) = lines::column_line(c, pad);
+            .enumerate()
+            .map(|(ix, (_, c))| {
+                let (text, spans) = lines::column_line(c, form.is_unique(ix), pad);
                 (text, spans, c.is_pk)
             })
             .collect();
@@ -678,15 +704,45 @@ impl TableEditor {
                             .child(labeled("Default", Input::new(&inputs.default).small(), cx)),
                     )
                     .child(
-                        h_flex().justify_end().child(
-                            Checkbox::new("column-not-null")
-                                .debug_selector(|| "column-not-null".into())
-                                .label("Not null")
-                                .checked(!c.nullable)
-                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                    this.set_nullable(ix, !*checked, cx)
-                                })),
-                        ),
+                        h_flex()
+                            .justify_end()
+                            .gap(theme::space_12())
+                            .child(
+                                Checkbox::new("column-not-null")
+                                    .debug_selector(|| "column-not-null".into())
+                                    .label("Not null")
+                                    .checked(!c.nullable)
+                                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                        this.set_nullable(ix, !*checked, cx)
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("column-identity")
+                                    .debug_selector(|| "column-identity".into())
+                                    .label("Auto increment")
+                                    .checked(c.identity)
+                                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                        this.set_identity(ix, *checked, cx)
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("column-unique")
+                                    .debug_selector(|| "column-unique".into())
+                                    .label("Unique")
+                                    .checked(form.is_unique(ix))
+                                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                        this.set_column_unique(ix, *checked, cx)
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("column-pk")
+                                    .debug_selector(|| "column-pk".into())
+                                    .label("Primary key")
+                                    .checked(c.is_pk)
+                                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                        this.set_pk(ix, *checked, cx)
+                                    })),
+                            ),
                     )
                     .into_any_element(),
             )
@@ -729,14 +785,23 @@ impl TableEditor {
         let Some(form) = &self.form else {
             return div().into_any_element();
         };
-        let pad = lines::pad(form.indexes.iter().map(|i| i.name.as_str()));
-        let rows = form
-            .indexes
-            .iter()
-            .map(|i| {
-                let (text, spans) = lines::index_line(i, pad);
-                (text, spans, false)
-            })
+        let uniques = form.unique_indexes();
+        let constraints: Vec<_> = form
+            .listed_uniques()
+            .into_iter()
+            .map(|n| &uniques[n])
+            .collect();
+        let pad = lines::pad(
+            form.indexes
+                .iter()
+                .chain(constraints.iter().copied())
+                .map(|i| i.name.as_str()),
+        );
+        let indexes = form.indexes.iter().map(|i| lines::index_line(i, pad));
+        let constraints = constraints.iter().map(|u| lines::constraint_line(u, pad));
+        let rows = indexes
+            .chain(constraints)
+            .map(|(text, spans)| (text, spans, false))
             .collect();
         let open = self.editing[1].and_then(|ix| {
             let (inputs, i) = (self.indexes.get(ix)?, form.indexes.get(ix)?);
@@ -827,7 +892,10 @@ impl TableEditor {
             ),
             (
                 "tab-indexes",
-                format!("Indexes{}", count(form.map(|f| f.indexes.len()))),
+                format!(
+                    "Indexes{}",
+                    count(form.map(|f| f.indexes.len() + f.listed_uniques().len()))
+                ),
             ),
             (
                 "tab-fks",
