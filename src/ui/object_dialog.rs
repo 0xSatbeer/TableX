@@ -28,7 +28,7 @@ use crate::ui::connection_dialog::delete_enabled;
 pub struct Apply(pub Vec<String>);
 
 /// A labeled control. `id` names it for tests (`field-<id>`).
-fn field(id: &'static str, label: String, control: impl IntoElement, cx: &App) -> AnyElement {
+pub fn field(id: &'static str, label: String, control: impl IntoElement, cx: &App) -> AnyElement {
     v_flex()
         .debug_selector(move || format!("field-{id}"))
         .gap(theme::space_4())

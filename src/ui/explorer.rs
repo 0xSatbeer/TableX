@@ -27,6 +27,7 @@ use crate::model::{
 };
 use crate::ui::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
 use crate::ui::object_dialog::{Apply, NameOwnerDialog, Owned, RoleDialog};
+use crate::ui::table_editor::TableEditor;
 use crate::ui::tabs::Origin;
 use crate::{assets, theme};
 

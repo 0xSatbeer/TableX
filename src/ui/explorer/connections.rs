@@ -170,7 +170,7 @@ impl Explorer {
         }
     }
 
-    /// Opens Modify for the selected Postgres database or schema row (Modify… in its menu, `ModifyObject`).
+    /// Opens Modify for the selected Postgres database, schema or table row (Modify… in its menu, `ModifyObject`).
     pub fn modify_object(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(node) = self.nodes.get(self.selected) else {
             return;
@@ -178,6 +178,7 @@ impl Explorer {
         let kind = match node.kind {
             NodeKind::Database => Owned::Database,
             NodeKind::Schema => Owned::Schema,
+            NodeKind::Object(ObjectKind::Table) => return self.modify_table(window, cx),
             _ => return,
         };
         let conn = self.workspace.read(cx).connections[node.conn].clone();
@@ -220,6 +221,53 @@ impl Explorer {
                     on,
                     atomic,
                     Some(refresh),
+                    move |reason, cx| {
+                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    },
+                    statements.clone(),
+                    window,
+                    cx,
+                )
+            },
+        )
+        .detach();
+    }
+
+    /// Opens the table editor on the selected Postgres table row. Apply runs atomically on the
+    /// table's database and refreshes its schema.
+    fn modify_table(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected) else {
+            return;
+        };
+        let conn = self.workspace.read(cx).connections[node.conn].clone();
+        if conn.kind() != DbKind::Postgres {
+            return;
+        }
+        let parts = segments(&node.key);
+        let (db, schema, table) = (parts[1].clone(), &parts[2], &parts[4]);
+        let schema_key = ancestors(&node.key)[2].to_string();
+        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
+            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
+            None => self.driver.connect(&on_database(&conn.params, &db)),
+        };
+        let dialog = TableEditor::open(
+            self.driver.clone(),
+            open,
+            (schema, table),
+            conn.is_production,
+            window,
+            cx,
+        );
+        cx.subscribe_in(
+            &dialog,
+            window,
+            move |this, dialog, Apply(statements), window, cx| {
+                let dialog = dialog.downgrade();
+                this.apply(
+                    conn.id,
+                    &db,
+                    true,
+                    Some(schema_key.clone()),
                     move |reason, cx| {
                         dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
                     },

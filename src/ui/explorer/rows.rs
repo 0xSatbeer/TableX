@@ -28,7 +28,7 @@ pub(super) fn click_action(kind: NodeKind, hit: Hit) -> Click {
     }
 }
 
-/// A row's menu: a connection's, a Postgres database's or schema's, or Refresh alone.
+/// A row's menu: a connection's, a Postgres database's, schema's or table's, or Refresh alone.
 #[derive(Clone, Copy)]
 enum Menu {
     Connection,
@@ -58,7 +58,7 @@ impl Explorer {
             .clone()
             .map(|ix| match self.nodes[ix].kind {
                 NodeKind::Connection(_) => Some(Menu::Connection),
-                NodeKind::Database | NodeKind::Schema
+                NodeKind::Database | NodeKind::Schema | NodeKind::Object(ObjectKind::Table)
                     if ws.connections[self.nodes[ix].conn].kind() == DbKind::Postgres =>
                 {
                     Some(Menu::Modify)

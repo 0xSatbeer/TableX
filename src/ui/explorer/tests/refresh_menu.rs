@@ -30,7 +30,7 @@ fn refresh_while_a_refresh_of_the_same_node_is_running_starts_no_second_load(
 }
 
 #[gpui_kit::test]
-fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the_connection_edit_and_delete_and_only_a_postgres_database_or_schema_modify_and_only_a_postgres_database_schema_or_table_new(
+fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the_connection_edit_and_delete_and_only_a_postgres_database_schema_or_table_modify_and_only_a_postgres_database_schema_or_table_new(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     let mut t = table("t");
@@ -45,7 +45,7 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
         (true, "app", false, false, true, true, true),
         (true, "public", false, false, true, true, true),
         (true, "Tables", false, false, false, false, false),
-        (true, "t", false, false, true, false, true),
+        (true, "t", false, false, true, true, true),
         (true, "Columns", false, false, false, false, false),
         (true, "id", false, false, false, false, false),
         (true, "v", false, false, true, false, false),
