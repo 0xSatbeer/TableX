@@ -44,7 +44,10 @@ impl Line {
     }
 
     fn done(&mut self) -> (String, Spans) {
-        (std::mem::take(&mut self.text), std::mem::take(&mut self.spans))
+        (
+            std::mem::take(&mut self.text),
+            std::mem::take(&mut self.spans),
+        )
     }
 }
 
@@ -79,7 +82,8 @@ pub fn index_line(i: &Index, pad: usize) -> (String, Spans) {
     if i.unique {
         line.push("unique ", Some("keyword"));
     }
-    line.push(&format!("({})", i.columns.join(", ")), None).done()
+    line.push(&format!("({})", i.columns.join(", ")), None)
+        .done()
 }
 
 /// `t_b_fk  (b) references public.users (id) on delete cascade`.
@@ -89,7 +93,12 @@ pub fn fk_line(f: &ForeignKey, pad: usize) -> (String, Spans) {
         .push(&format!("({})", f.columns.join(", ")), None)
         .push(" references ", Some("keyword"))
         .push(
-            &format!("{}.{} ({})", f.ref_schema, f.ref_table, f.ref_columns.join(", ")),
+            &format!(
+                "{}.{} ({})",
+                f.ref_schema,
+                f.ref_table,
+                f.ref_columns.join(", ")
+            ),
             None,
         );
     for (label, action) in [(" on delete ", &f.on_delete), (" on update ", &f.on_update)] {

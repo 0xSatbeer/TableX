@@ -13,25 +13,27 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IndexPath, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    tab::{Tab, TabBar},
+    dialog::Cancel,
+    menu::{DropdownMenu as _, PopupMenuItem},
     h_flex,
     input::{Input, InputEvent, InputState},
     select::{Select, SelectEvent, SelectState},
+    tab::{Tab, TabBar},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
-    KeyDownEvent, StyledText,
-    IntoElement, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
-    Window, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
+    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, StyledText, Window,
+    div, px,
 };
 
 use crate::db::{Driver, Reply, Session};
 use crate::model::{ForeignKey, Index};
 use crate::theme;
-use lines::Spans;
 use crate::ui::object_dialog::{Apply, ProductionConfirm, error_line, field, footer, sql_preview};
+use lines::Spans;
 
 /// One column row's inputs; its nullable flag lives in the form.
 pub struct ColumnInputs {
@@ -78,7 +80,9 @@ pub struct TableEditor {
     tab: usize,
     /// The selected row of the columns, indexes and foreign keys lists.
     selected: [Option<usize>; 3],
-    /// The lists take keys: up/down select, Delete removes, Enter edits.
+    /// The row of each list open as a form in place of its line.
+    editing: [Option<usize>; 3],
+    /// The lists take keys: up/down select, Delete removes, Enter opens or closes the form.
     list_focus: FocusHandle,
 }
 
@@ -181,6 +185,7 @@ impl TableEditor {
             error: None,
             tab: 0,
             selected: [None; 3],
+            editing: [None; 3],
             list_focus: cx.focus_handle(),
         }
     }
@@ -224,6 +229,8 @@ impl TableEditor {
             form.foreign_keys.len(),
         ]
         .map(|n| (n > 0).then_some(0));
+        // A new table opens on its first, empty column, ready to type.
+        self.editing = [form.is_create().then_some(0), None, None];
         self.form = Some(form);
         // A name typed while the definition loaded wins over the one it brought.
         self.sync(cx);
@@ -315,6 +322,7 @@ impl TableEditor {
         row.name.update(cx, |input, cx| input.focus(window, cx));
         self.rows.push(row);
         self.selected[0] = Some(self.rows.len() - 1);
+        self.editing[0] = self.selected[0];
         cx.notify();
     }
 
@@ -323,6 +331,7 @@ impl TableEditor {
         form.columns.remove(ix);
         self.rows.remove(ix);
         self.selected[0] = self.rows.len().checked_sub(1).map(|last| ix.min(last));
+        self.editing[0] = None;
         cx.notify();
     }
 
@@ -340,6 +349,7 @@ impl TableEditor {
         row.name.update(cx, |input, cx| input.focus(window, cx));
         self.indexes.push(row);
         self.selected[1] = Some(self.indexes.len() - 1);
+        self.editing[1] = self.selected[1];
         cx.notify();
     }
 
@@ -348,6 +358,7 @@ impl TableEditor {
         form.indexes.remove(ix);
         self.indexes.remove(ix);
         self.selected[1] = self.indexes.len().checked_sub(1).map(|last| ix.min(last));
+        self.editing[1] = None;
         cx.notify();
     }
 
@@ -366,6 +377,7 @@ impl TableEditor {
         row.name.update(cx, |input, cx| input.focus(window, cx));
         self.foreign_keys.push(row);
         self.selected[2] = Some(self.foreign_keys.len() - 1);
+        self.editing[2] = self.selected[2];
         cx.notify();
     }
 
@@ -373,7 +385,12 @@ impl TableEditor {
         let Some(form) = &mut self.form else { return };
         form.foreign_keys.remove(ix);
         self.foreign_keys.remove(ix);
-        self.selected[2] = self.foreign_keys.len().checked_sub(1).map(|last| ix.min(last));
+        self.selected[2] = self
+            .foreign_keys
+            .len()
+            .checked_sub(1)
+            .map(|last| ix.min(last));
+        self.editing[2] = None;
         cx.notify();
     }
 
@@ -404,9 +421,23 @@ impl TableEditor {
         cx.notify();
     }
 
+    /// Selects row `ix`, closing a form open on another row.
     fn select(&mut self, list: usize, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.selected[list] = Some(ix);
+        if self.editing[list] != Some(ix) {
+            self.editing[list] = None;
+        }
         window.focus(&self.list_focus, cx);
+        cx.notify();
+    }
+
+    /// Opens row `ix` as a form, its name focused.
+    fn edit(&mut self, list: usize, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected[list] = Some(ix);
+        self.editing[list] = Some(ix);
+        if let Some(name) = self.selected_name(list) {
+            name.update(cx, |input, cx| input.focus(window, cx));
+        }
         cx.notify();
     }
 
@@ -423,7 +454,9 @@ impl TableEditor {
     }
 
     fn remove_selected(&mut self, list: usize, cx: &mut Context<Self>) {
-        let Some(ix) = self.selected[list] else { return };
+        let Some(ix) = self.selected[list] else {
+            return;
+        };
         match list {
             0 => self.remove_column(ix, cx),
             1 => self.remove_index(ix, cx),
@@ -443,8 +476,20 @@ impl TableEditor {
 
     fn on_list_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let list = self.tab;
+        let key = ev.keystroke.key.as_str();
+        // Keys typed in an open form are the form's, except the two that close it.
+        if self.editing[list].is_some() {
+            if key != "enter" {
+                return;
+            }
+            self.editing[list] = None;
+            window.focus(&self.list_focus, cx);
+            cx.notify();
+            cx.stop_propagation();
+            return;
+        }
         let last = self.len(list).checked_sub(1);
-        match ev.keystroke.key.as_str() {
+        match key {
             "up" => {
                 if let Some(ix) = self.selected[list] {
                     self.select(list, ix.saturating_sub(1), window, cx);
@@ -457,8 +502,8 @@ impl TableEditor {
             }
             "delete" => self.remove_selected(list, cx),
             "enter" => {
-                if let Some(name) = self.selected_name(list) {
-                    name.update(cx, |input, cx| input.focus(window, cx));
+                if let Some(ix) = self.selected[list] {
+                    self.edit(list, ix, window, cx);
                 }
             }
             _ => return,
@@ -466,12 +511,13 @@ impl TableEditor {
         cx.stop_propagation();
     }
 
-    /// The `+ −` toolbar, the list of one-line summaries, and the selected row's form.
+    /// The `+ −` toolbar and the list of one-line summaries, with `form` in place of the line
+    /// being edited.
     fn render_list(
         &self,
         list: usize,
         lines: Vec<(String, Spans, bool)>,
-        detail: Option<AnyElement>,
+        mut form: Option<AnyElement>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = ["column", "index", "fk"][list];
@@ -481,13 +527,32 @@ impl TableEditor {
             .into_iter()
             .enumerate()
             .map(|(ix, (text, spans, is_pk))| {
+                if self.editing[list] == Some(ix) {
+                    if let Some(form) = form.take() {
+                        return div()
+                            .debug_selector(move || format!("{id}-{ix}"))
+                            .mx(theme::space_4())
+                            .my(theme::space_4())
+                            .p(theme::space_8())
+                            .rounded(theme.radius)
+                            .border_1()
+                            .border_color(theme.list_active_border)
+                            .bg(theme.background)
+                            .font_family(theme.font_family.clone())
+                            .text_size(theme::ui())
+                            .child(form)
+                            .into_any_element();
+                    }
+                }
                 let selected = self.selected[list] == Some(ix);
                 let highlights: Vec<_> = spans
                     .into_iter()
                     .filter_map(|(r, key)| Some((r, theme.highlight_theme.style(key)?)))
                     .collect();
                 let line = div()
-                    .when(is_pk, |d| d.debug_selector(move || format!("column-pk-{ix}")))
+                    .when(is_pk, |d| {
+                        d.debug_selector(move || format!("column-pk-{ix}"))
+                    })
                     .child(StyledText::new(text).with_highlights(highlights));
                 div()
                     .id((id, ix))
@@ -497,10 +562,18 @@ impl TableEditor {
                     .whitespace_nowrap()
                     .when(selected, |d| d.bg(theme.list_active))
                     .when(!selected, |d| d.hover(|d| d.bg(theme.list_hover)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select(list, ix, window, cx)
-                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                            if ev.click_count >= 2 {
+                                this.edit(list, ix, window, cx)
+                            } else {
+                                this.select(list, ix, window, cx)
+                            }
+                        }),
+                    )
                     .child(line)
+                    .into_any_element()
             })
             .collect::<Vec<_>>();
         let empty = rows.is_empty();
@@ -508,7 +581,7 @@ impl TableEditor {
             Button::new(name)
                 .debug_selector(move || name.into())
                 .ghost()
-                .xsmall()
+                .small()
                 .icon(icon)
                 .tooltip(tip)
         };
@@ -524,7 +597,8 @@ impl TableEditor {
                     .child(
                         h_flex()
                             .gap(theme::space_2())
-                            .p(theme::space_2())
+                            .px(theme::space_4())
+                            .py(theme::space_2())
                             .border_b_1()
                             .border_color(theme.border)
                             .child(tool(add, Lucide::Plus, format!("Add {noun}")).on_click(
@@ -543,6 +617,15 @@ impl TableEditor {
                             .id(("table-editor-list", list))
                             .track_focus(&self.list_focus)
                             .on_key_down(cx.listener(Self::on_list_key))
+                            // Escape is the dialog's Cancel: with a form open it closes the form only.
+                            .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                                let list = this.tab;
+                                if this.editing[list].take().is_none() {
+                                    return cx.propagate();
+                                }
+                                window.focus(&this.list_focus, cx);
+                                cx.notify();
+                            }))
                             .h(px(LIST_H))
                             .overflow_y_scroll()
                             .py(theme::space_2())
@@ -559,7 +642,6 @@ impl TableEditor {
                             .children(rows),
                     ),
             )
-            .child(div().min_h(px(DETAIL_H)).children(detail))
             .into_any_element()
     }
 
@@ -581,7 +663,7 @@ impl TableEditor {
                 (text, spans, c.is_pk)
             })
             .collect();
-        let detail = self.selected[0].and_then(|ix| {
+        let open = self.editing[0].and_then(|ix| {
             let (inputs, (_, c)) = (self.rows.get(ix)?, form.columns.get(ix)?);
             Some(
                 v_flex()
@@ -590,29 +672,55 @@ impl TableEditor {
                         h_flex()
                             .gap(theme::space_8())
                             .child(labeled("Name", Input::new(&inputs.name).small(), cx))
-                            .child(labeled("Type", Input::new(&inputs.ty).small(), cx)),
+                            .child(labeled("Type", self.type_input(ix, &inputs.ty, form, cx), cx))
+                            .child(labeled("Default", Input::new(&inputs.default).small(), cx)),
                     )
                     .child(
-                        h_flex()
-                            .gap(theme::space_8())
-                            .items_end()
-                            .child(labeled("Default", Input::new(&inputs.default).small(), cx))
-                            .child(
-                                div().flex_1().pb(theme::space_4()).child(
-                                    Checkbox::new("column-not-null")
-                                        .debug_selector(|| "column-not-null".into())
-                                        .label("Not null")
-                                        .checked(!c.nullable)
-                                        .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                            this.set_nullable(ix, !*checked, cx)
-                                        })),
-                                ),
-                            ),
+                        h_flex().justify_end().child(
+                            Checkbox::new("column-not-null")
+                                .debug_selector(|| "column-not-null".into())
+                                .label("Not null")
+                                .checked(!c.nullable)
+                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                    this.set_nullable(ix, !*checked, cx)
+                                })),
+                        ),
                     )
                     .into_any_element(),
             )
         });
-        self.render_list(0, rows, detail, cx)
+        self.render_list(0, rows, open, cx)
+    }
+
+    /// The Type input, free text, with a menu of types that fills it in.
+    fn type_input(
+        &self,
+        ix: usize,
+        input: &Entity<InputState>,
+        form: &TableForm,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (choices, current) = (form.type_choices(), form.columns[ix].1.data_type.clone());
+        let (input_for_menu, editor) = (input.clone(), cx.entity().downgrade());
+        let menu = Button::new("column-type-menu")
+            .debug_selector(|| "column-type-menu".into())
+            .ghost()
+            .xsmall()
+            .icon(Lucide::ChevronDown)
+            .tooltip("Pick a type")
+            .dropdown_menu(move |menu, _, _| {
+                choices.iter().fold(menu.scrollable(true).max_h(px(320.)), |menu, t| {
+                    let (input, editor, t) = (input_for_menu.clone(), editor.clone(), t.clone());
+                    menu.item(PopupMenuItem::new(t.clone()).checked(t == current).on_click(
+                        move |_, window, cx| {
+                            input.update(cx, |i, cx| i.set_value(t.clone(), window, cx));
+                            // set_value emits no change event, so the form is told here.
+                            _ = editor.update(cx, |e, cx| e.sync(cx));
+                        },
+                    ))
+                })
+            });
+        Input::new(input).small().suffix(menu).into_any_element()
     }
 
     fn render_indexes(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -628,20 +736,23 @@ impl TableEditor {
                 (text, spans, false)
             })
             .collect();
-        let detail = self.selected[1].and_then(|ix| {
+        let open = self.editing[1].and_then(|ix| {
             let (inputs, i) = (self.indexes.get(ix)?, form.indexes.get(ix)?);
             Some(
-                h_flex()
+                v_flex()
                     .gap(theme::space_8())
-                    .items_end()
-                    .child(labeled("Name", Input::new(&inputs.name).small(), cx))
-                    .child(labeled(
-                        "Columns (comma-separated)",
-                        Input::new(&inputs.columns).small(),
-                        cx,
-                    ))
                     .child(
-                        div().flex_none().pb(theme::space_4()).child(
+                        h_flex()
+                            .gap(theme::space_8())
+                            .child(labeled("Name", Input::new(&inputs.name).small(), cx))
+                            .child(labeled(
+                                "Columns (comma-separated)",
+                                Input::new(&inputs.columns).small(),
+                                cx,
+                            )),
+                    )
+                    .child(
+                        h_flex().justify_end().child(
                             Checkbox::new("index-unique")
                                 .debug_selector(|| "index-unique".into())
                                 .label("Unique")
@@ -654,7 +765,7 @@ impl TableEditor {
                     .into_any_element(),
             )
         });
-        self.render_list(1, rows, detail, cx)
+        self.render_list(1, rows, open, cx)
     }
 
     fn render_foreign_keys(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -670,7 +781,7 @@ impl TableEditor {
                 (text, spans, false)
             })
             .collect();
-        let detail = self.selected[2].and_then(|ix| {
+        let open = self.editing[2].and_then(|ix| {
             let inputs = self.foreign_keys.get(ix)?;
             let input = |label, i: &Entity<InputState>| labeled(label, Input::new(i).small(), cx);
             let select = |label, s: &ActionSelect| labeled(label, Select::new(s).small(), cx);
@@ -701,25 +812,40 @@ impl TableEditor {
                     .into_any_element(),
             )
         });
-        self.render_list(2, rows, detail, cx)
+        self.render_list(2, rows, open, cx)
     }
 
     fn render_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let form = self.form.as_ref();
         let count = |n: Option<usize>| n.map_or(String::new(), |n| format!(" ({n})"));
         let labels = [
-            ("tab-columns", format!("Columns{}", count(form.map(|f| f.columns.len())))),
-            ("tab-indexes", format!("Indexes{}", count(form.map(|f| f.indexes.len())))),
-            ("tab-fks", format!("Foreign keys{}", count(form.map(|f| f.foreign_keys.len())))),
-            ("tab-sql", format!("SQL{}", count(Some(self.statements().len()).filter(|n| *n > 0)))),
+            (
+                "tab-columns",
+                format!("Columns{}", count(form.map(|f| f.columns.len()))),
+            ),
+            (
+                "tab-indexes",
+                format!("Indexes{}", count(form.map(|f| f.indexes.len()))),
+            ),
+            (
+                "tab-fks",
+                format!("Foreign keys{}", count(form.map(|f| f.foreign_keys.len()))),
+            ),
+            (
+                "tab-sql",
+                format!(
+                    "SQL{}",
+                    count(Some(self.statements().len()).filter(|n| *n > 0))
+                ),
+            ),
         ];
         TabBar::new("table-editor-tabs")
             .underline()
             .small()
             .selected_index(self.tab)
-            .children(labels.map(|(id, label)| {
-                Tab::new().label(label).debug_selector(move || id.into())
-            }))
+            .children(
+                labels.map(|(id, label)| Tab::new().label(label).debug_selector(move || id.into())),
+            )
             .on_click(cx.listener(|this, ix: &usize, _, cx| {
                 this.tab = *ix;
                 cx.notify();
@@ -750,7 +876,7 @@ impl Render for TableEditor {
             2 => self.render_foreign_keys(cx),
             3 => div()
                 .id("table-editor-sql")
-                .h(px(LIST_H + DETAIL_H + LIST_CHROME))
+                .h(px(LIST_H + LIST_CHROME))
                 .overflow_y_scroll()
                 .child(sql_preview(&self.statements(), cx))
                 .into_any_element(),
@@ -768,15 +894,34 @@ impl Render for TableEditor {
                 v_flex()
                     .gap(theme::space_8())
                     .child(self.render_tabs(cx))
-                    .child(body),
+                    .child(body)
+                    .child(self.render_status(cx)),
             )
             .children(self.confirm.render(cx))
             .children(error_line(self.error.as_deref(), cx))
     }
 }
 
-const LIST_H: f32 = 280.;
-/// Room for the largest form (foreign keys), so switching rows or tabs never resizes the dialog.
-const DETAIL_H: f32 = 150.;
+impl TableEditor {
+    /// What Apply will do, or why it can't yet.
+    fn render_status(&self, cx: &App) -> AnyElement {
+        let n = self.statements().len();
+        let blocker = self.form.as_ref().and_then(TableForm::blocker);
+        let (text, color) = match (n, blocker) {
+            (0, Some(why)) => (why.to_string(), cx.theme().warning),
+            (0, None) => ("No changes yet.".to_string(), theme::text_secondary(cx.theme())),
+            (1, _) => ("1 statement to run. Review it on the SQL tab.".to_string(), theme::text_secondary(cx.theme())),
+            (n, _) => (format!("{n} statements to run. Review them on the SQL tab."), theme::text_secondary(cx.theme())),
+        };
+        div()
+            .debug_selector(|| "table-status".into())
+            .text_size(theme::ui_sm())
+            .text_color(color)
+            .child(text)
+            .into_any_element()
+    }
+}
+
+const LIST_H: f32 = 410.;
 /// The toolbar and borders around the list, so the SQL tab matches the others' height.
 const LIST_CHROME: f32 = 40.;

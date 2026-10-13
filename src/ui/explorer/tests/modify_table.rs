@@ -13,6 +13,29 @@ fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
 }
 
+/// Double-clicks `selector`, which opens a list row as a form.
+fn double_click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+    let position = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} drawn"))
+        .center();
+    let button = gpui_kit::MouseButton::Left;
+    cx.simulate_event(gpui_kit::MouseDownEvent {
+        position,
+        button,
+        modifiers: Default::default(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui_kit::MouseUpEvent {
+        position,
+        button,
+        modifiers: Default::default(),
+        click_count: 2,
+    });
+    cx.run_until_parked();
+}
+
 fn type_into(
     cx: &mut gpui_kit::VisualTestContext,
     input: gpui_kit::Entity<gpui_kit::component::input::InputState>,
@@ -122,9 +145,9 @@ fn renames_a_type_change_an_added_and_a_removed_column_run_atomically_and_refres
     let name = editor.read_with(&cx, |e, _| e.name.clone());
     type_into(&mut cx, name, "t2");
     let (a, id_type) = editor.read_with(&cx, |e, _| (e.rows[1].name.clone(), e.rows[0].ty.clone()));
-    click(&mut cx, "column-1");
+    double_click(&mut cx, "column-1");
     type_into(&mut cx, a, "a2");
-    click(&mut cx, "column-0");
+    double_click(&mut cx, "column-0");
     type_into(&mut cx, id_type, "bigint");
     click(&mut cx, "column-2");
     click(&mut cx, "column-remove");
@@ -249,5 +272,37 @@ fn an_added_unique_index_and_cascading_fk_and_a_removed_index_run_in_alter_table
             ]),
             true
         )]
+    );
+}
+
+#[gpui_kit::test]
+fn a_double_click_opens_a_row_as_a_form_and_escape_closes_only_the_form(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (mut cx, _editor, _fake) = open_editor(cx);
+    click(&mut cx, "column-1");
+    assert!(
+        cx.debug_bounds("column-not-null").is_none(),
+        "a click only selects"
+    );
+    double_click(&mut cx, "column-1");
+    assert!(
+        cx.debug_bounds("column-not-null").is_some(),
+        "the form is open"
+    );
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("column-not-null").is_none(),
+        "escape closed the form"
+    );
+    assert!(
+        cx.debug_bounds("dialog-layer").is_some(),
+        "the dialog stays open"
+    );
+    click(&mut cx, "column-add");
+    assert!(
+        cx.debug_bounds("column-not-null").is_some(),
+        "a new row opens as a form"
     );
 }

@@ -1,6 +1,32 @@
 use crate::ddl::{TableEdit, alter_table, create_table};
 use crate::model::{Column, ForeignKey, Index, TableDef};
 
+/// The types the Type field's menu offers, before the ones the table already uses.
+pub const COMMON_TYPES: [&str; 22] = [
+    "bigint",
+    "integer",
+    "smallint",
+    "bigserial",
+    "serial",
+    "numeric(10, 2)",
+    "double precision",
+    "real",
+    "boolean",
+    "text",
+    "varchar(255)",
+    "char(1)",
+    "uuid",
+    "date",
+    "time",
+    "timestamp",
+    "timestamp with time zone",
+    "interval",
+    "jsonb",
+    "json",
+    "bytea",
+    "inet",
+];
+
 /// The referential actions an FK's on delete and on update choose from.
 pub const FK_ACTIONS: [&str; 5] = [
     "NO ACTION",
@@ -49,6 +75,17 @@ impl TableForm {
         form
     }
 
+    /// The Type menu: the common types, then the others this table uses (enums, domains).
+    pub fn type_choices(&self) -> Vec<String> {
+        let mut choices: Vec<String> = COMMON_TYPES.iter().map(|t| t.to_string()).collect();
+        for (_, c) in &self.columns {
+            if !c.data_type.is_empty() && !choices.contains(&c.data_type) {
+                choices.push(c.data_type.clone());
+            }
+        }
+        choices
+    }
+
     pub fn is_create(&self) -> bool {
         self.before.name.is_empty()
     }
@@ -86,16 +123,25 @@ impl TableForm {
         });
     }
 
-    /// The statements the edits need; none while a required field is blank.
-    pub fn statements(&self, schema: &str) -> Vec<String> {
-        let blank_column = self
+    /// Why Apply has nothing to run yet: a required field is blank.
+    pub fn blocker(&self) -> Option<&'static str> {
+        if self.name.is_empty() {
+            return Some("Name the table.");
+        }
+        if self
             .columns
             .iter()
-            .any(|(_, c)| c.name.is_empty() || c.data_type.is_empty());
-        let blank_index = self
+            .any(|(_, c)| c.name.is_empty() || c.data_type.is_empty())
+        {
+            return Some("Every column needs a name and a type.");
+        }
+        if self
             .indexes
             .iter()
-            .any(|i| i.name.is_empty() || i.columns.is_empty());
+            .any(|i| i.name.is_empty() || i.columns.is_empty())
+        {
+            return Some("Every index needs a name and columns.");
+        }
         let blank_fk = self.foreign_keys.iter().any(|f| {
             f.name.is_empty()
                 || f.columns.is_empty()
@@ -103,7 +149,12 @@ impl TableForm {
                 || f.ref_table.is_empty()
                 || f.ref_columns.is_empty()
         });
-        if self.name.is_empty() || blank_column || blank_index || blank_fk {
+        blank_fk.then_some("Every foreign key needs a name, columns and what it references.")
+    }
+
+    /// The statements the edits need; none while a required field is blank.
+    pub fn statements(&self, schema: &str) -> Vec<String> {
+        if self.blocker().is_some() {
             return Vec::new();
         }
         if self.is_create() {
@@ -133,4 +184,39 @@ pub fn names(text: &str) -> Vec<String> {
         .filter(|n| !n.is_empty())
         .map(String::from)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_choices_add_the_tables_own_types_once_after_the_common_ones() {
+        let mut form = TableForm::create();
+        form.columns[0].1.data_type = "enum_status".into();
+        form.add_column();
+        form.columns[1].1.data_type = "integer".into();
+        form.add_column();
+        form.columns[2].1.data_type = "enum_status".into();
+        let choices = form.type_choices();
+        assert_eq!(choices.len(), COMMON_TYPES.len() + 1);
+        assert_eq!(choices.last().map(String::as_str), Some("enum_status"));
+    }
+
+    #[test]
+    fn blocker_names_the_first_blank_required_field() {
+        let mut form = TableForm::create();
+        assert_eq!(form.blocker(), Some("Name the table."));
+        form.name = "t".into();
+        assert_eq!(form.blocker(), Some("Every column needs a name and a type."));
+        form.columns[0].1.name = "a".into();
+        form.columns[0].1.data_type = "int".into();
+        assert_eq!(form.blocker(), None);
+        form.add_index();
+        assert_eq!(form.blocker(), Some("Every index needs a name and columns."));
+        form.indexes.clear();
+        form.add_foreign_key("public");
+        assert!(form.blocker().is_some());
+        assert!(form.statements("public").is_empty());
+    }
 }
