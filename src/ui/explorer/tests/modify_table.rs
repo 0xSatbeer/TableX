@@ -390,9 +390,7 @@ fn ticking_unique_and_auto_increment_adds_the_constraint_and_identity(
 }
 
 #[gpui_kit::test]
-fn moving_the_pk_drops_the_old_one_by_name_then_adds_the_new(
-    cx: &mut gpui_kit::TestAppContext,
-) {
+fn moving_the_pk_drops_the_old_one_by_name_then_adds_the_new(cx: &mut gpui_kit::TestAppContext) {
     let (mut cx, _, fake) = open_editor(cx);
     double_click(&mut cx, "column-0");
     click(&mut cx, "column-pk");

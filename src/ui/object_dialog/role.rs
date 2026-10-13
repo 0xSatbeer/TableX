@@ -48,7 +48,9 @@ impl RoleDialog {
                 }))
         });
         // The footer reads Apply's state when the dialog layer renders, which a body notify skips.
-        window.observe(&view, cx, |_, window, _| window.refresh()).detach();
+        window
+            .observe(&view, cx, |_, window, _| window.refresh())
+            .detach();
         view.read(cx)
             .name
             .clone()

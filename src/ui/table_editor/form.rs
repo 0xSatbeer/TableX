@@ -61,7 +61,12 @@ impl TableForm {
         let unique_keys = before
             .unique_keys
             .iter()
-            .map(|u| (u.name.clone(), u.columns.iter().filter_map(position).collect()))
+            .map(|u| {
+                (
+                    u.name.clone(),
+                    u.columns.iter().filter_map(position).collect(),
+                )
+            })
             .collect();
         Self {
             name: before.name.clone(),
@@ -272,7 +277,8 @@ mod tests {
     }
 
     #[test]
-    fn unique_keys_stay_on_their_column_through_renames_and_unticking_drops_every_single_column_key() {
+    fn unique_keys_stay_on_their_column_through_renames_and_unticking_drops_every_single_column_key()
+     {
         let mut form = TableForm::create();
         form.name = "t".into();
         form.columns[0].1.name = "a".into();
@@ -285,7 +291,11 @@ mod tests {
         // Renaming a through b's name and on leaves b's key on b.
         form.columns[0].1.name = "b".into();
         form.columns[0].1.name = "b2".into();
-        let columns: Vec<_> = form.unique_indexes().into_iter().map(|u| u.columns).collect();
+        let columns: Vec<_> = form
+            .unique_indexes()
+            .into_iter()
+            .map(|u| u.columns)
+            .collect();
         assert_eq!(columns, [["b2"], ["b"]]);
         form.unique_keys.push(form.unique_keys[0].clone());
         form.set_unique(0, false);

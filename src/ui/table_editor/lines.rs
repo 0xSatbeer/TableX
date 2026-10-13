@@ -129,7 +129,7 @@ pub fn fk_line(f: &ForeignKey, pad: usize) -> (String, Spans) {
 mod tests {
     use super::*;
 
-    fn keyed<'a>((text, spans): &'a (String, Spans)) -> Vec<(&'a str, &'static str)> {
+    fn keyed((text, spans): &(String, Spans)) -> Vec<(&str, &'static str)> {
         spans.iter().map(|(r, k)| (&text[r.clone()], *k)).collect()
     }
 

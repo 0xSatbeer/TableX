@@ -14,9 +14,9 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     dialog::Cancel,
-    menu::{DropdownMenu as _, PopupMenuItem},
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     select::{Select, SelectEvent, SelectState},
     tab::{Tab, TabBar},
     v_flex,
@@ -132,7 +132,9 @@ impl TableEditor {
                 }))
         });
         // The footer reads Apply's state when the dialog layer renders, which a body notify skips.
-        window.observe(&view, cx, |_, window, _| window.refresh()).detach();
+        window
+            .observe(&view, cx, |_, window, _| window.refresh())
+            .detach();
         view.read(cx)
             .name
             .clone()
@@ -470,7 +472,11 @@ impl TableEditor {
 
     fn len(&self, list: usize) -> usize {
         let constraints = self.form.as_ref().map_or(0, |f| f.listed_uniques().len());
-        [self.rows.len(), self.indexes.len() + constraints, self.foreign_keys.len()][list]
+        [
+            self.rows.len(),
+            self.indexes.len() + constraints,
+            self.foreign_keys.len(),
+        ][list]
     }
 
     fn add(&mut self, list: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -554,22 +560,22 @@ impl TableEditor {
             .into_iter()
             .enumerate()
             .map(|(ix, (text, spans, is_pk))| {
-                if self.editing[list] == Some(ix) {
-                    if let Some(form) = form.take() {
-                        return div()
-                            .debug_selector(move || format!("{id}-{ix}"))
-                            .mx(theme::space_4())
-                            .my(theme::space_4())
-                            .p(theme::space_8())
-                            .rounded(theme.radius)
-                            .border_1()
-                            .border_color(theme.list_active_border)
-                            .bg(theme.background)
-                            .font_family(theme.font_family.clone())
-                            .text_size(theme::ui())
-                            .child(form)
-                            .into_any_element();
-                    }
+                if self.editing[list] == Some(ix)
+                    && let Some(form) = form.take()
+                {
+                    return div()
+                        .debug_selector(move || format!("{id}-{ix}"))
+                        .mx(theme::space_4())
+                        .my(theme::space_4())
+                        .p(theme::space_8())
+                        .rounded(theme.radius)
+                        .border_1()
+                        .border_color(theme.list_active_border)
+                        .bg(theme.background)
+                        .font_family(theme.font_family.clone())
+                        .text_size(theme::ui())
+                        .child(form)
+                        .into_any_element();
                 }
                 let selected = self.selected[list] == Some(ix);
                 let highlights: Vec<_> = spans
@@ -700,7 +706,11 @@ impl TableEditor {
                         h_flex()
                             .gap(theme::space_8())
                             .child(labeled("Name", Input::new(&inputs.name).small(), cx))
-                            .child(labeled("Type", self.type_input(ix, &inputs.ty, form, cx), cx))
+                            .child(labeled(
+                                "Type",
+                                self.type_input(ix, &inputs.ty, form, cx),
+                                cx,
+                            ))
                             .child(labeled("Default", Input::new(&inputs.default).small(), cx)),
                     )
                     .child(
@@ -767,16 +777,21 @@ impl TableEditor {
             .icon(Lucide::ChevronDown)
             .tooltip("Pick a type")
             .dropdown_menu(move |menu, _, _| {
-                choices.iter().fold(menu.scrollable(true).max_h(px(320.)), |menu, t| {
-                    let (input, editor, t) = (input_for_menu.clone(), editor.clone(), t.clone());
-                    menu.item(PopupMenuItem::new(t.clone()).checked(t == current).on_click(
-                        move |_, window, cx| {
-                            input.update(cx, |i, cx| i.set_value(t.clone(), window, cx));
-                            // set_value emits no change event, so the form is told here.
-                            _ = editor.update(cx, |e, cx| e.sync(cx));
-                        },
-                    ))
-                })
+                choices
+                    .iter()
+                    .fold(menu.scrollable(true).max_h(px(320.)), |menu, t| {
+                        let (input, editor, t) =
+                            (input_for_menu.clone(), editor.clone(), t.clone());
+                        menu.item(
+                            PopupMenuItem::new(t.clone())
+                                .checked(t == current)
+                                .on_click(move |_, window, cx| {
+                                    input.update(cx, |i, cx| i.set_value(t.clone(), window, cx));
+                                    // set_value emits no change event, so the form is told here.
+                                    _ = editor.update(cx, |e, cx| e.sync(cx));
+                                }),
+                        )
+                    })
             });
         Input::new(input).small().suffix(menu).into_any_element()
     }
@@ -979,9 +994,18 @@ impl TableEditor {
         let blocker = self.form.as_ref().and_then(TableForm::blocker);
         let (text, color) = match (n, blocker) {
             (0, Some(why)) => (why.to_string(), cx.theme().warning),
-            (0, None) => ("No changes yet.".to_string(), theme::text_secondary(cx.theme())),
-            (1, _) => ("1 statement to run. Review it on the SQL tab.".to_string(), theme::text_secondary(cx.theme())),
-            (n, _) => (format!("{n} statements to run. Review them on the SQL tab."), theme::text_secondary(cx.theme())),
+            (0, None) => (
+                "No changes yet.".to_string(),
+                theme::text_secondary(cx.theme()),
+            ),
+            (1, _) => (
+                "1 statement to run. Review it on the SQL tab.".to_string(),
+                theme::text_secondary(cx.theme()),
+            ),
+            (n, _) => (
+                format!("{n} statements to run. Review them on the SQL tab."),
+                theme::text_secondary(cx.theme()),
+            ),
         };
         div()
             .debug_selector(|| "table-status".into())
