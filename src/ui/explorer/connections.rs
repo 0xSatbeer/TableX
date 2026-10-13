@@ -214,12 +214,66 @@ impl Explorer {
                     }
                     Owned::Schema => (db.as_str(), true, db_key.clone()),
                 };
+                let dialog = dialog.downgrade();
                 this.apply(
                     conn.id,
                     on,
                     atomic,
-                    refresh,
-                    dialog.downgrade(),
+                    Some(refresh),
+                    move |reason, cx| {
+                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    },
+                    statements.clone(),
+                    window,
+                    cx,
+                )
+            },
+        )
+        .detach();
+    }
+
+    /// Opens New Role, or New User when `login`, for the selected Postgres database, schema or
+    /// table row (+ New in its menu). Apply runs atomically on the row's database.
+    pub fn new_role(&mut self, login: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected) else {
+            return;
+        };
+        if !matches!(
+            node.kind,
+            NodeKind::Database | NodeKind::Schema | NodeKind::Object(ObjectKind::Table)
+        ) {
+            return;
+        }
+        let conn = self.workspace.read(cx).connections[node.conn].clone();
+        if conn.kind() != DbKind::Postgres {
+            return;
+        }
+        let db = segments(&node.key)[1].clone();
+        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
+            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
+            None => self.driver.connect(&on_database(&conn.params, &db)),
+        };
+        let dialog = RoleDialog::open(
+            self.driver.clone(),
+            open,
+            login,
+            conn.is_production,
+            window,
+            cx,
+        );
+        cx.subscribe_in(
+            &dialog,
+            window,
+            move |this, dialog, Apply(statements), window, cx| {
+                let dialog = dialog.downgrade();
+                this.apply(
+                    conn.id,
+                    &db,
+                    true,
+                    None,
+                    move |reason, cx| {
+                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    },
                     statements.clone(),
                     window,
                     cx,
@@ -230,15 +284,15 @@ impl Explorer {
     }
 
     /// Runs a Modify dialog's `statements` on connection `id`'s database `on`. Success closes the
-    /// dialog and re-reads the node keyed `refresh`; a failure goes back to the dialog.
+    /// dialog and re-reads the node keyed `refresh`, if any; a failure goes to `failed`.
     #[allow(clippy::too_many_arguments)]
     fn apply(
         &mut self,
         id: ConnectionId,
         on: &str,
         atomic: bool,
-        refresh: String,
-        dialog: WeakEntity<NameOwnerDialog>,
+        refresh: Option<String>,
+        failed: impl FnOnce(String, &mut App) + 'static,
         statements: Vec<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -269,13 +323,13 @@ impl Explorer {
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => {
                     window.close_dialog(cx);
-                    if this.gens.get(&id) == Some(&generation) {
+                    if let Some(refresh) =
+                        refresh.filter(|_| this.gens.get(&id) == Some(&generation))
+                    {
                         this.load(refresh, false, cx);
                     }
                 }
-                Err(reason) => {
-                    dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
-                }
+                Err(reason) => failed(reason, cx),
             })
             .ok();
         })

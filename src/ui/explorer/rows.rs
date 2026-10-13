@@ -68,6 +68,17 @@ impl Explorer {
                 _ => None,
             })
             .collect();
+        // + New: Postgres database, schema and table rows.
+        let news: Vec<bool> = range
+            .clone()
+            .map(|ix| {
+                let node = &self.nodes[ix];
+                matches!(
+                    node.kind,
+                    NodeKind::Database | NodeKind::Schema | NodeKind::Object(ObjectKind::Table)
+                ) && ws.connections[node.conn].kind() == DbKind::Postgres
+            })
+            .collect();
         range
             .map(|ix| {
                 let node = &self.nodes[ix];
@@ -224,16 +235,24 @@ impl Explorer {
                         d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
-            .zip(menus)
-            .map(|(row, menu)| match menu {
+            .zip(menus.into_iter().zip(news))
+            .map(|(row, (menu, new))| match menu {
                 Some(kind) => row
-                    .context_menu(move |menu, _, _| {
+                    .context_menu(move |menu, window, cx| {
                         let menu = match kind {
                             Menu::Connection => menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…")).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
                                 div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
                             }),
                             Menu::Modify => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
                             Menu::Refresh => menu,
+                        };
+                        let menu = if new {
+                            menu.submenu("+ New", window, cx, |menu, _, _| {
+                                menu.menu_element(Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
+                                    .menu_element(Box::new(crate::NewUser), |_, _| div().debug_selector(|| "menu-new-user".into()).child("User"))
+                            })
+                        } else {
+                            menu
                         };
                         menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
                     })

@@ -3,8 +3,10 @@
 //! the statements a dialog's `Apply` carries and reports a failure back with `failed`.
 
 mod name_owner;
+mod role;
 
 pub use name_owner::*;
+pub use role::*;
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IndexPath, Sizable as _, WindowExt as _,
@@ -16,7 +18,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Styled as _, Window, div,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window, div,
 };
 
 use crate::theme;

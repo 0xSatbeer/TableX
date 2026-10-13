@@ -25,6 +25,14 @@ impl Render for Explorer {
             .on_action(cx.listener(|this, _: &crate::ModifyObject, window, cx| {
                 this.modify_object(window, cx)
             }))
+            .on_action(
+                cx.listener(|this, _: &crate::NewRole, window, cx| {
+                    this.new_role(false, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::NewUser, window, cx| this.new_role(true, window, cx)),
+            )
             .child(
                 h_flex()
                     .flex_none()

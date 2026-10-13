@@ -17,6 +17,7 @@ mod filter;
 mod load;
 mod modify_database;
 mod modify_schema;
+mod new_role;
 mod refresh;
 mod refresh_errors;
 mod refresh_menu;

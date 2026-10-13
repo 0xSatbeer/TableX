@@ -30,7 +30,7 @@ fn refresh_while_a_refresh_of_the_same_node_is_running_starts_no_second_load(
 }
 
 #[gpui_kit::test]
-fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the_connection_edit_and_delete_and_only_a_postgres_database_or_schema_modify(
+fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the_connection_edit_and_delete_and_only_a_postgres_database_or_schema_modify_and_only_a_postgres_database_schema_or_table_new(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     let mut t = table("t");
@@ -39,23 +39,23 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
         kind: ObjectKind::Function,
         ..table("f()")
     };
-    // (Postgres connection, row right-clicked, Edit… shown, Delete shown, Refresh shown, Modify… shown)
-    let cases = [
-        (true, "pg", true, true, true, false),
-        (true, "app", false, false, true, true),
-        (true, "public", false, false, true, true),
-        (true, "Tables", false, false, false, false),
-        (true, "t", false, false, true, false),
-        (true, "Columns", false, false, false, false),
-        (true, "id", false, false, false, false),
-        (true, "v", false, false, true, false),
-        (true, "f()", false, false, false, false),
-        (false, "pg", true, true, true, false),
-        (false, "app", false, false, true, false),
-        (false, "public", false, false, true, false),
-        (false, "t", false, false, true, false),
+    // (Postgres connection, row right-clicked, Edit… shown, Delete shown, Refresh shown, Modify… shown, + New shown)
+    let cases: [(bool, &str, bool, bool, bool, bool, bool); 13] = [
+        (true, "pg", true, true, true, false, false),
+        (true, "app", false, false, true, true, true),
+        (true, "public", false, false, true, true, true),
+        (true, "Tables", false, false, false, false, false),
+        (true, "t", false, false, true, false, true),
+        (true, "Columns", false, false, false, false, false),
+        (true, "id", false, false, false, false, false),
+        (true, "v", false, false, true, false, false),
+        (true, "f()", false, false, false, false, false),
+        (false, "pg", true, true, true, false, false),
+        (false, "app", false, false, true, false, false),
+        (false, "public", false, false, true, false, false),
+        (false, "t", false, false, true, false, false),
     ];
-    for (postgres, row, edit, delete, refresh, modify) in cases {
+    for (postgres, row, edit, delete, refresh, modify, new) in cases {
         let base = if postgres {
             pg(1, "pg", "app")
         } else {
@@ -92,6 +92,13 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
             shown,
             [edit, delete, refresh, modify],
             "{row} (postgres {postgres}): Edit…, Delete, Refresh, Modify…"
+        );
+        // + New sits just above Refresh: selecting it opens its submenu.
+        cx.simulate_keystrokes("up up");
+        assert_eq!(
+            ["menu-new-role", "menu-new-user"].map(|item| cx.debug_bounds(item).is_some()),
+            [new, new],
+            "{row} (postgres {postgres}): + New ▸ Role, User"
         );
     }
 }

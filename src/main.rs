@@ -38,7 +38,9 @@ actions!(
         EditConnection,
         DeleteConnection,
         RefreshNode,
-        ModifyObject
+        ModifyObject,
+        NewRole,
+        NewUser
     ]
 );
 

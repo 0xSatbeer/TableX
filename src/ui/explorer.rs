@@ -26,7 +26,7 @@ use crate::model::{
     DbObject, Key, ObjectKind, Schema, Workspace,
 };
 use crate::ui::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
-use crate::ui::object_dialog::{Apply, NameOwnerDialog, Owned};
+use crate::ui::object_dialog::{Apply, NameOwnerDialog, Owned, RoleDialog};
 use crate::ui::tabs::Origin;
 use crate::{assets, theme};
 
