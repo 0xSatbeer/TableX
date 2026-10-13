@@ -55,7 +55,7 @@ fn open_new(
     cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
     cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
     cx.run_until_parked();
-    cx.simulate_keystrokes("up up");
+    cx.simulate_keystrokes("down");
     click(&mut cx, "menu-new-table");
     let editor = opened.take().expect("+ New ▸ Table opened the editor");
     // The dialog slides in on the wall clock; clicks read bounds from a still frame.

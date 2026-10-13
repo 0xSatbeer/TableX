@@ -243,6 +243,16 @@ impl Explorer {
             .map(|(row, ((menu, new), console))| match menu {
                 Some(kind) => row
                     .context_menu(move |menu, window, cx| {
+                        let menu = if new {
+                            menu.submenu("+ New", window, cx, |menu, _, _| {
+                                menu.menu_element(Box::new(crate::NewTable), |_, _| div().debug_selector(|| "menu-new-table".into()).child("Table"))
+                                    .menu_element(Box::new(crate::NewDatabase), |_, _| div().debug_selector(|| "menu-new-database".into()).child("Database"))
+                                    .menu_element(Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
+                                    .menu_element(Box::new(crate::NewUser), |_, _| div().debug_selector(|| "menu-new-user".into()).child("User"))
+                            })
+                        } else {
+                            menu
+                        };
                         let menu = if console {
                             menu.menu_element(Box::new(crate::OpenConsole), |_, _| div().debug_selector(|| "menu-open-console".into()).child("Open console"))
                         } else {
@@ -254,16 +264,6 @@ impl Explorer {
                             }),
                             Menu::Modify => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
                             Menu::Refresh => menu,
-                        };
-                        let menu = if new {
-                            menu.submenu("+ New", window, cx, |menu, _, _| {
-                                menu.menu_element(Box::new(crate::NewTable), |_, _| div().debug_selector(|| "menu-new-table".into()).child("Table"))
-                                    .menu_element(Box::new(crate::NewDatabase), |_, _| div().debug_selector(|| "menu-new-database".into()).child("Database"))
-                                    .menu_element(Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
-                                    .menu_element(Box::new(crate::NewUser), |_, _| div().debug_selector(|| "menu-new-user".into()).child("User"))
-                            })
-                        } else {
-                            menu
                         };
                         menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
                     })

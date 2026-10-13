@@ -64,7 +64,7 @@ fn open_new(
     cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
     cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
     cx.run_until_parked();
-    cx.simulate_keystrokes("up up");
+    cx.simulate_keystrokes("down");
     click(&mut cx, "menu-new-database");
     let dialog = opened.take().expect("+ New ▸ Database opened the dialog");
     fake.resolve("roles app", Ok(vec![role("alice"), role("u")]));

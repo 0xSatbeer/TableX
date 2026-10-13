@@ -98,8 +98,8 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
             matches!(row, "app" | "public"),
             "{row} (postgres {postgres}): Open console"
         );
-        // + New sits just above Refresh: selecting it opens its submenu.
-        cx.simulate_keystrokes("up up");
+        // + New sits at the top: selecting it opens its submenu.
+        cx.simulate_keystrokes("down");
         let items = [
             "menu-new-table",
             "menu-new-database",
