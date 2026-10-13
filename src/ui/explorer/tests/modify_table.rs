@@ -116,6 +116,8 @@ fn answer_def(fake: &crate::db::fake::Fake, cx: &mut gpui_kit::VisualTestContext
             on_delete: "NO ACTION".into(),
             on_update: "NO ACTION".into(),
         }],
+        primary_key: Some("t_pkey".into()),
+        unique_keys: vec![],
     };
     fake.resolve("table_def app/public/t", Ok(def));
     cx.run_until_parked();

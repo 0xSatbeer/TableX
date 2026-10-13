@@ -70,6 +70,8 @@ impl TableForm {
             columns: Vec::new(),
             indexes: Vec::new(),
             foreign_keys: Vec::new(),
+            primary_key: None,
+            unique_keys: Vec::new(),
         });
         form.add_column();
         form
@@ -98,6 +100,7 @@ impl TableForm {
             default: None,
             is_pk: false,
             enum_values: Vec::new(),
+            identity: false,
         };
         self.columns.push((None, column));
     }
@@ -171,6 +174,8 @@ impl TableForm {
                 columns,
                 indexes: self.indexes.clone(),
                 foreign_keys: self.foreign_keys.clone(),
+                primary_key: self.before.primary_key.clone(),
+                unique_keys: self.before.unique_keys.clone(),
             },
             origins,
         }
@@ -208,12 +213,18 @@ mod tests {
         let mut form = TableForm::create();
         assert_eq!(form.blocker(), Some("Name the table."));
         form.name = "t".into();
-        assert_eq!(form.blocker(), Some("Every column needs a name and a type."));
+        assert_eq!(
+            form.blocker(),
+            Some("Every column needs a name and a type.")
+        );
         form.columns[0].1.name = "a".into();
         form.columns[0].1.data_type = "int".into();
         assert_eq!(form.blocker(), None);
         form.add_index();
-        assert_eq!(form.blocker(), Some("Every index needs a name and columns."));
+        assert_eq!(
+            form.blocker(),
+            Some("Every index needs a name and columns.")
+        );
         form.indexes.clear();
         form.add_foreign_key("public");
         assert!(form.blocker().is_some());

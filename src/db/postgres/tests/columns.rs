@@ -32,6 +32,7 @@ fn column(
         default: default.map(String::from),
         is_pk,
         enum_values: Vec::new(),
+        identity: false,
     }
 }
 

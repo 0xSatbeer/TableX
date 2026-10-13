@@ -204,6 +204,7 @@ fn columns_come_in_ordinal_order_with_type_nullability_default_and_pk() {
         default: default.map(Into::into),
         is_pk,
         enum_values: Vec::new(),
+        identity: false,
     };
     // (schema sql, object, columns)
     let cases = [

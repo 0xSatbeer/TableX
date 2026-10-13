@@ -206,6 +206,7 @@ fn table(name: String, r: u64) -> DbObject {
         default: default.map(Into::into),
         is_pk,
         enum_values: Vec::new(),
+        identity: false,
     };
     let mut columns = vec![
         col(

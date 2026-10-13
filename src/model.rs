@@ -236,6 +236,8 @@ pub struct Column {
     pub is_pk: bool,
     /// The labels of an enum column, in declared order; empty for every other type.
     pub enum_values: Vec<String>,
+    /// GENERATED … AS IDENTITY; serial columns stay false (their default shows nextval).
+    pub identity: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -266,9 +268,13 @@ pub struct ForeignKey {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableDef {
     pub name: String,
-    pub columns: Vec<Column>, // existing Column; is_pk read-only, enum_values ignored
+    pub columns: Vec<Column>, // existing Column; is_pk editable, enum_values ignored
     pub indexes: Vec<Index>,  // existing Index; excludes PK/constraint-backing indexes
     pub foreign_keys: Vec<ForeignKey>,
+    /// The primary key constraint's name, `None` when the table has none.
+    pub primary_key: Option<String>,
+    /// UNIQUE constraints (existing `Index`, `unique` always true), by constraint name.
+    pub unique_keys: Vec<Index>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -150,6 +150,7 @@ impl Driver for Sqlite {
                     default: row.get(3)?,
                     is_pk: row.get::<_, i64>(4)? > 0,
                     enum_values: Vec::new(),
+                    identity: false,
                 })
             });
             rows.and_then(Iterator::collect)

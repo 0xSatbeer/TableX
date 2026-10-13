@@ -45,6 +45,7 @@ pub(super) fn column(name: &str) -> crate::model::Column {
         default: None,
         is_pk: false,
         enum_values: vec![],
+        identity: false,
     }
 }
 

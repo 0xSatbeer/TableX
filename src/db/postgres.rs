@@ -285,10 +285,13 @@ impl Driver for Postgres {
     fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef> {
         let (schema, table) = (schema.to_string(), table.to_string());
         read(session, |session| async move {
+            let (primary_key, unique_keys) = constraints(&session, &schema, &table).await?;
             Ok(TableDef {
                 columns: columns(&session, &schema, &table).await?,
                 indexes: indexes(&session, &schema, &table).await?,
                 foreign_keys: foreign_keys(&session, &schema, &table).await?,
+                primary_key,
+                unique_keys,
                 name: table,
             })
         })
@@ -298,7 +301,8 @@ impl Driver for Postgres {
 async fn columns(session: &PgSession, schema: &str, object: &str) -> Result<Vec<Column>, String> {
     let sql = "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
                  pg_get_expr(d.adbin, d.adrelid), coalesce(a.attnum = ANY (i.indkey), false), \
-                 ARRAY(SELECT e.enumlabel::text FROM pg_enum e WHERE e.enumtypid = a.atttypid ORDER BY e.enumsortorder) \
+                 ARRAY(SELECT e.enumlabel::text FROM pg_enum e WHERE e.enumtypid = a.atttypid ORDER BY e.enumsortorder), \
+                 a.attidentity <> '' \
                FROM pg_attribute a \
                JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
                LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
@@ -315,6 +319,7 @@ async fn columns(session: &PgSession, schema: &str, object: &str) -> Result<Vec<
             default: row.get(3),
             is_pk: row.get(4),
             enum_values: row.get(5),
+            identity: row.get(6),
         })
         .collect())
 }
@@ -340,6 +345,33 @@ async fn indexes(session: &PgSession, schema: &str, table: &str) -> Result<Vec<I
             columns: row.get(2),
         })
         .collect())
+}
+
+/// The primary key constraint's name and the UNIQUE constraints, their columns in key order.
+async fn constraints(
+    session: &PgSession,
+    schema: &str,
+    table: &str,
+) -> Result<(Option<String>, Vec<Index>), String> {
+    let sql = "SELECT k.conname::text, k.contype = 'p', \
+                 ARRAY(SELECT a.attname::text FROM unnest(k.conkey) WITH ORDINALITY u(num, ord) \
+                   JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = u.num ORDER BY u.ord) \
+               FROM pg_constraint k \
+               JOIN pg_class c ON c.oid = k.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+               WHERE k.contype IN ('p', 'u') AND n.nspname = $1 AND c.relname = $2 \
+               ORDER BY k.conname COLLATE \"C\"";
+    let rows = session.query(sql, &[&schema, &table]).await?;
+    let primary_key = rows.iter().find(|r| r.get(1)).map(|r| r.get(0));
+    let unique_keys = rows
+        .iter()
+        .filter(|r| !r.get::<_, bool>(1))
+        .map(|row| Index {
+            name: row.get(0),
+            columns: row.get(2),
+            unique: true,
+        })
+        .collect();
+    Ok((primary_key, unique_keys))
 }
 
 async fn foreign_keys(

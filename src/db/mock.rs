@@ -6,7 +6,9 @@ use futures::FutureExt;
 use gpui_kit::BackgroundExecutor;
 
 use super::{Driver, Reply, Session, foreign};
-use crate::model::{Column, ConnectionParams, Database, DbObject, ForeignKey, Key, Role, TableDef};
+use crate::model::{
+    Column, ConnectionParams, Database, DbObject, ForeignKey, Index, Key, Role, TableDef,
+};
 
 pub struct Mock {
     /// Times the simulated latency, so tests can advance it by hand.
@@ -205,6 +207,23 @@ fn table_def(schema: &str, object: DbObject) -> TableDef {
             _ => None,
         })
         .collect();
+    let primary_key = object.keys.iter().find_map(|k| match k {
+        Key::Primary { name, .. } => Some(name.clone()),
+        _ => None,
+    });
+    let mut unique_keys: Vec<Index> = object
+        .keys
+        .iter()
+        .filter_map(|k| match k {
+            Key::Unique { name, columns } => Some(Index {
+                name: name.clone(),
+                columns: columns.clone(),
+                unique: true,
+            }),
+            _ => None,
+        })
+        .collect();
+    unique_keys.sort_by(|a, b| a.name.cmp(&b.name));
     TableDef {
         indexes: object
             .indexes
@@ -215,6 +234,8 @@ fn table_def(schema: &str, object: DbObject) -> TableDef {
         name: object.name,
         columns: object.columns.unwrap_or_default(),
         foreign_keys,
+        primary_key,
+        unique_keys,
     }
 }
 
@@ -266,6 +287,8 @@ mod tests {
         );
         let def = (&mut def).now_or_never().unwrap().unwrap();
         assert_eq!(def.name, table.name);
+        assert_eq!(def.primary_key, Some(format!("{}_pkey", table.name)));
+        assert_eq!(def.unique_keys, vec![]);
         assert_eq!(Some(def.columns), table.columns);
         assert_eq!(
             def.indexes,
