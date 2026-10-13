@@ -2,10 +2,18 @@ use std::sync::Arc;
 
 use super::*;
 use crate::db::{Driver, Reply, Session};
-use crate::ddl::alter_database;
+use crate::ddl::{alter_database, alter_schema};
 
-/// Modify database: its name and owner.
-pub struct DatabaseDialog {
+/// What a `NameOwnerDialog` modifies.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Owned {
+    Database,
+    Schema,
+}
+
+/// Modify database or schema: its name and owner.
+pub struct NameOwnerDialog {
+    kind: Owned,
     original: String,
     pub name: Entity<InputState>,
     /// Every role's name, once loaded.
@@ -20,22 +28,27 @@ pub struct DatabaseDialog {
     pub error: Option<String>,
 }
 
-impl EventEmitter<Apply> for DatabaseDialog {}
+impl EventEmitter<Apply> for NameOwnerDialog {}
 
-impl DatabaseDialog {
-    /// Opens Modify database `name` over `window`, reading its roles and owner through the
-    /// session `open` resolves to (a session on `name`).
+impl NameOwnerDialog {
+    /// Opens Modify database or schema `name` over `window`, reading its roles and owner through
+    /// the session `open` resolves to (a session on the database).
     pub fn open(
         driver: Arc<dyn Driver>,
         open: Reply<Session>,
+        kind: Owned,
         name: &str,
         is_production: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        let view = cx.new(|cx| Self::new(driver, open, name, is_production, window, cx));
+        let view = cx.new(|cx| Self::new(driver, open, kind, name, is_production, window, cx));
         let body = view.clone();
-        let title = format!("Modify database {name}");
+        let noun = match kind {
+            Owned::Database => "database",
+            Owned::Schema => "schema",
+        };
+        let title = format!("Modify {noun} {name}");
         window.open_dialog(cx, move |dialog, _, cx| {
             let enabled = body.read(cx).apply_enabled(cx);
             let on_apply = body.clone();
@@ -56,6 +69,7 @@ impl DatabaseDialog {
     fn new(
         driver: Arc<dyn Driver>,
         open: Reply<Session>,
+        kind: Owned,
         name: &str,
         is_production: bool,
         window: &mut Window,
@@ -64,12 +78,16 @@ impl DatabaseDialog {
         let input = cx.new(|cx| InputState::new(window, cx).default_value(name.to_string()));
         cx.subscribe(&input, |_, _, _: &InputEvent, cx| cx.notify())
             .detach();
+        let schema = name.to_string();
         cx.spawn_in(window, async move |this, cx| {
             // The session is dropped once read, so it doesn't block a rename.
             let loaded = async {
                 let session = open.await?;
-                let (roles, owner) =
-                    futures::join!(driver.roles(&session), driver.database_owner(&session));
+                let owner = match kind {
+                    Owned::Database => driver.database_owner(&session),
+                    Owned::Schema => driver.schema_owner(&session, &schema),
+                };
+                let (roles, owner) = futures::join!(driver.roles(&session), owner);
                 Ok::<_, String>((roles?, owner?))
             }
             .await;
@@ -84,6 +102,7 @@ impl DatabaseDialog {
         })
         .detach();
         Self {
+            kind,
             original: name.into(),
             name: input,
             roles: Vec::new(),
@@ -125,7 +144,11 @@ impl DatabaseDialog {
             .selected_value()
             .cloned()
             .unwrap_or_else(|| self.owner_was.clone());
-        alter_database(
+        let build = match self.kind {
+            Owned::Database => alter_database,
+            Owned::Schema => alter_schema,
+        };
+        build(
             &self.original,
             &self.name.read(cx).value(),
             &self.owner_was,
@@ -158,7 +181,7 @@ impl DatabaseDialog {
     }
 }
 
-impl Render for DatabaseDialog {
+impl Render for NameOwnerDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = match &self.owner {
             Some(owner) => Select::new(owner).small().into_any_element(),

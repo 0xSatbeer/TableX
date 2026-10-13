@@ -28,11 +28,11 @@ pub(super) fn click_action(kind: NodeKind, hit: Hit) -> Click {
     }
 }
 
-/// A row's menu: a connection's, a Postgres database's, or Refresh alone.
+/// A row's menu: a connection's, a Postgres database's or schema's, or Refresh alone.
 #[derive(Clone, Copy)]
 enum Menu {
     Connection,
-    Database,
+    Modify,
     Refresh,
 }
 
@@ -58,10 +58,10 @@ impl Explorer {
             .clone()
             .map(|ix| match self.nodes[ix].kind {
                 NodeKind::Connection(_) => Some(Menu::Connection),
-                NodeKind::Database
+                NodeKind::Database | NodeKind::Schema
                     if ws.connections[self.nodes[ix].conn].kind() == DbKind::Postgres =>
                 {
-                    Some(Menu::Database)
+                    Some(Menu::Modify)
                 }
                 NodeKind::Database | NodeKind::Schema => Some(Menu::Refresh),
                 kind if opens_tab(kind) => Some(Menu::Refresh),
@@ -232,7 +232,7 @@ impl Explorer {
                             Menu::Connection => menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…")).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
                                 div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
                             }),
-                            Menu::Database => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
+                            Menu::Modify => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
                             Menu::Refresh => menu,
                         };
                         menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))

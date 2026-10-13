@@ -170,28 +170,34 @@ impl Explorer {
         }
     }
 
-    /// Opens Modify database for the selected Postgres database row (Modify… in its menu, `ModifyObject`).
+    /// Opens Modify for the selected Postgres database or schema row (Modify… in its menu, `ModifyObject`).
     pub fn modify_object(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(node) = self
-            .nodes
-            .get(self.selected)
-            .filter(|n| n.kind == NodeKind::Database)
-        else {
+        let Some(node) = self.nodes.get(self.selected) else {
             return;
+        };
+        let kind = match node.kind {
+            NodeKind::Database => Owned::Database,
+            NodeKind::Schema => Owned::Schema,
+            _ => return,
         };
         let conn = self.workspace.read(cx).connections[node.conn].clone();
         if conn.kind() != DbKind::Postgres {
             return;
         }
-        let db = node.label.to_string();
+        let name = node.label.to_string();
+        let db = segments(&node.key)[1].clone();
+        let db_key = ancestors(&node.key)
+            .get(1)
+            .map_or(node.key.clone(), |k| k.to_string());
         let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
             Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
             None => self.driver.connect(&on_database(&conn.params, &db)),
         };
-        let dialog = DatabaseDialog::open(
+        let dialog = NameOwnerDialog::open(
             self.driver.clone(),
             open,
-            &db,
+            kind,
+            &name,
             conn.is_production,
             window,
             cx,
@@ -200,9 +206,19 @@ impl Explorer {
             &dialog,
             window,
             move |this, dialog, Apply(statements), window, cx| {
+                let (on, atomic, refresh) = match kind {
+                    // Dropping the session on `db` keeps it from blocking a rename.
+                    Owned::Database => {
+                        this.sessions.remove(&(conn.id, db.clone()));
+                        ("postgres", false, conn.id.0.to_string())
+                    }
+                    Owned::Schema => (db.as_str(), true, db_key.clone()),
+                };
                 this.apply(
                     conn.id,
-                    &db,
+                    on,
+                    atomic,
+                    refresh,
                     dialog.downgrade(),
                     statements.clone(),
                     window,
@@ -213,14 +229,16 @@ impl Explorer {
         .detach();
     }
 
-    /// Runs a Modify dialog's `statements` on connection `id`'s `postgres` database, after dropping
-    /// the session on `db` so a rename isn't blocked by it. Success closes the dialog and re-reads
-    /// the connection; a failure goes back to the dialog.
+    /// Runs a Modify dialog's `statements` on connection `id`'s database `on`. Success closes the
+    /// dialog and re-reads the node keyed `refresh`; a failure goes back to the dialog.
+    #[allow(clippy::too_many_arguments)]
     fn apply(
         &mut self,
         id: ConnectionId,
-        db: &str,
-        dialog: WeakEntity<DatabaseDialog>,
+        on: &str,
+        atomic: bool,
+        refresh: String,
+        dialog: WeakEntity<NameOwnerDialog>,
         statements: Vec<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -228,11 +246,10 @@ impl Explorer {
         let Some(params) = self.params.get(&id).cloned() else {
             return;
         };
-        self.sessions.remove(&(id, db.to_string()));
-        let at = (id, "postgres".to_string());
+        let at = (id, on.to_string());
         let open: crate::db::Reply<Session> = match self.sessions.get(&at) {
             Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
-            None => self.driver.connect(&on_database(&params, "postgres")),
+            None => self.driver.connect(&on_database(&params, on)),
         };
         let generation = *self.gens.entry(id).or_default();
         let driver = self.driver.clone();
@@ -245,7 +262,7 @@ impl Explorer {
                         }
                     })
                     .ok();
-                    driver.execute(&session, statements, false).await
+                    driver.execute(&session, statements, atomic).await
                 }
                 Err(reason) => Err(reason),
             };
@@ -253,7 +270,7 @@ impl Explorer {
                 Ok(()) => {
                     window.close_dialog(cx);
                     if this.gens.get(&id) == Some(&generation) {
-                        this.load(id.0.to_string(), false, cx);
+                        this.load(refresh, false, cx);
                     }
                 }
                 Err(reason) => {

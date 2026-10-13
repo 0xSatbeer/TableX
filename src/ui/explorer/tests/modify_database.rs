@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::model::Role;
-use crate::ui::object_dialog::DatabaseDialog;
+use crate::ui::object_dialog::NameOwnerDialog;
 
 fn role(name: &str) -> Role {
     Role {
@@ -20,7 +20,7 @@ fn open_modify(
     gpui_kit::VisualTestContext,
     gpui_kit::Entity<super::Explorer>,
     Arc<crate::db::fake::Fake>,
-    gpui_kit::Entity<DatabaseDialog>,
+    gpui_kit::Entity<NameOwnerDialog>,
 ) {
     use std::{cell::RefCell, rc::Rc};
     let conn = crate::model::Connection {
@@ -32,7 +32,7 @@ fn open_modify(
     let opened = Rc::new(RefCell::new(None));
     let sink = opened.clone();
     let _watch = cx.update(|_, cx| {
-        cx.observe_new(move |_: &mut DatabaseDialog, _, cx| *sink.borrow_mut() = Some(cx.entity()))
+        cx.observe_new(move |_: &mut NameOwnerDialog, _, cx| *sink.borrow_mut() = Some(cx.entity()))
     });
     let ix = labels(&explorer, &cx)
         .iter()
@@ -86,7 +86,7 @@ fn type_into(
 /// Renames shop to store and hands it to bob.
 fn rename_and_reown(
     cx: &mut gpui_kit::VisualTestContext,
-    dialog: &gpui_kit::Entity<DatabaseDialog>,
+    dialog: &gpui_kit::Entity<NameOwnerDialog>,
 ) {
     let name = dialog.read_with(cx, |d, _| d.name.clone());
     type_into(cx, name, "store");

@@ -2,9 +2,9 @@
 //! the production confirmation, the Cancel/Apply footer and the error line. The explorer runs
 //! the statements a dialog's `Apply` carries and reports a failure back with `failed`.
 
-mod database;
+mod name_owner;
 
-pub use database::*;
+pub use name_owner::*;
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IndexPath, Sizable as _, WindowExt as _,
