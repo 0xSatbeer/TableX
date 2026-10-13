@@ -280,6 +280,48 @@ impl Explorer {
         .detach();
     }
 
+    /// Opens New table for the selected Postgres database, schema or table row (+ New in its
+    /// menu), in that schema, or `public` from a database. Apply runs atomically on the row's
+    /// database and refreshes the schema.
+    pub fn new_table(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected) else {
+            return;
+        };
+        let schema_key = match node.kind {
+            NodeKind::Database => format!("{}/{}", node.key, seg("public")),
+            NodeKind::Schema => node.key.clone(),
+            NodeKind::Object(ObjectKind::Table) => ancestors(&node.key)[2].to_string(),
+            _ => return,
+        };
+        let conn = self.workspace.read(cx).connections[node.conn].clone();
+        if conn.kind() != DbKind::Postgres {
+            return;
+        }
+        let parts = segments(&schema_key);
+        let (db, schema) = (parts[1].clone(), &parts[2]);
+        let dialog = TableEditor::create(schema, conn.is_production, window, cx);
+        cx.subscribe_in(
+            &dialog,
+            window,
+            move |this, dialog, Apply(statements), window, cx| {
+                let dialog = dialog.downgrade();
+                this.apply(
+                    conn.id,
+                    &db,
+                    true,
+                    Some(schema_key.clone()),
+                    move |reason, cx| {
+                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    },
+                    statements.clone(),
+                    window,
+                    cx,
+                )
+            },
+        )
+        .detach();
+    }
+
     /// Opens New Database for the selected Postgres database, schema or table row (+ New in its
     /// menu). Apply runs non-atomically on the row's database and refreshes the connection.
     pub fn new_database(&mut self, window: &mut Window, cx: &mut Context<Self>) {

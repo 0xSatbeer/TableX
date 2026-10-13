@@ -107,7 +107,7 @@ pub fn footer(enabled: bool, on_apply: impl Fn(&mut Window, &mut App) + 'static)
 
 /// On a production connection, the object's name typed to enable Apply.
 pub struct ProductionConfirm {
-    name: String,
+    pub name: String,
     is_production: bool,
     pub typed: Entity<InputState>,
 }

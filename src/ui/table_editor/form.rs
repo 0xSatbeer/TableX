@@ -1,4 +1,4 @@
-use crate::ddl::{TableEdit, alter_table};
+use crate::ddl::{TableEdit, alter_table, create_table};
 use crate::model::{Column, ForeignKey, Index, TableDef};
 
 /// The referential actions an FK's on delete and on update choose from.
@@ -35,6 +35,22 @@ impl TableForm {
             before,
             columns,
         }
+    }
+
+    /// A new table: no name, one empty column. Its `before` is blank, which marks create mode.
+    pub fn create() -> Self {
+        let mut form = Self::modify(TableDef {
+            name: String::new(),
+            columns: Vec::new(),
+            indexes: Vec::new(),
+            foreign_keys: Vec::new(),
+        });
+        form.add_column();
+        form
+    }
+
+    pub fn is_create(&self) -> bool {
+        self.before.name.is_empty()
     }
 
     pub fn add_column(&mut self) {
@@ -89,6 +105,9 @@ impl TableForm {
         });
         if self.name.is_empty() || blank_column || blank_index || blank_fk {
             return Vec::new();
+        }
+        if self.is_create() {
+            return create_table(schema, &self.edit().def);
         }
         alter_table(schema, &self.before, &self.edit())
     }

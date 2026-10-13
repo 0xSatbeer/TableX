@@ -23,7 +23,7 @@ use gpui_kit::{
 };
 
 use crate::db::{Driver, Reply, Session};
-use crate::model::{ForeignKey, Index, TableDef};
+use crate::model::{ForeignKey, Index};
 use crate::theme;
 use crate::ui::object_dialog::{Apply, ProductionConfirm, error_line, field, footer, sql_preview};
 
@@ -82,8 +82,26 @@ impl TableEditor {
         cx: &mut App,
     ) -> Entity<Self> {
         let view = cx.new(|cx| Self::new(driver, open, (schema, table), is_production, window, cx));
+        Self::show(view, format!("Modify table {table}"), window, cx)
+    }
+
+    /// Opens New table in `schema` over `window`: empty, with nothing to load.
+    pub fn create(
+        schema: &str,
+        is_production: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        let view = cx.new(|cx| {
+            let mut this = Self::blank(schema, "", is_production, window, cx);
+            this.loaded(TableForm::create(), window, cx);
+            this
+        });
+        Self::show(view, "New table".into(), window, cx)
+    }
+
+    fn show(view: Entity<Self>, title: String, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let body = view.clone();
-        let title = format!("Modify table {table}");
         window.open_dialog(cx, move |dialog, _, cx| {
             let enabled = body.read(cx).apply_enabled(cx);
             let on_apply = body.clone();
@@ -109,7 +127,6 @@ impl TableEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let name = Self::input(table, "", window, cx);
         let (on_schema, on_table) = (schema.to_string(), table.to_string());
         cx.spawn_in(window, async move |this, cx| {
             let def = async {
@@ -119,7 +136,7 @@ impl TableEditor {
             .await;
             this.update_in(cx, |this, window, cx| {
                 match def {
-                    Ok(def) => this.loaded(def, window, cx),
+                    Ok(def) => this.loaded(TableForm::modify(def), window, cx),
                     Err(reason) => this.error = Some(reason),
                 }
                 cx.notify();
@@ -127,9 +144,19 @@ impl TableEditor {
             .ok();
         })
         .detach();
+        Self::blank(schema, table, is_production, window, cx)
+    }
+
+    fn blank(
+        schema: &str,
+        table: &str,
+        is_production: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             schema: schema.into(),
-            name,
+            name: Self::input(table, "", window, cx),
             form: None,
             rows: Vec::new(),
             indexes: Vec::new(),
@@ -157,8 +184,7 @@ impl TableEditor {
         input
     }
 
-    fn loaded(&mut self, def: TableDef, window: &mut Window, cx: &mut Context<Self>) {
-        let form = TableForm::modify(def);
+    fn loaded(&mut self, form: TableForm, window: &mut Window, cx: &mut Context<Self>) {
         self.rows = form
             .columns
             .iter()
@@ -229,6 +255,10 @@ impl TableEditor {
     fn sync(&mut self, cx: &mut Context<Self>) {
         let Some(form) = &mut self.form else { return };
         form.name = self.name.read(cx).value().to_string();
+        // On production a new table's confirmation is its new name.
+        if form.is_create() {
+            self.confirm.name = form.name.clone();
+        }
         for (row, (_, c)) in self.rows.iter().zip(&mut form.columns) {
             c.name = row.name.read(cx).value().to_string();
             c.data_type = row.ty.read(cx).value().to_string();

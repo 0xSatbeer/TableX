@@ -95,12 +95,25 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
         );
         // + New sits just above Refresh: selecting it opens its submenu.
         cx.simulate_keystrokes("up up");
+        let items = [
+            "menu-new-table",
+            "menu-new-database",
+            "menu-new-role",
+            "menu-new-user",
+        ]
+        .map(|item| cx.debug_bounds(item));
         assert_eq!(
-            ["menu-new-database", "menu-new-role", "menu-new-user"]
-                .map(|item| cx.debug_bounds(item).is_some()),
-            [new, new, new],
-            "{row} (postgres {postgres}): + New ▸ Database, Role, User"
+            items.map(|b| b.is_some()),
+            [new; 4],
+            "{row} (postgres {postgres}): + New ▸ Table, Database, Role, User"
         );
+        if new {
+            let tops = items.map(|b| b.expect("drawn").origin.y);
+            assert!(
+                tops.is_sorted(),
+                "{row}: Table, Database, Role, User in order"
+            );
+        }
     }
 }
 

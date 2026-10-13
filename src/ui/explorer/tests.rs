@@ -20,6 +20,7 @@ mod modify_schema;
 mod modify_table;
 mod new_database;
 mod new_role;
+mod new_table;
 mod refresh;
 mod refresh_errors;
 mod refresh_menu;
