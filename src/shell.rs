@@ -1,8 +1,8 @@
-use gpui_kit::component::input::{EditorState, InputState};
+use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 
-use crate::ui::{explorer, grid, panel, statusbar, tabs};
-use crate::{RestorePanel, mock, model, theme};
+use crate::ui::{console, explorer, grid, panel, statusbar, tabs};
+use crate::{RestorePanel, db, mock, model, theme};
 use std::rc::Rc;
 
 mod actions;
@@ -17,7 +17,7 @@ use layout::LayoutState;
 
 enum TabContent {
     Grid(Entity<grid::Grid>),
-    Console(Entity<EditorState>),
+    Console(Entity<console::Console>),
 }
 
 /// How the app starts. `Demo` (`--demo`) loads the sample workspace, tabs and query log and
@@ -46,6 +46,8 @@ pub(crate) struct Shell {
         allow(dead_code, reason = "tests reach the workspace through the Shell")
     )]
     workspace: Entity<model::Workspace>,
+    /// What new consoles run on.
+    driver: std::sync::Arc<dyn db::Driver>,
     explorer: Entity<explorer::Explorer>,
     tabs: tabs::Tabs<TabContent>,
     tab_scroll: ScrollHandle,

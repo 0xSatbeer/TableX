@@ -1,4 +1,4 @@
-use gpui_kit::component::{ActiveTheme as _, TitleBar, h_flex, input::Editor, v_flex};
+use gpui_kit::component::{ActiveTheme as _, TitleBar, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -42,6 +42,10 @@ impl Render for Shell {
             .update(cx, |bar, cx| bar.set_grid_focused(grid_focused, cx));
         let explorer_focused = focused(Some(self.explorer.focus_handle(cx)), cx);
         let panel_focused = focused(Some(self.bottom_panel.focus_handle(cx)), cx);
+        if let Some(TabContent::Console(console)) = self.tabs.active().map(|t| &t.content) {
+            let text_size = self.console_text_size();
+            console.update(cx, |console, _| console.text_size = text_size);
+        }
         let theme = cx.theme();
         let content = match self.tabs.active().map(|t| &t.content) {
             // shortcut: a grid with no columns is a table tab's placeholder; QX-033 fills it with the table's rows
@@ -66,7 +70,7 @@ impl Render for Shell {
                     .into_any_element()
             }
             Some(TabContent::Grid(grid)) => grid.clone().into_any_element(),
-            Some(TabContent::Console(editor)) => {
+            Some(TabContent::Console(console)) => {
                 let production = self.tabs.active().and_then(|t| t.origin.as_ref()).is_some_and(|o| o.production);
                 // ponytail: a rule, not the full background tint QX-012 brings with the console toolbar
                 h_flex()
@@ -79,7 +83,7 @@ impl Render for Shell {
                             .on_action(cx.listener(|this, _: &theme::ZoomIn, _, cx| this.zoom_console(theme::Zoom::In, cx)))
                             .on_action(cx.listener(|this, _: &theme::ZoomOut, _, cx| this.zoom_console(theme::Zoom::Out, cx)))
                             .on_action(cx.listener(|this, _: &theme::ZoomReset, _, cx| this.zoom_console(theme::Zoom::Reset, cx)))
-                            .child(Editor::new(editor).bordered(false).h_full().text_size(self.console_text_size())),
+                            .child(console.clone()),
                     )
                     .into_any_element()
             }
@@ -140,10 +144,10 @@ impl Render for Shell {
                     let explorer_w = self.layout.explorer.shown(viewport.width);
                     let bottom_h = self.layout.bottom.shown(viewport.height);
                     let maximized = self.layout.panel_maximized;
-                    let console = matches!(
-                        self.tabs.active().map(|t| &t.content),
-                        Some(TabContent::Console(_))
-                    );
+                    let console = match self.tabs.active().map(|t| &t.content) {
+                        Some(TabContent::Console(console)) => Some(console.clone()),
+                        _ => None,
+                    };
                     self.bottom_panel.update(cx, |panel, _| {
                         (panel.maximized, panel.console) = (maximized, console)
                     });

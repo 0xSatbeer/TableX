@@ -1,7 +1,7 @@
-use gpui_kit::component::input::{EditorState, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
-use crate::ui::{explorer, grid, panel, split, statusbar, tabs};
+use crate::ui::{console, explorer, grid, panel, split, statusbar, tabs};
 use crate::{db, mock, model, theme};
 use std::rc::Rc;
 
@@ -45,13 +45,14 @@ impl Shell {
         let demo = mode == Mode::Demo;
         let workspace = cx.new(|_| workspace);
         // The demo console runs against production, so the tint shows up.
-        let console_origin = workspace
+        let console_conn = workspace
             .read(cx)
             .connections
             .iter()
             .find(|c| demo && c.is_production)
-            .map(tabs::Origin::of);
-        let explorer = cx.new(|cx| explorer::Explorer::new(workspace.clone(), driver, window, cx));
+            .map(|c| (tabs::Origin::of(c), c.id, c.params.database()));
+        let explorer =
+            cx.new(|cx| explorer::Explorer::new(workspace.clone(), driver.clone(), window, cx));
         cx.observe(&workspace, |this, workspace, cx| {
             this.tabs.refresh_origins(workspace.read(cx));
             let (origin, has_tab) = (
@@ -121,8 +122,21 @@ impl Shell {
                         tail,
                     };
                     let title = format!("{} — console", ev.database);
-                    this.tabs
-                        .open(console_tab(key, title, Some(origin), "", window, cx));
+                    let target = console::Target {
+                        workspace: this.workspace.clone(),
+                        driver: this.driver.clone(),
+                        connection: Some(conn.id),
+                        database: ev.database.clone(),
+                    };
+                    this.tabs.open(console_tab(
+                        key,
+                        title,
+                        Some(origin),
+                        target,
+                        "",
+                        window,
+                        cx,
+                    ));
                 }
                 this.tab_changed(cx);
             },
@@ -152,10 +166,21 @@ impl Shell {
             },
         )
         .detach();
+        let (origin, connection, database) = match console_conn {
+            Some((origin, id, database)) => (Some(origin), Some(id), database),
+            None => (None, None, String::new()),
+        };
+        let target = console::Target {
+            workspace: workspace.clone(),
+            driver: driver.clone(),
+            connection,
+            database,
+        };
         let console = console_tab(
             "console-1",
             "console-1",
-            console_origin,
+            origin,
+            target,
             if demo {
                 "SELECT id, email\nFROM users\nWHERE created_at > now() - interval '7 days';\n"
             } else {
@@ -182,6 +207,7 @@ impl Shell {
             overflow_open: false,
             overflow_search,
             workspace: workspace.clone(),
+            driver,
             explorer,
             tab_scroll: ScrollHandle::new(),
             tabs: tabs::Tabs::new(tabs),
@@ -229,16 +255,28 @@ pub(super) fn grid_tab(
     }
 }
 
-/// A console tab keyed `key` with its own SQL editor holding `text`.
+/// A console tab keyed `key` on `target`, with its own SQL editor holding `text`. Its runs go
+/// to the bottom panel: statements to Logs, and the panel shows Results or Messages when done.
 pub(super) fn console_tab(
     key: impl Into<SharedString>,
     title: impl Into<SharedString>,
     origin: Option<tabs::Origin>,
+    target: console::Target,
     text: &str,
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) -> tabs::EditorTab<TabContent> {
-    let text = text.to_string();
+    let console = cx.new(|cx| console::Console::new(target, text, window, cx));
+    cx.subscribe(&console, |this, console, ev: &console::ConsoleEvent, cx| {
+        let shown = console.read(cx).results.is_empty();
+        this.bottom_panel.update(cx, |panel, cx| match ev {
+            console::ConsoleEvent::Logged(entry) => panel.push(entry.clone(), cx),
+            console::ConsoleEvent::Finished => panel.show_run(!shown, cx),
+        });
+    })
+    .detach();
+    // The panel draws the active console's results, so it redraws with them.
+    cx.observe(&console, |_, _, cx| cx.notify()).detach();
     tabs::EditorTab {
         key: key.into(),
         title: title.into(),
@@ -246,10 +284,6 @@ pub(super) fn console_tab(
         tooltip: None,
         preview: false,
         pinned: false,
-        content: TabContent::Console(cx.new(|cx| {
-            EditorState::new(window, cx)
-                .language("sql")
-                .default_value(text)
-        })),
+        content: TabContent::Console(console),
     }
 }

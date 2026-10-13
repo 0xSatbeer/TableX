@@ -81,13 +81,11 @@ pub trait Driver: Send + Sync {
     fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef>;
     /// Runs one statement. Row-returning statements stay open for `fetch`. With `autocommit`,
     /// Postgres opens the portal inside an implicit transaction that commits on close/exhaustion.
-    #[allow(dead_code)] // the query methods' callers, the console and table views, come in later tickets
     fn open(&self, session: &Session, sql: String, autocommit: bool) -> QueryReply<Opened>;
     /// Up to `max` more rows of the open result; fewer than `max` means it is exhausted and closed.
-    #[allow(dead_code)]
     fn fetch(&self, session: &Session, max: usize) -> QueryReply<Vec<Row>>;
     /// Closes the open result, if any. Never fails on a session with nothing open.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // the query methods' other callers (paging, cancel, table views) come in later tickets
     fn close(&self, session: &Session) -> Reply<()>;
     /// Stops whatever `session` is running; that call fails with `QueryErrorKind::Cancelled`.
     #[allow(dead_code)]

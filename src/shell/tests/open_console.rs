@@ -1,3 +1,4 @@
+use super::support::*;
 use super::*;
 
 /// Reveals the tree row keyed `key` and picks Open console on it.
@@ -17,9 +18,11 @@ fn active_console(
     shell: &gpui_kit::Entity<crate::shell::Shell>,
     cx: &gpui_kit::VisualTestContext,
 ) -> gpui_kit::Entity<gpui_kit::component::input::EditorState> {
-    shell.read_with(cx, |this, _| match this.tabs.active().map(|t| &t.content) {
-        Some(crate::shell::TabContent::Console(editor)) => editor.clone(),
-        _ => panic!("a console tab is active"),
+    shell.read_with(cx, |this, cx| {
+        match this.tabs.active().map(|t| &t.content) {
+            Some(crate::shell::TabContent::Console(console)) => console.read(cx).editor.clone(),
+            _ => panic!("a console tab is active"),
+        }
     })
 }
 
@@ -84,4 +87,48 @@ fn two_consoles_keep_separate_editor_text(cx: &mut gpui_kit::TestAppContext) {
     cx.simulate_input("select 2");
     let texts = cx.update(|_, cx| [schema, database].map(|e| e.read(cx).value().to_string()));
     assert_eq!(texts, ["select 1", "select 2"]);
+}
+
+#[gpui_kit::test]
+fn each_console_runs_on_its_own_session_and_logs_to_the_panel(cx: &mut gpui_kit::TestAppContext) {
+    use crate::db::Opened;
+    let (fake, window, shell) = open_with_fake(cx);
+    cx.update(crate::ui::console::bind_keys);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    let connects = |fake: &crate::db::fake::Fake| {
+        fake.pending()
+            .iter()
+            .filter(|l| *l == "connect app_db")
+            .count()
+    };
+    for key in ["1/app_db/public", "1/app_db"] {
+        open_console(&mut cx, &shell, key);
+        let before = connects(&fake);
+        cx.simulate_input("update t set x = 1");
+        cx.simulate_keystrokes("ctrl-enter");
+        cx.run_until_parked();
+        assert_eq!(
+            connects(&fake),
+            before + 1,
+            "{key} connects its own session"
+        );
+    }
+    for _ in 0..2 {
+        fake.resolve("connect app_db", Ok(crate::db::fake::session("app_db")));
+        cx.run_until_parked();
+        fake.resolve_query("open app_db", Ok(Opened::Affected(1)));
+        cx.run_until_parked();
+    }
+    let logged = shell.read_with(&cx, |this, cx| {
+        let log = this.bottom_panel.read(cx).logged();
+        log[log.len() - 2..]
+            .iter()
+            .map(|e| (e.sql.clone(), e.source))
+            .collect::<Vec<_>>()
+    });
+    let entry = (
+        "update t set x = 1".to_string(),
+        crate::model::QuerySource::Console,
+    );
+    assert_eq!(logged, [entry.clone(), entry]);
 }

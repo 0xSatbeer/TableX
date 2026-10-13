@@ -11,6 +11,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
 use crate::model::{ConnectionId, QueryLogEntry, Workspace};
+use crate::ui::console::Console;
 
 pub use filter::LogFilter;
 use filter::filter_rows;
@@ -18,14 +19,15 @@ use filter::filter_rows;
 const TABS: [&str; 3] = ["Results", "Logs", "Messages"];
 const RESULTS: usize = 0;
 const LOGS: usize = 1;
+const MESSAGES: usize = 2;
 /// Time column width in `SPACE_8` units; wide enough for the "Time (UTC)" header.
 const TIME_W: f32 = 10.;
 
 pub struct BottomPanel {
     /// Set by the shell: the panel covers the editor area, so the header offers restore.
     pub maximized: bool,
-    /// Set by the shell: Results belongs to the query console, so other tabs hide it.
-    pub console: bool,
+    /// Set by the shell: the active console, whose results and messages show here; other tabs hide Results.
+    pub console: Option<Entity<Console>>,
     tab: usize,
     log: Vec<QueryLogEntry>,
     filter: LogFilter,
@@ -87,7 +89,7 @@ impl BottomPanel {
         let rows = filter_rows(&log, &filter);
         Self {
             maximized: false,
-            console: true,
+            console: None,
             tab: RESULTS,
             log,
             filter,
@@ -110,6 +112,24 @@ impl BottomPanel {
             .find(|c| c.id == id);
         conn.map(|c| (c.name.clone(), c.color, c.is_production))
             .unwrap_or_default()
+    }
+
+    /// Logs `entry` as the newest row.
+    pub fn push(&mut self, entry: QueryLogEntry, cx: &mut Context<Self>) {
+        push_log(&mut self.log, entry);
+        self.refilter(cx);
+        cx.notify();
+    }
+
+    /// Shows what a console run left: Results when it returned rows, else Messages.
+    pub fn show_run(&mut self, results: bool, cx: &mut Context<Self>) {
+        self.tab = if results { RESULTS } else { MESSAGES };
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn logged(&self) -> &[QueryLogEntry] {
+        &self.log
     }
 
     /// The connections the query log has rows for.

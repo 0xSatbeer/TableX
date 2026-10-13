@@ -59,6 +59,7 @@ fn main() {
             shell::bind_overflow_keys(cx);
             shell::bind_panel_keys(cx);
             shell::bind_zoom_keys(cx);
+            ui::console::bind_keys(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.bind_keys([
                 KeyBinding::new("ctrl-q", Quit, None),

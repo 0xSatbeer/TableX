@@ -18,7 +18,7 @@ impl Shell {
     /// Points the status bar at the active tab: its origin, and the cursor only for the console.
     pub(super) fn tab_changed(&mut self, cx: &mut Context<Self>) {
         let editor = match self.tabs.active().map(|t| &t.content) {
-            Some(TabContent::Console(editor)) => Some(editor.clone()),
+            Some(TabContent::Console(console)) => Some(console.read(cx).editor.clone()),
             _ => None,
         };
         let grid = match self.tabs.active().map(|t| &t.content) {

@@ -50,7 +50,7 @@ fn zoom_keys_change_only_the_focused_grid_or_editor(cx: &mut gpui_kit::TestAppCo
         }
         let handle = shell.read_with(&cx, |this, cx| match focus {
             "grid" => Some(grid.focus_handle(cx)),
-            "editor" => Some(super::console_1(this).focus_handle(cx)),
+            "editor" => Some(super::console_1(this, cx).focus_handle(cx)),
             "explorer" => Some(this.explorer.focus_handle(cx)),
             _ => None,
         });
@@ -93,7 +93,7 @@ fn console_editor_follows_ui_scale_like_the_grid(cx: &mut gpui_kit::TestAppConte
         this.tab_changed(cx);
     });
     cx.run_until_parked();
-    let editor = shell.read_with(&cx, |this, cx| super::console_1(this).focus_handle(cx));
+    let editor = shell.read_with(&cx, |this, cx| super::console_1(this, cx).focus_handle(cx));
     cx.update(|window, cx| window.focus(&editor, cx));
     for (keys, want) in [("", 16.25), ("ctrl-=", 17.55)] {
         if !keys.is_empty() {
@@ -151,7 +151,7 @@ fn focus_ring_follows_the_focused_pane(cx: &mut gpui_kit::TestAppContext) {
         let handle = shell.read_with(&cx, |this, cx| match focus {
             "explorer" => Some(this.explorer.focus_handle(cx)),
             "grid" => Some(grid.focus_handle(cx)),
-            "console" => Some(super::console_1(this).focus_handle(cx)),
+            "console" => Some(super::console_1(this, cx).focus_handle(cx)),
             "panel" => Some(this.bottom_panel.focus_handle(cx)),
             _ => None,
         });
@@ -230,7 +230,7 @@ fn aggregate_shows_only_while_the_grid_is_focused(cx: &mut gpui_kit::TestAppCont
         let handle = shell.read_with(&cx, |this, cx| match focus {
             "explorer" => Some(this.explorer.focus_handle(cx)),
             "grid" => Some(grid.focus_handle(cx)),
-            "console" => Some(super::console_1(this).focus_handle(cx)),
+            "console" => Some(super::console_1(this, cx).focus_handle(cx)),
             "panel" => Some(this.bottom_panel.focus_handle(cx)),
             _ => None,
         });

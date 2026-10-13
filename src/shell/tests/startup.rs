@@ -89,7 +89,7 @@ fn a_normal_start_shows_no_connections_one_empty_console_and_empty_logs(
         "one console tab, on no connection"
     );
     assert_eq!(
-        shell.read_with(&cx, |this, cx| super::console_1(this).read(cx).value()),
+        shell.read_with(&cx, |this, cx| super::console_1(this, cx).read(cx).value()),
         "",
         "the console is empty"
     );

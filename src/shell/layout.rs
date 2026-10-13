@@ -150,7 +150,7 @@ impl Shell {
     pub(super) fn content_focus(&self, cx: &App) -> Option<FocusHandle> {
         match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Grid(grid)) => Some(grid.focus_handle(cx)),
-            Some(TabContent::Console(editor)) => Some(editor.focus_handle(cx)),
+            Some(TabContent::Console(console)) => Some(console.read(cx).editor.focus_handle(cx)),
             None => None,
         }
     }

@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Sizable as _,
+    ActiveTheme as _, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::Input,
@@ -8,6 +8,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::ui::console::Console;
 use crate::{MaximizePanel, ToggleBottomPanel, theme};
 
 use super::filter::empty_message;
@@ -18,7 +19,7 @@ impl Render for BottomPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let connection_menu = self.connection_menu(cx);
         let filter_menu = self.filter_menu(cx);
-        let tab = if !self.console && self.tab == RESULTS {
+        let tab = if self.console.is_none() && self.tab == RESULTS {
             LOGS
         } else {
             self.tab
@@ -36,7 +37,7 @@ impl Render for BottomPanel {
             .children(
                 TABS.iter()
                     .enumerate()
-                    .filter(|(ix, _)| self.console || *ix != RESULTS)
+                    .filter(|(ix, _)| self.console.is_some() || *ix != RESULTS)
                     .map(|(ix, label)| {
                         let active = ix == tab;
                         div()
@@ -149,8 +150,28 @@ impl Render for BottomPanel {
                     .w_full(),
                 )
                 .into_any_element(),
-            0 => empty("Console results will show here").into_any_element(),
-            _ => empty("No messages").into_any_element(),
+            RESULTS => match self
+                .console
+                .as_ref()
+                .filter(|c| !c.read(cx).results.is_empty())
+            {
+                Some(console) => results(console, cx).into_any_element(),
+                None => empty("Console results will show here").into_any_element(),
+            },
+            _ => match self
+                .console
+                .as_ref()
+                .filter(|c| !c.read(cx).messages.is_empty())
+            {
+                Some(console) => v_flex()
+                    .size_full()
+                    .p(theme::space_8())
+                    .gap(theme::space_4())
+                    .font_family(theme.mono_font_family.clone())
+                    .children(console.read(cx).messages.clone())
+                    .into_any_element(),
+                None => empty("No messages").into_any_element(),
+            },
         };
         v_flex()
             .size_full()
@@ -158,4 +179,36 @@ impl Render for BottomPanel {
             .child(header)
             .child(div().flex_1().min_h_0().child(body))
     }
+}
+
+/// The console's result tabs as a strip over the active one's grid.
+fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let this = console.read(cx);
+    let strip = h_flex()
+        .flex_none()
+        .px(theme::space_8())
+        .gap(theme::space_4())
+        .border_b_1()
+        .border_color(theme.border)
+        .children((0..this.results.len()).map(|ix| {
+            let console = console.clone();
+            Button::new(("result-tab", ix))
+                .ghost()
+                .xsmall()
+                .selected(ix == this.active_result)
+                .label(format!("Result {}", ix + 1))
+                .on_click(move |_, _, cx| {
+                    console.update(cx, |console, cx| {
+                        console.active_result = ix;
+                        cx.notify();
+                    })
+                })
+        }));
+    v_flex().size_full().child(strip).child(
+        div()
+            .flex_1()
+            .min_h_0()
+            .child(this.results[this.active_result].clone()),
+    )
 }

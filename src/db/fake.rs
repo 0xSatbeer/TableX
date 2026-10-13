@@ -50,6 +50,7 @@ pub struct Fake {
     pending: Mutex<Vec<(String, oneshot::Sender<Answer>)>>,
     tested: Mutex<Vec<ConnectionParams>>,
     executed: Mutex<Vec<(String, Vec<String>, bool)>>,
+    opened: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -71,6 +72,11 @@ impl Fake {
     /// The (database, statements, atomic) of every `execute` call so far, oldest first.
     pub fn executed(&self) -> Vec<(String, Vec<String>, bool)> {
         self.executed.lock().unwrap().clone()
+    }
+
+    /// The SQL of every `open` call so far, oldest first.
+    pub fn opened(&self) -> Vec<String> {
+        self.opened.lock().unwrap().clone()
     }
 
     /// Resolves the oldest pending call labelled `label` with `result`.
@@ -173,7 +179,8 @@ impl Driver for Fake {
         self.call(format!("table_def {}/{schema}/{table}", on(session)))
     }
 
-    fn open(&self, session: &Session, _: String, _: bool) -> QueryReply<Opened> {
+    fn open(&self, session: &Session, sql: String, _: bool) -> QueryReply<Opened> {
+        self.opened.lock().unwrap().push(sql);
         self.call_query(format!("open {}", on(session)))
     }
 

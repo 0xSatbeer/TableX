@@ -112,7 +112,7 @@ fn every_way_out_of_panel_maximize_refocuses_the_content(cx: &mut gpui_kit::Test
                 let content = match this.tabs.active().map(|t| &t.content) {
                     Some(crate::shell::TabContent::Grid(grid)) => grid.focus_handle(cx),
                     Some(crate::shell::TabContent::Console(_)) => {
-                        super::console_1(this).focus_handle(cx)
+                        super::console_1(this, cx).focus_handle(cx)
                     }
                     None => panic!("launch opens a tab"),
                 };
@@ -150,7 +150,7 @@ fn clicking_chrome_keeps_focus_when_not_maximized(cx: &mut gpui_kit::TestAppCont
     });
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
     cx.run_until_parked();
-    let editor = shell.read_with(&cx, |this, cx| super::console_1(this).focus_handle(cx));
+    let editor = shell.read_with(&cx, |this, cx| super::console_1(this, cx).focus_handle(cx));
     cx.update(|window, cx| window.focus(&editor, cx));
     let bottom_middle = cx.update(|window, _| {
         let v = window.viewport_size();

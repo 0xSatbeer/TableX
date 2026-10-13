@@ -185,6 +185,12 @@ pub(super) fn console_on(
             key.clone(),
             key,
             Some(crate::shell::tabs::Origin::of(conn)),
+            crate::ui::console::Target {
+                workspace: gpui_kit::AppContext::new(cx, |_| crate::mock::workspaces().remove(0)),
+                driver: std::sync::Arc::new(crate::db::fake::Fake::default()),
+                connection: Some(conn.id),
+                database: conn.params.database(),
+            },
             "",
             window,
             cx,

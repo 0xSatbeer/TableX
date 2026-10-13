@@ -71,6 +71,12 @@ fn open_with_connection_tabs(
             "console-local",
             "console-local",
             Some(super::tabs::Origin::of(&local)),
+            crate::ui::console::Target {
+                workspace: this.workspace.clone(),
+                driver: this.driver.clone(),
+                connection: Some(local.id),
+                database: local.params.database(),
+            },
             "",
             window,
             cx,
@@ -155,7 +161,10 @@ fn open_started(
 }
 
 /// The editor of the `console-1` tab the Shell starts with.
-fn console_1(this: &super::Shell) -> gpui_kit::Entity<gpui_kit::component::input::EditorState> {
+fn console_1(
+    this: &super::Shell,
+    cx: &gpui_kit::App,
+) -> gpui_kit::Entity<gpui_kit::component::input::EditorState> {
     match this
         .tabs
         .tabs
@@ -163,7 +172,7 @@ fn console_1(this: &super::Shell) -> gpui_kit::Entity<gpui_kit::component::input
         .find(|t| t.key == "console-1")
         .map(|t| &t.content)
     {
-        Some(super::TabContent::Console(editor)) => editor.clone(),
+        Some(super::TabContent::Console(console)) => console.read(cx).editor.clone(),
         _ => panic!("the console-1 tab"),
     }
 }

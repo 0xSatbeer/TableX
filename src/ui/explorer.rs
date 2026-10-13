@@ -44,6 +44,7 @@ mod rows;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use fetch::on_database;
 use fetch::*;
 use filter::*;
 use flatten::*;

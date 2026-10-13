@@ -3,7 +3,7 @@
 use super::*;
 
 /// `params` pointed at database `db`: a Postgres server's other database, or the SQLite file itself.
-pub(super) fn on_database(params: &ConnectionParams, db: &str) -> ConnectionParams {
+pub(crate) fn on_database(params: &ConnectionParams, db: &str) -> ConnectionParams {
     match params {
         ConnectionParams::Postgres { .. } if params.database() != db => {
             let mut params = params.clone();
