@@ -118,3 +118,41 @@ fn truncated_header_names_and_types_show_a_tooltip(cx: &mut gpui_kit::TestAppCon
         );
     }
 }
+
+#[gpui_kit::test]
+fn opening_widths_fit_short_headers_beside_the_sort_control(cx: &mut gpui_kit::TestAppContext) {
+    use crate::model::ResultSet;
+    use crate::theme::tests::hover_shows_truncation_tip;
+    use gpui_kit::AppContext as _;
+    cx.update(gpui_kit::init);
+    let col = |name: &str, data_type: &str, is_pk| ColumnMeta {
+        name: name.into(),
+        data_type: data_type.into(),
+        is_pk,
+        ..Default::default()
+    };
+    // One-character cells: only the header can size these columns.
+    let source = ResultSet {
+        columns: vec![col("id", "bigint", true), col("ok", "boolean", false)],
+        rows: vec![vec![Value::Int(1), Value::Bool(true)].into()],
+    };
+    let (window, _grid) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |_, cx| {
+            cx.new(|cx| super::Grid::new(std::rc::Rc::new(source), cx))
+        })
+        .expect("open test window")
+    });
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    cx.run_until_parked();
+    for selector in [
+        "header-name-0",
+        "header-type-0",
+        "header-name-1",
+        "header-type-1",
+    ] {
+        assert!(
+            !hover_shows_truncation_tip(&mut cx, selector.into()),
+            "{selector}"
+        );
+    }
+}

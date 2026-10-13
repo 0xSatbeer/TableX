@@ -115,6 +115,7 @@ impl Grid {
                     .map(|(c, s)| {
                         h_flex()
                             .id(("col", s))
+                            .group(SharedString::from(format!("col-{s}")))
                             .absolute()
                             .left(self.gutter() + offsets[c] - scroll_x)
                             .w(self.widths[s])
@@ -232,7 +233,11 @@ impl Grid {
                                 };
                                 div()
                                     .id(("sort", s))
-                                    .px(theme::space_4())
+                                    // Fixed width: autofit reserves exactly this much beside the header text.
+                                    .flex_none()
+                                    .w(theme::space_16())
+                                    .flex()
+                                    .justify_center()
                                     .text_size(theme::ui_sm())
                                     // Drag must not start from the sort control.
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
@@ -240,8 +245,12 @@ impl Grid {
                                     })
                                     .map(|d| match avail {
                                         SortAvail::Enabled => d
+                                            // An unsorted column shows its control only while the header is hovered.
                                             .when(glyph == "↕", |d| {
-                                                d.text_color(theme::text_disabled(theme))
+                                                d.text_color(transparent_black()).group_hover(
+                                                    SharedString::from(format!("col-{s}")),
+                                                    |d| d.text_color(theme.muted_foreground),
+                                                )
                                             })
                                             .hover(|d| d.text_color(theme.foreground))
                                             .on_click(cx.listener(move |this, _, _, cx| {

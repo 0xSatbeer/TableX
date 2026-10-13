@@ -43,7 +43,6 @@ impl BottomPanel {
         let line = h_flex()
             .group("log-row")
             .w_full()
-            .when(production, |d| d.bg(theme::production_tint(theme)))
             .h(theme::list_row())
             .px(theme::space_12())
             .gap(theme::space_12())
@@ -99,7 +98,7 @@ impl BottomPanel {
                     .text_right()
                     .font_family(theme.mono_font_family.clone())
                     .text_size(theme::mono())
-                    .child(entry.rows.map(|r| format!("{r} rows")).unwrap_or_default()),
+                    .child(entry.rows.map(|r| r.to_string()).unwrap_or_default()),
             )
             .child(col(11.).child(source))
             .child(

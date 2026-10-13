@@ -44,7 +44,8 @@ impl Render for ConnectionDialog {
             div()
                 .id(("swatch", ix as usize))
                 .debug_selector(move || format!("swatch-{ix}"))
-                .size(theme::space_16())
+                // 20px at a 28px pitch clears the WCAG 2.5.8 24px target spacing.
+                .size(theme::space_16() + theme::space_4())
                 .rounded_full()
                 .bg(theme::connection_color(ix, theme))
                 .when(picked, |d| d.border_2().border_color(theme.foreground))
@@ -97,13 +98,12 @@ impl Render for ConnectionDialog {
                         &errors,
                         cx,
                     ))
-                    .child(field(
-                        "port",
-                        "Port",
-                        Input::new(&self.port).small(),
-                        &errors,
-                        cx,
-                    ))
+                    .child(
+                        // A port is five digits; the host gets the rest of the row.
+                        field("port", "Port", Input::new(&self.port).small(), &errors, cx)
+                            .flex_none()
+                            .w(theme::space_24() * 4.),
+                    )
                     .into_any_element(),
                 h_flex()
                     .items_start()
@@ -157,7 +157,7 @@ impl Render for ConnectionDialog {
             .child(field(
                 "color",
                 "Color",
-                h_flex().gap(theme::space_6()).children(swatches),
+                h_flex().gap(theme::space_8()).children(swatches),
                 &errors,
                 cx,
             ))

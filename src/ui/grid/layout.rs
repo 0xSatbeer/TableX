@@ -66,14 +66,23 @@ impl Grid {
         let top = (-self.scroll.0.borrow().base_handle.offset().y / self.row_h()) as usize;
         let rows = top..(top + AUTOFIT_SAMPLE).min(self.source.row_count());
         let meta = &self.source.columns()[c];
-        let chars = rows
+        let cell_chars = rows
             .map(|r| format_cell(&self.row(r)[c]).0.chars().count())
-            .chain([meta.name.chars().count(), meta.data_type.chars().count()])
             .max()
             .unwrap_or(0);
-        // ponytail: advance estimated as 0.6em (mono); Inter headers can be under-sized, measure with the text system if that shows
+        // shortcut: advance estimated as 0.6em (mono); Inter headers can be under-sized, measure with the text system if that shows
+        let advance = self.mono_px() * 0.6;
+        // The key icon sits before the name; the sort control sits beside both header lines.
+        let key = if meta.is_pk {
+            theme::space_16()
+        } else {
+            Pixels::ZERO
+        };
+        let header = (advance * meta.name.chars().count() as f32 + key)
+            .max(advance * meta.data_type.chars().count() as f32)
+            + theme::space_16();
         self.widths[c] =
-            (self.mono_px() * 0.6 * chars as f32 + theme::space_16() + theme::space_4())
+            ((advance * cell_chars as f32).max(header) + theme::space_16() + theme::space_4())
                 .max(MIN_WIDTH);
     }
 
