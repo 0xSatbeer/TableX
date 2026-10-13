@@ -2,7 +2,7 @@
 //! atomically on its database's session.
 
 use super::*;
-use crate::model::TableDef;
+use crate::model::{ForeignKey, Index, TableDef};
 use crate::ui::table_editor::TableEditor;
 
 fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
@@ -23,7 +23,8 @@ fn type_into(
     cx.simulate_input(text);
 }
 
-/// Modify… on table `t`, its definition answered: `id` (the PK), `a` and `b`.
+/// Modify… on table `t`, its definition answered: `id` (the PK), `a` and `b`; index `t_a_idx`
+/// and FK `t_b_fk`.
 fn open_editor(
     cx: &mut gpui_kit::TestAppContext,
 ) -> (
@@ -33,6 +34,10 @@ fn open_editor(
 ) {
     let (mut cx, editor, fake) = open_unloaded(cx);
     answer_def(&fake, &mut cx);
+    // The dialog slides in on the wall clock; clicks read bounds from a still frame.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
     (cx, editor, fake)
 }
 
@@ -74,8 +79,20 @@ fn answer_def(fake: &crate::db::fake::Fake, cx: &mut gpui_kit::VisualTestContext
     let def = TableDef {
         name: "t".into(),
         columns: vec![id, column("a"), column("b")],
-        indexes: vec![],
-        foreign_keys: vec![],
+        indexes: vec![Index {
+            name: "t_a_idx".into(),
+            columns: vec!["a".into()],
+            unique: false,
+        }],
+        foreign_keys: vec![ForeignKey {
+            name: "t_b_fk".into(),
+            columns: vec!["b".into()],
+            ref_schema: "public".into(),
+            ref_table: "u".into(),
+            ref_columns: vec!["id".into()],
+            on_delete: "NO ACTION".into(),
+            on_update: "NO ACTION".into(),
+        }],
     };
     fake.resolve("table_def app/public/t", Ok(def));
     cx.run_until_parked();
@@ -147,5 +164,79 @@ fn a_name_typed_before_the_definition_loads_is_kept(cx: &mut gpui_kit::TestAppCo
     assert_eq!(
         editor.read_with(&cx, |e, _| e.statements()),
         strings(&[r#"ALTER TABLE "public"."t" RENAME TO "t2""#])
+    );
+}
+
+#[gpui_kit::test]
+fn the_editor_shows_the_indexes_and_fks_from_table_def(cx: &mut gpui_kit::TestAppContext) {
+    let (mut cx, editor, _) = open_editor(cx);
+    let (index, fk) = editor.read_with(&cx, |e, cx| {
+        let value = |i: &gpui_kit::Entity<gpui_kit::component::input::InputState>| {
+            i.read(cx).value().to_string()
+        };
+        let (i, f) = (&e.indexes[0], &e.foreign_keys[0]);
+        (
+            [value(&i.name), value(&i.columns)],
+            [
+                value(&f.name),
+                value(&f.columns),
+                value(&f.ref_schema),
+                value(&f.ref_table),
+                value(&f.ref_columns),
+            ],
+        )
+    });
+    assert_eq!(index, ["t_a_idx", "a"]);
+    assert_eq!(fk, ["t_b_fk", "b", "public", "u", "id"]);
+    for selector in ["index-0", "fk-0", "index-add", "fk-add"] {
+        assert!(cx.debug_bounds(selector).is_some(), "{selector} drawn");
+    }
+}
+
+#[gpui_kit::test]
+fn an_added_unique_index_and_cascading_fk_and_a_removed_index_run_in_alter_table_order(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (mut cx, editor, fake) = open_editor(cx);
+    click(&mut cx, "index-remove-0");
+    click(&mut cx, "index-add");
+    click(&mut cx, "index-unique-0");
+    let (name, columns) = editor.read_with(&cx, |e, _| {
+        (e.indexes[0].name.clone(), e.indexes[0].columns.clone())
+    });
+    type_into(&mut cx, name, "t_ab_key");
+    type_into(&mut cx, columns, "a, b");
+    click(&mut cx, "fk-add");
+    let fk = editor.read_with(&cx, |e, _| {
+        let f = &e.foreign_keys[1];
+        (
+            f.on_delete.clone(),
+            [
+                f.name.clone(),
+                f.columns.clone(),
+                f.ref_table.clone(),
+                f.ref_columns.clone(),
+            ],
+        )
+    });
+    fk.0.update_in(&mut cx, |s, window, cx| {
+        s.set_selected_value(&"CASCADE", window, cx)
+    });
+    for (input, text) in fk.1.into_iter().zip(["t_a_fk", "a", "v", "id"]) {
+        type_into(&mut cx, input, text);
+    }
+    cx.run_until_parked();
+    click(&mut cx, "object-apply");
+    assert_eq!(
+        fake.executed(),
+        [(
+            "app".to_string(),
+            strings(&[
+                r#"DROP INDEX "public"."t_a_idx""#,
+                r#"CREATE UNIQUE INDEX "t_ab_key" ON "public"."t" ("a", "b")"#,
+                r#"ALTER TABLE "public"."t" ADD CONSTRAINT "t_a_fk" FOREIGN KEY ("a") REFERENCES "public"."v" ("id") ON DELETE CASCADE ON UPDATE NO ACTION"#,
+            ]),
+            true
+        )]
     );
 }
