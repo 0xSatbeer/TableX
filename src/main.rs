@@ -1,5 +1,6 @@
 mod assets;
 mod db;
+mod ddl;
 mod mock;
 mod model;
 mod shell;
