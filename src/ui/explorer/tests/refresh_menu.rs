@@ -30,7 +30,7 @@ fn refresh_while_a_refresh_of_the_same_node_is_running_starts_no_second_load(
 }
 
 #[gpui_kit::test]
-fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the_connection_edit_and_delete_and_only_a_postgres_database_schema_or_table_modify_and_only_a_postgres_database_schema_or_table_new(
+fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the_connection_edit_and_delete_and_only_a_postgres_database_schema_or_table_modify_and_new_and_only_a_database_or_schema_open_console(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     let mut t = table("t");
@@ -92,6 +92,11 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
             shown,
             [edit, delete, refresh, modify],
             "{row} (postgres {postgres}): Edit…, Delete, Refresh, Modify…"
+        );
+        assert_eq!(
+            cx.debug_bounds("menu-open-console").is_some(),
+            matches!(row, "app" | "public"),
+            "{row} (postgres {postgres}): Open console"
         );
         // + New sits just above Refresh: selecting it opens its submenu.
         cx.simulate_keystrokes("up up");

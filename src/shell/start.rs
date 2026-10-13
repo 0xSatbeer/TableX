@@ -91,6 +91,43 @@ impl Shell {
             this.focus_content = !ev.preview;
         })
         .detach();
+        cx.subscribe_in(
+            &explorer,
+            window,
+            |this, _, ev: &explorer::OpenConsole, window, cx| {
+                let key: SharedString = match &ev.schema {
+                    Some(schema) => format!("console:{}/{}/{schema}", ev.conn.0, ev.database),
+                    None => format!("console:{}/{}", ev.conn.0, ev.database),
+                }
+                .into();
+                if let Some(ix) = this.tabs.tabs.iter().position(|t| t.key == key) {
+                    this.tabs.activate(ix);
+                } else {
+                    let Some(conn) = this
+                        .workspace
+                        .read(cx)
+                        .connections
+                        .iter()
+                        .find(|c| c.id == ev.conn)
+                    else {
+                        return;
+                    };
+                    let tail = tabs::join_path(&ev.database, ev.schema.as_deref().unwrap_or(""));
+                    let origin = tabs::Origin {
+                        connection: conn.id,
+                        color: conn.color,
+                        production: conn.is_production,
+                        path: tabs::join_path(&conn.name, &tail),
+                        tail,
+                    };
+                    let title = format!("{} — console", ev.database);
+                    this.tabs
+                        .open(console_tab(key, title, Some(origin), "", window, cx));
+                }
+                this.tab_changed(cx);
+            },
+        )
+        .detach();
         let status_bar =
             cx.new(|cx| statusbar::StatusBar::new(workspace.clone(), demo, window, cx));
         cx.subscribe(&status_bar, |this, _, statusbar::Connect(id), cx| {
@@ -115,15 +152,18 @@ impl Shell {
             },
         )
         .detach();
-        let console = tabs::EditorTab {
-            key: "console-1".into(),
-            title: "console-1".into(),
-            origin: console_origin,
-            tooltip: None,
-            preview: false,
-            pinned: false,
-            content: TabContent::Console,
-        };
+        let console = console_tab(
+            "console-1",
+            "console-1",
+            console_origin,
+            if demo {
+                "SELECT id, email\nFROM users\nWHERE created_at > now() - interval '7 days';\n"
+            } else {
+                ""
+            },
+            window,
+            cx,
+        );
         let tabs = match mode {
             Mode::Normal => vec![console],
             Mode::Demo => vec![
@@ -143,11 +183,6 @@ impl Shell {
             overflow_search,
             workspace: workspace.clone(),
             explorer,
-            editor: cx.new(|cx| {
-                EditorState::new(window, cx)
-                    .language("sql")
-                    .default_value(if demo { "SELECT id, email\nFROM users\nWHERE created_at > now() - interval '7 days';\n" } else { "" })
-            }),
             tab_scroll: ScrollHandle::new(),
             tabs: tabs::Tabs::new(tabs),
             layout: LayoutState {
@@ -168,7 +203,9 @@ impl Shell {
             user_themes: Vec::new(),
             user_theme_errors: Vec::new(),
             console_mono: theme::MONO,
-            _appearance: cx.observe_window_appearance(window, |this, window, cx| this.theme.apply(&this.user_themes, window, cx)),
+            _appearance: cx.observe_window_appearance(window, |this, window, cx| {
+                this.theme.apply(&this.user_themes, window, cx)
+            }),
         };
         this.tab_changed(cx);
         this
@@ -189,5 +226,30 @@ pub(super) fn grid_tab(
         preview: false,
         pinned: false,
         content: TabContent::Grid(cx.new(|cx| grid::Grid::new(source, cx))),
+    }
+}
+
+/// A console tab keyed `key` with its own SQL editor holding `text`.
+pub(super) fn console_tab(
+    key: impl Into<SharedString>,
+    title: impl Into<SharedString>,
+    origin: Option<tabs::Origin>,
+    text: &str,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> tabs::EditorTab<TabContent> {
+    let text = text.to_string();
+    tabs::EditorTab {
+        key: key.into(),
+        title: title.into(),
+        origin,
+        tooltip: None,
+        preview: false,
+        pinned: false,
+        content: TabContent::Console(cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("sql")
+                .default_value(text)
+        })),
     }
 }

@@ -17,7 +17,7 @@ use layout::LayoutState;
 
 enum TabContent {
     Grid(Entity<grid::Grid>),
-    Console,
+    Console(Entity<EditorState>),
 }
 
 /// How the app starts. `Demo` (`--demo`) loads the sample workspace, tabs and query log and
@@ -47,7 +47,6 @@ pub(crate) struct Shell {
     )]
     workspace: Entity<model::Workspace>,
     explorer: Entity<explorer::Explorer>,
-    editor: Entity<EditorState>,
     tabs: tabs::Tabs<TabContent>,
     tab_scroll: ScrollHandle,
     layout: LayoutState,

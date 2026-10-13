@@ -175,15 +175,20 @@ pub(super) fn console_on(
     conn: &crate::model::Connection,
     key: &str,
     pinned: bool,
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::Context<crate::shell::Shell>,
 ) -> crate::shell::tabs::EditorTab<crate::shell::TabContent> {
+    let key = key.to_string();
     crate::shell::tabs::EditorTab {
-        key: key.to_string().into(),
-        title: key.to_string().into(),
-        origin: Some(crate::shell::tabs::Origin::of(conn)),
-        tooltip: None,
-        preview: false,
         pinned,
-        content: crate::shell::TabContent::Console,
+        ..crate::shell::start::console_tab(
+            key.clone(),
+            key,
+            Some(crate::shell::tabs::Origin::of(conn)),
+            "",
+            window,
+            cx,
+        )
     }
 }
 

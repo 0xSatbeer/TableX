@@ -142,7 +142,7 @@ fn connect_or_retry_in_the_status_bar_connects_the_active_tabs_connection_as_the
         let (window, shell) = open_plain_with(cx, fake.clone());
         let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
         let workspace = shell.read_with(&cx, |this, _| this.workspace.clone());
-        shell.update(&mut cx, |this, cx| {
+        shell.update_in(&mut cx, |this, window, cx| {
             let conn = this
                 .workspace
                 .read(cx)
@@ -152,7 +152,8 @@ fn connect_or_retry_in_the_status_bar_connects_the_active_tabs_connection_as_the
                 .unwrap()
                 .clone();
             assert_eq!(conn.status, status, "{name}");
-            this.tabs.open(console_on(&conn, "console-x", false));
+            this.tabs
+                .open(console_on(&conn, "console-x", false, window, cx));
             this.tab_changed(cx);
         });
         cx.run_until_parked();

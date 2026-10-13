@@ -11,6 +11,7 @@ mod edit_sessions;
 mod focus;
 mod layout;
 mod maximize;
+mod open_console;
 mod overflow;
 mod races;
 mod rename;
@@ -64,17 +65,16 @@ fn open_with_connection_tabs(
     vcx.run_until_parked();
     vcx.simulate_keystrokes("enter");
     vcx.run_until_parked();
-    shell.update(&mut vcx, |this, cx| {
+    shell.update_in(&mut vcx, |this, window, cx| {
         let local = this.workspace.read(cx).connections[2].clone();
-        this.tabs.open(super::tabs::EditorTab {
-            key: "console-local".into(),
-            title: "console-local".into(),
-            origin: Some(super::tabs::Origin::of(&local)),
-            tooltip: None,
-            preview: false,
-            pinned: false,
-            content: super::TabContent::Console,
-        });
+        this.tabs.open(super::start::console_tab(
+            "console-local",
+            "console-local",
+            Some(super::tabs::Origin::of(&local)),
+            "",
+            window,
+            cx,
+        ));
         this.tab_changed(cx);
     });
     vcx.run_until_parked();
@@ -152,4 +152,18 @@ fn open_started(
     });
     gpui_kit::VisualTestContext::from_window(window, cx).run_until_parked();
     (window, shell)
+}
+
+/// The editor of the `console-1` tab the Shell starts with.
+fn console_1(this: &super::Shell) -> gpui_kit::Entity<gpui_kit::component::input::EditorState> {
+    match this
+        .tabs
+        .tabs
+        .iter()
+        .find(|t| t.key == "console-1")
+        .map(|t| &t.content)
+    {
+        Some(super::TabContent::Console(editor)) => editor.clone(),
+        _ => panic!("the console-1 tab"),
+    }
 }

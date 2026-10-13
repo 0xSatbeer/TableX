@@ -79,6 +79,10 @@ impl Explorer {
                 ) && ws.connections[node.conn].kind() == DbKind::Postgres
             })
             .collect();
+        let consoles: Vec<bool> = range
+            .clone()
+            .map(|ix| matches!(self.nodes[ix].kind, NodeKind::Database | NodeKind::Schema))
+            .collect();
         range
             .map(|ix| {
                 let node = &self.nodes[ix];
@@ -235,10 +239,15 @@ impl Explorer {
                         d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
-            .zip(menus.into_iter().zip(news))
-            .map(|(row, (menu, new))| match menu {
+            .zip(menus.into_iter().zip(news).zip(consoles))
+            .map(|(row, ((menu, new), console))| match menu {
                 Some(kind) => row
                     .context_menu(move |menu, window, cx| {
+                        let menu = if console {
+                            menu.menu_element(Box::new(crate::OpenConsole), |_, _| div().debug_selector(|| "menu-open-console".into()).child("Open console"))
+                        } else {
+                            menu
+                        };
                         let menu = match kind {
                             Menu::Connection => menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…")).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
                                 div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")

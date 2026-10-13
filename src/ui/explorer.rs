@@ -135,6 +135,15 @@ pub struct OpenObject {
 
 impl EventEmitter<OpenObject> for Explorer {}
 
+/// Open console on a database or schema row: a console tab bound to that place.
+pub struct OpenConsole {
+    pub conn: ConnectionId,
+    pub database: String,
+    pub schema: Option<String>,
+}
+
+impl EventEmitter<OpenConsole> for Explorer {}
+
 /// Emitted after connection `id` was deleted, so the Shell can close its tabs.
 pub struct ConnectionDeleted {
     pub id: ConnectionId,

@@ -42,7 +42,8 @@ actions!(
         NewTable,
         NewDatabase,
         NewRole,
-        NewUser
+        NewUser,
+        OpenConsole
     ]
 );
 

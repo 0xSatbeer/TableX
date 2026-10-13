@@ -101,6 +101,23 @@ impl Explorer {
         }
     }
 
+    /// Open console on the selected database or schema row.
+    pub(super) fn open_console(&mut self, cx: &mut Context<Self>) {
+        let Some(node) = self.nodes.get(self.selected) else {
+            return;
+        };
+        if !matches!(node.kind, NodeKind::Database | NodeKind::Schema) {
+            return;
+        }
+        let mut parts = segments(&node.key).into_iter().skip(1);
+        let database = parts.next().expect("a database row's key names it");
+        cx.emit(OpenConsole {
+            conn: self.workspace.read(cx).connections[node.conn].id,
+            database,
+            schema: parts.next(),
+        });
+    }
+
     /// Whether `node` is a connection whose connect failed.
     pub(super) fn failed(&self, node: &FlatNode, cx: &App) -> bool {
         matches!(node.kind, NodeKind::Connection(_))

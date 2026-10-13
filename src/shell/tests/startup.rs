@@ -77,7 +77,7 @@ fn a_normal_start_shows_no_connections_one_empty_console_and_empty_logs(
             .map(|t| {
                 (
                     t.title.to_string(),
-                    matches!(t.content, crate::shell::TabContent::Console),
+                    matches!(t.content, crate::shell::TabContent::Console(_)),
                     t.origin.is_none(),
                 )
             })
@@ -89,7 +89,7 @@ fn a_normal_start_shows_no_connections_one_empty_console_and_empty_logs(
         "one console tab, on no connection"
     );
     assert_eq!(
-        shell.read_with(&cx, |this, cx| this.editor.read(cx).value()),
+        shell.read_with(&cx, |this, cx| super::console_1(this).read(cx).value()),
         "",
         "the console is empty"
     );
@@ -254,7 +254,7 @@ fn opening_a_table_shows_a_placeholder_in_normal_mode_and_mock_rows_in_demo_mode
             let tab = this.tabs.active().expect("a tab opened");
             let rows = match &tab.content {
                 crate::shell::TabContent::Grid(grid) => grid.read(cx).row_count(),
-                crate::shell::TabContent::Console => panic!("{mode:?}: a grid tab opens"),
+                crate::shell::TabContent::Console(_) => panic!("{mode:?}: a grid tab opens"),
             };
             (tab.title.to_string(), rows)
         });

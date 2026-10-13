@@ -66,7 +66,7 @@ impl Render for Shell {
                     .into_any_element()
             }
             Some(TabContent::Grid(grid)) => grid.clone().into_any_element(),
-            Some(TabContent::Console) => {
+            Some(TabContent::Console(editor)) => {
                 let production = self.tabs.active().and_then(|t| t.origin.as_ref()).is_some_and(|o| o.production);
                 // ponytail: a rule, not the full background tint QX-012 brings with the console toolbar
                 h_flex()
@@ -79,7 +79,7 @@ impl Render for Shell {
                             .on_action(cx.listener(|this, _: &theme::ZoomIn, _, cx| this.zoom_console(theme::Zoom::In, cx)))
                             .on_action(cx.listener(|this, _: &theme::ZoomOut, _, cx| this.zoom_console(theme::Zoom::Out, cx)))
                             .on_action(cx.listener(|this, _: &theme::ZoomReset, _, cx| this.zoom_console(theme::Zoom::Reset, cx)))
-                            .child(Editor::new(&self.editor).bordered(false).h_full().text_size(self.console_text_size())),
+                            .child(Editor::new(editor).bordered(false).h_full().text_size(self.console_text_size())),
                     )
                     .into_any_element()
             }
@@ -142,7 +142,7 @@ impl Render for Shell {
                     let maximized = self.layout.panel_maximized;
                     let console = matches!(
                         self.tabs.active().map(|t| &t.content),
-                        Some(TabContent::Console)
+                        Some(TabContent::Console(_))
                     );
                     self.bottom_panel.update(cx, |panel, _| {
                         (panel.maximized, panel.console) = (maximized, console)

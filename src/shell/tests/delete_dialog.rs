@@ -135,14 +135,15 @@ fn confirming_the_delete_of_b_removes_it_from_the_tree_and_the_panel_and_closes_
         )
     });
     // Two tabs from staging-pg, one pinned, and one of them closed into the reopen history.
-    shell.update(&mut cx, |this, cx| {
+    shell.update_in(&mut cx, |this, window, cx| {
         let staging = this.workspace.read(cx).connections[1].clone();
         for (key, pinned) in [
             ("staging-1", false),
             ("staging-2", true),
             ("staging-3", false),
         ] {
-            this.tabs.open(console_on(&staging, key, pinned));
+            this.tabs
+                .open(console_on(&staging, key, pinned, window, cx));
         }
         let closed = this
             .tabs

@@ -23,7 +23,7 @@ impl Shell {
         let theme = cx.theme();
         let icon = match t.content {
             TabContent::Grid(_) => Icon::empty().path(assets::object_icon("table", false)),
-            TabContent::Console => Icon::new(IconName::SquareTerminal),
+            TabContent::Console(_) => Icon::new(IconName::SquareTerminal),
         };
         let active = ix == self.tabs.active;
         let group: SharedString = format!("tab-{ix}").into();
