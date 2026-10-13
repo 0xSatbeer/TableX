@@ -12,7 +12,7 @@ gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql"] }
 # Database IO (src/db): one tokio runtime runs every session (docs/adr/0001).
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tokio-postgres = "0.7"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled", "column_decltype"] }
 futures = "0.3"
 # Raw cell bytes sent back for the server's text form; already in the tree through tokio-postgres.
 bytes = "1"

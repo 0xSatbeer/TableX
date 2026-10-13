@@ -285,3 +285,173 @@ fn ddl_and_metadata_calls_are_not_supported() {
         "nothing ran"
     );
 }
+
+fn session_on(dir: &Path, sql: &str) -> Session {
+    block_on(Sqlite.connect(&params(&file(dir, "q.db", sql)))).unwrap()
+}
+
+const NUMBERS: &str = "CREATE TABLE n (i INTEGER PRIMARY KEY, label TEXT); \
+     WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 1234) \
+     INSERT INTO n SELECT x, 'n' || x FROM c;";
+
+#[test]
+fn paging_a_result_gives_full_pages_then_the_rest_then_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), NUMBERS);
+    let opened = block_on(Sqlite.open(&session, "SELECT i, label FROM n ORDER BY i".into(), true));
+    let meta = |name: &str, data_type: &str| ColumnMeta {
+        name: name.into(),
+        data_type: data_type.into(),
+        ..ColumnMeta::default()
+    };
+    assert_eq!(
+        opened,
+        Ok(Opened::Rows(vec![
+            meta("i", "INTEGER"),
+            meta("label", "TEXT")
+        ]))
+    );
+    let pages: Vec<_> = (0..4)
+        .map(|_| block_on(Sqlite.fetch(&session, 500)).unwrap())
+        .collect();
+    let sizes: Vec<_> = pages.iter().map(Vec::len).collect();
+    assert_eq!(sizes, [500, 500, 234, 0]);
+    assert_eq!(
+        pages[2].last().map(|row| row.to_vec()),
+        Some(vec![Value::Int(1234), Value::Text("n1234".into())])
+    );
+}
+
+#[test]
+fn cells_decode_by_their_storage_class() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), "");
+    let got = block_on(Sqlite.query(&session, "SELECT 7, 1.5, 'hi', x'00ff', NULL".into()));
+    let got = got.unwrap();
+    assert_eq!(
+        got.rows,
+        vec![
+            vec![
+                Value::Int(7),
+                Value::Float(1.5),
+                Value::Text("hi".into()),
+                Value::Bytes([0u8, 255].into()),
+                Value::Null,
+            ]
+            .into_boxed_slice()
+        ]
+    );
+    assert!(got.columns.iter().all(|c| c.data_type.is_empty()));
+}
+
+#[test]
+fn statements_without_rows_report_rows_affected() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), "CREATE TABLE t (a)");
+    // (sql, affected)
+    let cases = [
+        ("INSERT INTO t VALUES (1), (2), (3)", 3),
+        ("UPDATE t SET a = a + 1 WHERE a > 1", 2),
+        ("CREATE TABLE u (b)", 0),
+        ("DELETE FROM t", 3),
+    ];
+    for (sql, want) in cases {
+        assert_eq!(
+            block_on(Sqlite.open(&session, sql.into(), true)),
+            Ok(Opened::Affected(want)),
+            "{sql}"
+        );
+    }
+}
+
+#[test]
+fn a_rejected_statement_is_a_server_error_without_position() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), "CREATE TABLE t (a)");
+    for sql in [
+        "SELEC 1",
+        "SELECT nope FROM t",
+        "INSERT INTO missing VALUES (1)",
+    ] {
+        let err = block_on(Sqlite.open(&session, sql.into(), true)).unwrap_err();
+        assert_eq!(
+            (err.kind, err.position),
+            (QueryErrorKind::Server, None),
+            "{sql}"
+        );
+        assert!(!err.message.is_empty(), "{sql}");
+        let err = block_on(Sqlite.query(&session, sql.into())).unwrap_err();
+        assert_eq!(err.kind, QueryErrorKind::Server, "{sql}");
+    }
+}
+
+#[test]
+fn cancel_stops_a_running_statement() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), "");
+    let endless =
+        "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
+    let running = Sqlite.query(&session, endless.into());
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    block_on(Sqlite.cancel(&session)).unwrap();
+    assert_eq!(
+        block_on(running).unwrap_err().kind,
+        QueryErrorKind::Cancelled
+    );
+    assert_eq!(
+        block_on(Sqlite.query(&session, "SELECT 1".into())).map(|r| r.rows.len()),
+        Ok(1),
+        "the session still works"
+    );
+}
+
+#[test]
+fn open_closes_the_result_already_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), NUMBERS);
+    block_on(Sqlite.open(&session, "SELECT i FROM n".into(), true)).unwrap();
+    assert_eq!(
+        block_on(Sqlite.fetch(&session, 10)).map(|r| r.len()),
+        Ok(10)
+    );
+    block_on(Sqlite.open(&session, "SELECT 'second'".into(), true)).unwrap();
+    assert_eq!(
+        block_on(Sqlite.fetch(&session, 10)),
+        Ok(vec![vec![Value::Text("second".into())].into_boxed_slice()])
+    );
+    assert_eq!(block_on(Sqlite.fetch(&session, 10)), Ok(vec![]));
+}
+
+#[test]
+fn close_ends_the_open_result_and_other_calls_run_beside_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), NUMBERS);
+    assert_eq!(block_on(Sqlite.close(&session)), Ok(()), "nothing open");
+    block_on(Sqlite.open(&session, "SELECT i FROM n".into(), true)).unwrap();
+    block_on(Sqlite.fetch(&session, 1)).unwrap();
+    assert_eq!(
+        block_on(Sqlite.objects(&session, "main")).map(|o| o.len()),
+        Ok(1)
+    );
+    let all = block_on(Sqlite.query(&session, "SELECT i FROM n".into())).unwrap();
+    assert_eq!(all.rows.len(), 1234);
+    assert_eq!(
+        block_on(Sqlite.fetch(&session, 1)).map(|r| r.len()),
+        Ok(1),
+        "still open"
+    );
+    assert_eq!(block_on(Sqlite.close(&session)), Ok(()));
+    assert_eq!(block_on(Sqlite.fetch(&session, 1)), Ok(vec![]));
+}
+
+#[test]
+fn query_calls_on_a_closed_session_are_disconnected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file(dir.path(), "q.db", "CREATE TABLE t (a)");
+    let session = block_on(Sqlite.connect(&params(&path))).unwrap();
+    break_reads_of(&path);
+    block_on(Sqlite.objects(&session, "main")).unwrap_err();
+    assert!(session.is_closed());
+    let err = block_on(Sqlite.query(&session, "SELECT * FROM t".into())).unwrap_err();
+    assert_eq!(err.kind, QueryErrorKind::Disconnected);
+}
