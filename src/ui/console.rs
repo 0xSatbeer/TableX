@@ -5,24 +5,26 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::input::{Diagnostic, DiagnosticSeverity};
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Editor, EditorState},
+    input::{Editor, EditorState, RopeExt as _},
     v_flex,
 };
 use gpui_kit::*;
 
 use crate::db::{Driver, Opened, Session};
 use crate::model::{
-    ColumnMeta, ConnectionId, ConnectionParams, QueryError, QueryLogEntry, QuerySource,
-    QueryStatus, ResultSet, Row, Workspace,
+    ColumnMeta, ConnectionId, ConnectionParams, QueryError, QueryErrorKind, QueryLogEntry,
+    QuerySource, QueryStatus, ResultSet, Row, Workspace,
 };
 use crate::ui::{explorer, grid};
 use crate::{sql, theme};
 
-actions!(console, [RunStatement, RunScript, Rerun]);
+actions!(console, [RunStatement, RunScript, Rerun, Cancel]);
 
 const CONTEXT: &str = "Console";
 /// Rows a result page shows and each fetch reads.
@@ -39,6 +41,7 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-enter", RunStatement, editor),
         KeyBinding::new("ctrl-shift-enter", RunScript, editor),
+        KeyBinding::new("escape", Cancel, editor),
         KeyBinding::new("f5", Rerun, Some(CONTEXT)),
     ]);
 }
@@ -63,7 +66,8 @@ pub struct Console {
     target: Target,
     /// Opened on the first run and kept, so each console has its own.
     session: Option<Session>,
-    last: Vec<String>,
+    /// The last run's statements with their byte offsets in the editor text.
+    last: Vec<(usize, String)>,
     /// The last run's row-returning statements, in order.
     pub results: Vec<Paged>,
     pub active_result: usize,
@@ -181,6 +185,7 @@ impl EventEmitter<ConsoleEvent> for Console {}
 
 struct Step {
     sql: String,
+    offset: usize,
     at: SystemTime,
     duration: Duration,
     result: Result<Ran, QueryError>,
@@ -220,11 +225,15 @@ impl Console {
         let selected = editor.selected_range();
         let statements = if selected.is_empty() {
             sql::at_cursor(&text, editor.cursor())
-                .map(|r| text[r].to_string())
+                .map(|r| (r.start, text[r].to_string()))
                 .into_iter()
                 .collect()
         } else {
+            let start = selected.start;
             statements(&text[selected])
+                .into_iter()
+                .map(|(offset, sql)| (start + offset, sql))
+                .collect()
         };
         self.run(statements, cx);
     }
@@ -238,13 +247,29 @@ impl Console {
         self.run_again(cx);
     }
 
+    /// Stops the run: its running statement fails as cancelled, which ends the script.
+    fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.running {
+            cx.propagate();
+            return;
+        }
+        let Some(session) = self.session.clone().filter(|s| !s.is_closed()) else {
+            self._run = None;
+            self.finish(Some("Cancelled".into()), cx);
+            return;
+        };
+        cx.background_spawn(self.target.driver.cancel(&session))
+            .detach();
+    }
+
     /// Runs `statements` one after another, stopping at the first error. Replaces the last run's output.
-    fn run(&mut self, statements: Vec<String>, cx: &mut Context<Self>) {
+    fn run(&mut self, statements: Vec<(usize, String)>, cx: &mut Context<Self>) {
         if statements.is_empty() {
             return;
         }
         self.last = statements.clone();
         (self.results, self.active_result, self.messages) = (Vec::new(), 0, Vec::new());
+        self.mark_error(None, "", cx);
         self._fetch = None;
         cx.notify();
         let Some(params) = self.params(cx) else {
@@ -268,12 +293,13 @@ impl Console {
             };
             this.update(cx, |this, _| this.session = Some(session.clone()))
                 .ok();
-            for sql in statements {
+            for (offset, sql) in statements {
                 let (at, started) = (SystemTime::now(), Instant::now());
                 let result = run_one(&*driver, &session, sql.clone()).await;
                 let duration = started.elapsed();
                 let step = Step {
                     sql,
+                    offset,
                     at,
                     duration,
                     result,
@@ -313,10 +339,7 @@ impl Console {
                 self.messages.push(format!("{n} rows affected"));
                 (Some(n), QueryStatus::Ok)
             }
-            Err(error) => {
-                self.messages.push(error.message.clone());
-                (None, QueryStatus::Err(error.message))
-            }
+            Err(error) => (None, self.failed(error, step.offset, step.duration, cx)),
         };
         let ok = rows.is_some();
         cx.emit(ConsoleEvent::Logged(QueryLogEntry {
@@ -331,6 +354,59 @@ impl Console {
         }));
         cx.notify();
         ok
+    }
+
+    /// Reports a failed statement starting at `offset` in the editor text; the log status.
+    fn failed(
+        &mut self,
+        error: QueryError,
+        offset: usize,
+        duration: Duration,
+        cx: &mut Context<Self>,
+    ) -> QueryStatus {
+        match error.kind {
+            QueryErrorKind::Cancelled => {
+                let ms = duration.as_millis();
+                self.messages.push(format!("Cancelled after {ms} ms"));
+                return QueryStatus::Cancelled;
+            }
+            QueryErrorKind::Disconnected => {
+                self.session = None;
+                self.messages
+                    .push("Connection lost · Run again to reconnect".into());
+            }
+            QueryErrorKind::Server => {
+                let at = error.position.map(|p| offset + p);
+                let message = self.mark_error(at, &error.message, cx);
+                self.messages.push(message);
+            }
+        }
+        QueryStatus::Err(error.message)
+    }
+
+    /// Replaces the editor's diagnostics with `message` over the token at byte `at`, if given.
+    /// Returns the message to show, with the line and column when `at` is in the text.
+    fn mark_error(&self, at: Option<usize>, message: &str, cx: &mut Context<Self>) -> String {
+        self.editor.update(cx, |editor, cx| {
+            let text = editor.text().clone();
+            let diagnostics = editor
+                .diagnostics_mut()
+                .expect("the console is a code editor");
+            diagnostics.clear();
+            cx.notify();
+            let full = text.to_string();
+            let Some(at) = at.filter(|&at| full.get(..at).is_some()) else {
+                return message.to_string();
+            };
+            let (line, col) = sql::line_col(&full, at);
+            let token = text.word_range(at).unwrap_or(at..(at + 1).min(text.len()));
+            let range = text.offset_to_position(token.start)..text.offset_to_position(token.end);
+            diagnostics.push(
+                Diagnostic::new(range, message.to_string())
+                    .with_severity(DiagnosticSeverity::Error),
+            );
+            format!("Error at line {line}, col {col}: {message}")
+        })
     }
 
     fn finish(&mut self, error: Option<String>, cx: &mut Context<Self>) {
@@ -411,11 +487,11 @@ impl Console {
     }
 }
 
-/// Every statement of `text`.
-fn statements(text: &str) -> Vec<String> {
+/// Every statement of `text`, with its byte offset.
+fn statements(text: &str) -> Vec<(usize, String)> {
     sql::split(text)
         .into_iter()
-        .map(|r| text[r].to_string())
+        .map(|r| (r.start, text[r].to_string()))
         .collect()
 }
 
@@ -432,28 +508,34 @@ async fn run_one(driver: &dyn Driver, session: &Session, sql: String) -> Result<
 
 impl Render for Console {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let run =
+            match self.running {
+                true => Button::new("console-cancel")
+                    .icon(Lucide::Square)
+                    .label("Cancel")
+                    .tooltip_with_action("Cancel", &Cancel, None)
+                    .on_click(cx.listener(|this, _, window, cx| this.cancel(&Cancel, window, cx))),
+                false => Button::new("console-run")
+                    .label("Run")
+                    .tooltip_with_action("Run statement", &RunStatement, None)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.run_statement(&RunStatement, window, cx)
+                    })),
+            };
         let toolbar = h_flex()
             .flex_none()
             .h(theme::tab())
             .px(theme::space_8())
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(
-                Button::new("console-run")
-                    .ghost()
-                    .xsmall()
-                    .label("Run")
-                    .tooltip_with_action("Run statement", &RunStatement, None)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.run_statement(&RunStatement, window, cx)
-                    })),
-            );
+            .child(run.ghost().xsmall());
         v_flex()
             .size_full()
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::run_statement))
             .on_action(cx.listener(Self::run_script))
             .on_action(cx.listener(Self::rerun))
+            .on_action(cx.listener(Self::cancel))
             .child(toolbar)
             .child(
                 div().flex_1().min_h_0().child(
