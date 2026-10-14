@@ -120,16 +120,12 @@ impl<C> Tabs<C> {
         self.touch();
     }
 
-    /// Closes every unpinned tab whose index `drop` accepts, keeping the active one active if it
-    /// stays. Pinned tabs survive bulk closes, as in VS Code; they close one at a time.
-    pub fn close_where(&mut self, drop: impl Fn(usize) -> bool) {
-        let doomed: Vec<usize> = (0..self.tabs.len())
-            .rev()
+    /// The unpinned tabs whose index `drop` accepts, in order: what a bulk close closes. Pinned
+    /// tabs survive bulk closes, as in VS Code; they close one at a time.
+    pub fn closable(&self, drop: impl Fn(usize) -> bool) -> Vec<usize> {
+        (0..self.tabs.len())
             .filter(|&ix| drop(ix) && !self.tabs[ix].pinned)
-            .collect();
-        for ix in doomed {
-            self.close(ix);
-        }
+            .collect()
     }
 
     /// Ctrl+Tab while Ctrl is held: previews the next tab in MRU order.

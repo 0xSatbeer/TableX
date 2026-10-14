@@ -1,12 +1,12 @@
 use super::*;
 
 #[gpui_kit::test]
-fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_and_auto_commit(
+fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_and_hint(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     use crate::model::ConnectionStatus::{self, *};
     let pg_hint = "password authentication failed for user \"app\"\nCheck that db.acme.internal:5433 is reachable (VPN, firewall), then retry.";
-    // (connection, status, solid dot, dot tooltip, text, in danger colour, button, hover hint, AUTO-COMMIT)
+    // (connection, status, solid dot, dot tooltip, text, in danger colour, button, hover hint)
     let cases: [(
         usize,
         ConnectionStatus,
@@ -16,19 +16,8 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
         bool,
         Option<&str>,
         Option<&str>,
-        bool,
     ); 9] = [
-        (
-            0,
-            Connected,
-            true,
-            "Connected",
-            None,
-            false,
-            None,
-            None,
-            true,
-        ),
+        (0, Connected, true, "Connected", None, false, None, None),
         (
             0,
             Connecting,
@@ -38,7 +27,6 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
             false,
             None,
             None,
-            false,
         ),
         (
             0,
@@ -49,7 +37,6 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
             false,
             Some("Connect"),
             None,
-            false,
         ),
         (
             0,
@@ -60,7 +47,6 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
             true,
             Some("Retry"),
             Some(pg_hint),
-            false,
         ),
         (
             1,
@@ -71,19 +57,8 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
             true,
             Some("Retry"),
             Some("No file at /x/local.db\nCheck that the file exists and is readable."),
-            false,
         ),
-        (
-            1,
-            Connected,
-            true,
-            "Connected",
-            None,
-            false,
-            None,
-            None,
-            true,
-        ),
+        (1, Connected, true, "Connected", None, false, None, None),
         (
             1,
             Connecting,
@@ -93,7 +68,6 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
             false,
             None,
             None,
-            false,
         ),
         (
             1,
@@ -104,7 +78,6 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
             false,
             Some("Connect"),
             None,
-            false,
         ),
         // Our own timeout reason leads the hint the same way.
         (
@@ -118,10 +91,9 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
             Some(
                 "timeout expired after 10 s\nCheck that db.acme.internal:5433 is reachable (VPN, firewall), then retry.",
             ),
-            false,
         ),
     ];
-    for (ix, status, solid, tip, text, danger, button, hint, auto_commit) in cases {
+    for (ix, status, solid, tip, text, danger, button, hint) in cases {
         let (mut cx, bar, workspace) = open_bar(cx, 1200., false);
         let case = format!("{ix} {status:?}");
         show(&mut cx, &bar, &workspace, ix, status);
@@ -152,11 +124,6 @@ fn the_status_bar_shows_the_active_connections_status_by_dot_text_button_hint_an
                 "{case}: button {known:?}"
             );
         }
-        assert_eq!(
-            drawn(&mut cx, "auto-commit".into()),
-            auto_commit,
-            "{case}: AUTO-COMMIT"
-        );
         let dot = if solid {
             "status-dot-solid"
         } else {

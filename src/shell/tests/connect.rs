@@ -198,8 +198,8 @@ fn connect_or_retry_in_the_status_bar_connects_the_active_tabs_connection_as_the
             "{name}"
         );
         assert!(
-            cx.debug_bounds("auto-commit").is_some(),
-            "{name}: AUTO-COMMIT once connected"
+            cx.debug_bounds("tx-mode:AUTO-COMMIT").is_some(),
+            "{name}: the console's mode"
         );
     }
 }

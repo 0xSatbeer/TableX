@@ -8,12 +8,13 @@ use std::time::{Duration, Instant, SystemTime};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::{Diagnostic, DiagnosticSeverity};
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Editor, EditorState, RopeExt as _},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::db::{Driver, Opened, Session};
@@ -75,6 +76,9 @@ pub struct Console {
     /// Set by the shell: the editor's zoomed mono size.
     pub text_size: Pixels,
     running: bool,
+    /// Manual mode: runs open a transaction that only Commit or Rollback ends.
+    manual: bool,
+    pub in_transaction: bool,
     _run: Option<Task<()>>,
     _fetch: Option<Task<()>>,
 }
@@ -213,9 +217,91 @@ impl Console {
             messages: Vec::new(),
             text_size: theme::scaled(theme::MONO),
             running: false,
+            manual: false,
+            in_transaction: false,
             _run: None,
             _fetch: None,
         }
+    }
+
+    /// What the status bar shows for this console.
+    pub fn mode(&self) -> &'static str {
+        match (self.manual, self.in_transaction) {
+            (_, true) => "TX",
+            (true, false) => "MANUAL",
+            (false, false) => "AUTO-COMMIT",
+        }
+    }
+
+    /// Switches mode; leaving manual with a transaction open asks whether to commit or roll it back.
+    pub fn set_manual(&mut self, manual: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if manual || !self.in_transaction {
+            self.manual = manual;
+            cx.notify();
+            return;
+        }
+        let console = cx.entity();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let end = |id: &'static str, label: &'static str, sql: &'static str| {
+                let console = console.clone();
+                Button::new(id)
+                    .debug_selector(move || id.into())
+                    .small()
+                    .label(label)
+                    .on_click(move |_, window, cx| {
+                        console.update(cx, |c, cx| {
+                            c.manual = false;
+                            c.end_transaction(sql, cx);
+                        });
+                        window.close_dialog(cx);
+                    })
+            };
+            dialog
+                .title(
+                    div()
+                        .debug_selector(|| "tx-switch-title".into())
+                        .child("Commit or roll back the open transaction?"),
+                )
+                .footer(
+                    h_flex()
+                        .gap(theme::space_8())
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("tx-switch-cancel")
+                                .debug_selector(|| "tx-switch-cancel".into())
+                                .small()
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(end("tx-switch-rollback", "Roll back", "ROLLBACK"))
+                        .child(end("tx-switch-commit", "Commit", "COMMIT").primary()),
+                )
+        });
+    }
+
+    /// Ends the open transaction with `sql`, `COMMIT` or `ROLLBACK`.
+    pub fn end_transaction(&mut self, sql: &'static str, cx: &mut Context<Self>) {
+        let Some(session) = self
+            .session
+            .clone()
+            .filter(|_| self.in_transaction && !self.running)
+        else {
+            return;
+        };
+        self.running = true;
+        cx.notify();
+        let open = self.target.driver.open(&session, sql.into(), false);
+        self._run = Some(cx.spawn(async move |this, cx| {
+            let result = open.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(_) => this.in_transaction = false,
+                    Err(error) => _ = this.failed(error, 0, Duration::ZERO, cx),
+                }
+                this.finish(None, cx);
+            })
+            .ok();
+        }));
     }
 
     /// The selection's statements, else the one under the cursor.
@@ -277,8 +363,14 @@ impl Console {
             return;
         };
         self.running = true;
-        let driver = self.target.driver.clone();
         let session = self.session.clone().filter(|s| !s.is_closed());
+        // A dropped session took its transaction with it; a new one must BEGIN again.
+        if session.is_none() && std::mem::take(&mut self.in_transaction) {
+            self.messages
+                .push("Connection lost · the open transaction was rolled back".into());
+        }
+        let (begin, autocommit) = (self.manual && !self.in_transaction, !self.manual);
+        let driver = self.target.driver.clone();
         self._run = Some(cx.spawn(async move |this, cx| {
             let session = match session {
                 Some(session) => session,
@@ -293,9 +385,18 @@ impl Console {
             };
             this.update(cx, |this, _| this.session = Some(session.clone()))
                 .ok();
+            if begin {
+                let began = driver.open(&session, "BEGIN".into(), false).await;
+                if !this
+                    .update(cx, |this, cx| this.began(began, cx))
+                    .unwrap_or(false)
+                {
+                    return;
+                }
+            }
             for (offset, sql) in statements {
                 let (at, started) = (SystemTime::now(), Instant::now());
-                let result = run_one(&*driver, &session, sql.clone()).await;
+                let result = run_one(&*driver, &session, sql.clone(), autocommit).await;
                 let duration = started.elapsed();
                 let step = Step {
                     sql,
@@ -318,6 +419,18 @@ impl Console {
         let workspace = self.target.workspace.read(cx);
         let conn = workspace.connections.iter().find(|c| c.id == id)?;
         Some(explorer::on_database(&conn.params, &self.target.database))
+    }
+
+    /// Marks the transaction open, or reports why BEGIN failed and ends the run; whether it began.
+    fn began(&mut self, began: Result<Opened, QueryError>, cx: &mut Context<Self>) -> bool {
+        if let Err(error) = began {
+            self.failed(error, 0, Duration::ZERO, cx);
+            self.finish(None, cx);
+            return false;
+        }
+        self.in_transaction = true;
+        cx.notify();
+        true
     }
 
     /// Adds `step`'s result tab or message and logs it; false when it failed.
@@ -371,7 +484,7 @@ impl Console {
                 return QueryStatus::Cancelled;
             }
             QueryErrorKind::Disconnected => {
-                self.session = None;
+                (self.session, self.in_transaction) = (None, false);
                 self.messages
                     .push("Connection lost · Run again to reconnect".into());
             }
@@ -474,16 +587,27 @@ impl Console {
         self.run(self.last.clone(), cx);
     }
 
-    /// Closes the session's open result, as when the console tab closes; a later run reconnects.
+    /// Rolls back an open transaction and closes the session's open result, as when the console
+    /// tab closes; a later run reconnects.
     pub fn close_session(&mut self, cx: &mut Context<Self>) {
         (self._run, self._fetch, self.running) = (None, None, false);
         for result in &mut self.results {
             (result.open, result.fetching) = (false, false);
         }
-        if let Some(session) = self.session.take() {
-            cx.background_spawn(self.target.driver.close(&session))
-                .detach();
-        }
+        let in_transaction = std::mem::take(&mut self.in_transaction);
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        let driver = &self.target.driver;
+        let rollback = in_transaction.then(|| driver.open(&session, "ROLLBACK".into(), false));
+        let close = driver.close(&session);
+        cx.background_spawn(async move {
+            if let Some(rollback) = rollback {
+                rollback.await.ok();
+            }
+            close.await.ok();
+        })
+        .detach();
     }
 }
 
@@ -496,13 +620,46 @@ fn statements(text: &str) -> Vec<(usize, String)> {
 }
 
 /// Opens `sql`; a row-returning statement's first `PAGE` rows are read.
-async fn run_one(driver: &dyn Driver, session: &Session, sql: String) -> Result<Ran, QueryError> {
-    match driver.open(session, sql, true).await? {
+async fn run_one(
+    driver: &dyn Driver,
+    session: &Session,
+    sql: String,
+    autocommit: bool,
+) -> Result<Ran, QueryError> {
+    match driver.open(session, sql, autocommit).await? {
         Opened::Affected(n) => Ok(Ran::Affected(n)),
         Opened::Rows(columns) => {
             let rows = driver.fetch(session, PAGE).await?;
             Ok(Ran::Rows(ResultSet { columns, rows }))
         }
+    }
+}
+
+impl Console {
+    fn mode_toggle(&self, cx: &mut Context<Self>) -> Button {
+        let manual = self.manual;
+        Button::new("console-mode")
+            .ghost()
+            .xsmall()
+            .label(if manual { "Manual" } else { "Auto-commit" })
+            .disabled(self.running)
+            .tooltip("Switch between auto-commit and manual transactions")
+            .on_click(cx.listener(move |this, _, window, cx| this.set_manual(!manual, window, cx)))
+    }
+
+    fn end_button(
+        &self,
+        label: &'static str,
+        sql: &'static str,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        Button::new(label)
+            .ghost()
+            .xsmall()
+            .label(label)
+            .disabled(!enabled)
+            .on_click(cx.listener(move |this, _, _, cx| this.end_transaction(sql, cx)))
     }
 }
 
@@ -528,7 +685,14 @@ impl Render for Console {
             .px(theme::space_8())
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(run.ghost().xsmall());
+            .gap(theme::space_4())
+            .child(run.ghost().xsmall())
+            .child(self.mode_toggle(cx))
+            .when(self.manual, |d| {
+                let enabled = self.in_transaction && !self.running;
+                d.child(self.end_button("Commit", "COMMIT", enabled, cx))
+                    .child(self.end_button("Rollback", "ROLLBACK", enabled, cx))
+            });
         v_flex()
             .size_full()
             .key_context(CONTEXT)

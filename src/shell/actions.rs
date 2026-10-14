@@ -36,23 +36,19 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
         this.layout.toggle_maximize();
         cx.notify();
     }))
-    .on_action(cx.listener(|this, _: &CloseTab, _, cx| {
-        this.tabs.close(this.tabs.active);
-        this.tab_changed(cx);
+    .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+        this.close_tabs(vec![this.tabs.active], window, cx);
     }))
-    .on_action(cx.listener(|this, _: &CloseOtherTabs, _, cx| {
+    .on_action(cx.listener(|this, _: &CloseOtherTabs, window, cx| {
         let active = this.tabs.active;
-        this.tabs.close_where(|ix| ix != active);
-        this.tab_changed(cx);
+        this.close_tabs(this.tabs.closable(|ix| ix != active), window, cx);
     }))
-    .on_action(cx.listener(|this, _: &CloseTabsToRight, _, cx| {
+    .on_action(cx.listener(|this, _: &CloseTabsToRight, window, cx| {
         let active = this.tabs.active;
-        this.tabs.close_where(|ix| ix > active);
-        this.tab_changed(cx);
+        this.close_tabs(this.tabs.closable(|ix| ix > active), window, cx);
     }))
-    .on_action(cx.listener(|this, _: &CloseAllTabs, _, cx| {
-        this.tabs.close_where(|_| true);
-        this.tab_changed(cx);
+    .on_action(cx.listener(|this, _: &CloseAllTabs, window, cx| {
+        this.close_tabs(this.tabs.closable(|_| true), window, cx);
     }))
     .on_action(cx.listener(|this, _: &TogglePinTab, _, cx| {
         this.tabs.toggle_pin(this.tabs.active);

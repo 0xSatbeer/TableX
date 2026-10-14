@@ -37,7 +37,6 @@ impl Render for StatusBar {
                     .find(|c| c.id == o.connection)
             })
             .map(readout);
-        let connected = readout.as_ref().is_some_and(|r| r.solid);
         let tip = |selector: String, text: String| {
             move |window: &mut Window, cx: &mut App| {
                 let (selector, text) = (selector.clone(), text.clone());
@@ -166,13 +165,24 @@ impl Render for StatusBar {
                     )),
             )
             .child(context)
-            // ponytail: tx state is fixed until QX-012/025 give it a model; shown only while Connected
-            .when(connected, |d| {
+            .when_some(self.mode, |d, mode| {
+                let hazard = mode == "TX" && self.origin.as_ref().is_some_and(|o| o.production);
+                let selector = match hazard {
+                    true => format!("tx-mode-hazard:{mode}"),
+                    false => format!("tx-mode:{mode}"),
+                };
                 d.child(
                     div()
                         .flex_none()
-                        .debug_selector(|| "auto-commit".into())
-                        .child("AUTO-COMMIT"),
+                        .debug_selector(|| selector)
+                        .when(hazard, |d| {
+                            d.px(theme::space_4())
+                                .rounded(theme::radius_sm())
+                                .bg(theme.danger)
+                                .text_color(theme.background)
+                                .font_weight(FontWeight::BOLD)
+                        })
+                        .child(mode),
                 )
             })
             .child(div().flex_1())

@@ -27,7 +27,7 @@ fn a_tab_without_a_connection_shows_no_connection_or_in_demo_mode_sample_data(
         for status in [
             "status-dot-solid",
             "status-dot-ring",
-            "auto-commit",
+            "tx-mode:AUTO-COMMIT",
             "status-button:Connect",
             "status-button:Retry",
         ] {
@@ -151,6 +151,54 @@ fn truncated_status_path_shows_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
             hover_shows_truncation_tip(&mut cx, "status-path".into()),
             tip,
             "{path}"
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn the_active_console_shows_its_mode_and_other_tabs_show_none(cx: &mut gpui_kit::TestAppContext) {
+    use crate::model::ConnectionStatus::Connected;
+    use crate::ui::console::{Console, Target};
+    use gpui_kit::AppContext as _;
+    // (production, manual, in a transaction, selector drawn)
+    let cases = [
+        (false, false, false, "tx-mode:AUTO-COMMIT"),
+        (false, true, false, "tx-mode:MANUAL"),
+        (false, true, true, "tx-mode:TX"),
+        (true, true, true, "tx-mode-hazard:TX"),
+    ];
+    for (production, manual, in_transaction, selector) in cases {
+        let (mut cx, bar, workspace) = open_bar(cx, 1200., false);
+        workspace.update(&mut cx, |ws, _| {
+            ws.connections[0].is_production = production
+        });
+        show(&mut cx, &bar, &workspace, 0, Connected);
+        assert!(
+            !drawn(&mut cx, "tx-mode:AUTO-COMMIT".into()),
+            "a table tab shows none"
+        );
+        let console = cx.update(|window, cx| {
+            let target = Target {
+                workspace: workspace.clone(),
+                driver: std::sync::Arc::new(crate::db::fake::Fake::default()),
+                connection: None,
+                database: "app".into(),
+            };
+            cx.new(|cx| Console::new(target, "", window, cx))
+        });
+        bar.update(&mut cx, |bar, cx| bar.set_console(Some(&console), cx));
+        console.update_in(&mut cx, |c, window, cx| {
+            c.set_manual(manual, window, cx);
+            c.in_transaction = in_transaction;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(drawn(&mut cx, selector.into()), "{selector}");
+        bar.update(&mut cx, |bar, cx| bar.set_console(None, cx));
+        cx.run_until_parked();
+        assert!(
+            !drawn(&mut cx, selector.into()),
+            "{selector}: gone off the console"
         );
     }
 }

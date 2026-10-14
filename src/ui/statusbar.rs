@@ -6,6 +6,7 @@ use gpui_kit::component::input::EditorState;
 use gpui_kit::*;
 
 use crate::model::{Connection, ConnectionId, ConnectionParams, ConnectionStatus, Workspace};
+use crate::ui::console::Console;
 use crate::ui::grid::{Grid, SelectionKey};
 use crate::ui::tabs::Origin;
 
@@ -29,6 +30,9 @@ pub struct StatusBar {
     /// 1-based line and column of the focused console editor, and its selection length in chars.
     cursor: Option<(u32, u32, usize)>,
     _editor: Option<Subscription>,
+    /// The active console's mode (AUTO-COMMIT, MANUAL or TX); `None` off a console.
+    mode: Option<&'static str>,
+    _console: Option<Subscription>,
     /// Aggregate of the active grid's selection, and the selection it was computed for.
     selection: Option<String>,
     grid_focused: bool,
@@ -104,6 +108,8 @@ impl StatusBar {
             memory_mb: None,
             cursor: None,
             _editor: None,
+            mode: None,
+            _console: None,
             selection: None,
             grid_focused: false,
             selection_key: None,
@@ -145,6 +151,21 @@ impl StatusBar {
             })
         });
         self.cursor = editor.map(|editor| position(editor, cx));
+        cx.notify();
+    }
+
+    /// Follow `console`'s transaction mode, or show none when `None`.
+    pub fn set_console(&mut self, console: Option<&Entity<Console>>, cx: &mut Context<Self>) {
+        self._console = console.map(|console| {
+            cx.observe(console, |this, console, cx| {
+                let mode = Some(console.read(cx).mode());
+                if this.mode != mode {
+                    this.mode = mode;
+                    cx.notify();
+                }
+            })
+        });
+        self.mode = console.map(|console| console.read(cx).mode());
         cx.notify();
     }
 

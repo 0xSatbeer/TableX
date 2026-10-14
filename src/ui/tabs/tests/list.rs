@@ -43,7 +43,9 @@ fn pin_moves_left_and_close_others_keeps_active() {
     );
     t.activate(2);
     let active = t.active;
-    t.close_where(|ix| ix != active);
+    for ix in t.closable(|ix| ix != active).into_iter().rev() {
+        t.close(ix);
+    }
     assert_eq!(
         (keys(&t), t.active),
         (vec!["c", "b"], 1),
@@ -57,7 +59,9 @@ fn pin_moves_left_and_close_others_keeps_active() {
         tab("d", false),
     ]);
     t.activate(1);
-    t.close_where(|ix| ix > 1);
+    for ix in t.closable(|ix| ix > 1).into_iter().rev() {
+        t.close(ix);
+    }
     assert_eq!(
         (keys(&t), t.active),
         (vec!["a", "b"], 1),

@@ -106,10 +106,7 @@ impl Shell {
             }))
             .on_mouse_down(
                 MouseButton::Middle,
-                cx.listener(move |this, _, _, cx| {
-                    this.tabs.close(ix);
-                    this.tab_changed(cx);
-                }),
+                cx.listener(move |this, _, window, cx| this.close_tabs(vec![ix], window, cx)),
             )
             .on_mouse_down(
                 MouseButton::Right,
@@ -146,10 +143,9 @@ impl Shell {
                             })
                             .group_hover(group, |d| d.text_color(theme.muted_foreground))
                             .hover(|d| d.bg(theme.secondary_hover).text_color(theme.foreground))
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                this.tabs.close(ix);
-                                this.tab_changed(cx);
+                                this.close_tabs(vec![ix], window, cx);
                             }))
                             .child(Icon::new(IconName::Close).xsmall()),
                     )

@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Selectable as _, Sizable as _,
+    ActiveTheme as _, IconName, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::Input,
@@ -27,6 +27,10 @@ impl Shell {
             Some(TabContent::Console(console)) => Some(console.read(cx).editor.clone()),
             _ => None,
         };
+        let console = match self.tabs.active().map(|t| &t.content) {
+            Some(TabContent::Console(console)) => Some(console.clone()),
+            _ => None,
+        };
         let grid = match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Grid(grid)) => Some(grid.clone()),
             _ => None,
@@ -38,12 +42,79 @@ impl Shell {
         self.status_bar.update(cx, |bar, cx| {
             bar.set_editor(editor.as_ref(), cx);
             bar.set_grid(grid.as_ref(), cx);
+            bar.set_console(console.as_ref(), cx);
             bar.set_origin(origin, has_tab, cx);
         });
         self.focus_content = true;
         // Without a search field the list is a plain menu; don't re-mount open with a stale query.
         self.overflow_open &= tabs::show_search(self.tabs.tabs.len());
         cx.notify();
+    }
+
+    /// Closes tabs `ixs`; when one is a console with an open transaction, asks first, and
+    /// confirming rolls it back as the console closes.
+    pub(super) fn close_tabs(
+        &mut self,
+        ixs: Vec<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let doomed: Vec<_> = ixs
+            .iter()
+            .filter_map(|&ix| self.tabs.tabs.get(ix))
+            .collect();
+        let keys: Vec<SharedString> = doomed.iter().map(|t| t.key.clone()).collect();
+        let open_transaction = doomed
+            .iter()
+            .any(|t| matches!(&t.content, TabContent::Console(c) if c.read(cx).in_transaction));
+        if !open_transaction {
+            self.close_keys(&keys, cx);
+            return;
+        }
+        let shell = cx.entity();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let (shell, keys) = (shell.clone(), keys.clone());
+            dialog
+                .title(
+                    div()
+                        .debug_selector(|| "tab-close-title".into())
+                        .child("Roll back and close?"),
+                )
+                .child("This console has an open transaction; its changes are discarded.")
+                .footer(
+                    h_flex()
+                        .gap(theme::space_8())
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("tab-close-cancel")
+                                .debug_selector(|| "tab-close-cancel".into())
+                                .small()
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("tab-close-confirm")
+                                .debug_selector(|| "tab-close-confirm".into())
+                                .danger()
+                                .small()
+                                .label("Roll back and close")
+                                .on_click(move |_, window, cx| {
+                                    shell.update(cx, |this, cx| this.close_keys(&keys, cx));
+                                    window.close_dialog(cx);
+                                }),
+                        ),
+                )
+        });
+    }
+
+    /// Closes the tabs keyed `keys`, last first so earlier indices stay put.
+    fn close_keys(&mut self, keys: &[SharedString], cx: &mut Context<Self>) {
+        for key in keys.iter().rev() {
+            if let Some(ix) = self.tabs.tabs.iter().position(|t| &t.key == key) {
+                self.tabs.close(ix);
+            }
+        }
+        self.tab_changed(cx);
     }
 
     /// Our own strip, not the library `TabBar`: its `Tab` repaints background and borders over
