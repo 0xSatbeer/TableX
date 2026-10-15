@@ -113,12 +113,16 @@ fn each_console_runs_on_its_own_session_and_logs_to_the_panel(cx: &mut gpui_kit:
             "{key} connects its own session"
         );
     }
-    for _ in 0..2 {
+    // The console opened on a schema sets its search_path before running.
+    for opens in [2, 1] {
         fake.resolve("connect app_db", Ok(crate::db::fake::session("app_db")));
         cx.run_until_parked();
-        fake.resolve_query("open app_db", Ok(Opened::Affected(1)));
-        cx.run_until_parked();
+        for _ in 0..opens {
+            fake.resolve_query("open app_db", Ok(Opened::Affected(1)));
+            cx.run_until_parked();
+        }
     }
+    assert_eq!(fake.opened()[0], "SET search_path TO \"public\"");
     let logged = shell.read_with(&cx, |this, cx| {
         let log = this.bottom_panel.read(cx).logged();
         log[log.len() - 2..]
@@ -174,4 +178,37 @@ fn deleting_a_connection_closes_its_consoles_sessions(cx: &mut gpui_kit::TestApp
     });
     cx.run_until_parked();
     assert!(fake.pending().contains(&"close app_db".to_string()));
+}
+
+#[gpui_kit::test]
+fn picking_a_schema_moves_the_tab_origin_and_title_but_keeps_its_key(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (window, shell) = open_plain(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    let name = shell.read_with(&cx, |this, cx| {
+        this.workspace.read(cx).connections[0].name.clone()
+    });
+    open_console(&mut cx, &shell, "1/app_db/public");
+    let console = shell.read_with(&cx, |this, _| {
+        match this.tabs.active().map(|t| &t.content) {
+            Some(crate::shell::TabContent::Console(console)) => console.clone(),
+            _ => panic!("a console tab is active"),
+        }
+    });
+    console.update(&mut cx, |c, cx| c.pick_schema("sales".into(), cx));
+    cx.run_until_parked();
+    let tab = shell.read_with(&cx, |this, _| {
+        let tab = this.tabs.active().expect("a tab is active");
+        let path = tab.origin.as_ref().map(|o| o.path.clone());
+        (tab.key.clone(), tab.title.clone(), path)
+    });
+    assert_eq!(
+        tab,
+        (
+            "console:1/app_db/public".into(),
+            "app_db › sales — console".into(),
+            Some(format!("{name} › app_db › sales").into()),
+        )
+    );
 }

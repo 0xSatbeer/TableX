@@ -21,6 +21,7 @@ fn open_transaction(
             driver,
             connection: Some(conn.id),
             database: conn.params.database(),
+            schema: None,
         };
         let tab = crate::shell::start::console_tab(
             "console-tx",

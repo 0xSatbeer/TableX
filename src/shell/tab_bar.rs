@@ -10,7 +10,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use crate::theme;
-use crate::ui::tabs;
+use crate::ui::{console, tabs};
 
 use super::{OVERFLOW_CONTEXT, Shell, TabContent, tab::TabDrag};
 
@@ -48,6 +48,31 @@ impl Shell {
         self.focus_content = true;
         // Without a search field the list is a plain menu; don't re-mount open with a stale query.
         self.overflow_open &= tabs::show_search(self.tabs.tabs.len());
+        cx.notify();
+    }
+
+    /// Points `console`'s tab origin and title at the database and schema it moved to; the key stays.
+    pub(super) fn console_moved(
+        &mut self,
+        console: &Entity<console::Console>,
+        cx: &mut Context<Self>,
+    ) {
+        let tail = console.read(cx).tail();
+        let is_it = |t: &&mut tabs::EditorTab<TabContent>| matches!(&t.content, TabContent::Console(c) if c == console);
+        let Some(tab) = self.tabs.tabs.iter_mut().find(is_it) else {
+            return;
+        };
+        tab.title = format!("{tail} — console").into();
+        if let Some(origin) = &mut tab.origin {
+            origin.tail = tail.into();
+        }
+        self.tabs.refresh_origins(self.workspace.read(cx));
+        let (origin, has_tab) = (
+            self.tabs.active().and_then(|t| t.origin.clone()),
+            self.tabs.active().is_some(),
+        );
+        self.status_bar
+            .update(cx, |bar, cx| bar.set_origin(origin, has_tab, cx));
         cx.notify();
     }
 

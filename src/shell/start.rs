@@ -131,6 +131,7 @@ impl Shell {
                         driver: this.driver.clone(),
                         connection: Some(conn.id),
                         database: ev.database.clone(),
+                        schema: ev.schema.clone(),
                     };
                     this.tabs.open(console_tab(
                         key,
@@ -179,6 +180,7 @@ impl Shell {
             driver: driver.clone(),
             connection,
             database,
+            schema: None,
         };
         let console = console_tab(
             "console-1",
@@ -273,10 +275,15 @@ pub(super) fn console_tab(
     let console = cx.new(|cx| console::Console::new(target, text, window, cx));
     cx.subscribe(&console, |this, console, ev: &console::ConsoleEvent, cx| {
         let shown = console.read(cx).results.is_empty();
-        this.bottom_panel.update(cx, |panel, cx| match ev {
-            console::ConsoleEvent::Logged(entry) => panel.push(entry.clone(), cx),
-            console::ConsoleEvent::Finished => panel.show_run(!shown, cx),
-        });
+        match ev {
+            console::ConsoleEvent::Logged(entry) => this
+                .bottom_panel
+                .update(cx, |panel, cx| panel.push(entry.clone(), cx)),
+            console::ConsoleEvent::Finished => this
+                .bottom_panel
+                .update(cx, |panel, cx| panel.show_run(!shown, cx)),
+            console::ConsoleEvent::Moved => this.console_moved(&console, cx),
+        }
     })
     .detach();
     // The panel draws the active console's results, so it redraws with them.

@@ -190,6 +190,7 @@ pub(super) fn console_on(
                 driver: std::sync::Arc::new(crate::db::fake::Fake::default()),
                 connection: Some(conn.id),
                 database: conn.params.database(),
+                schema: None,
             },
             "",
             window,

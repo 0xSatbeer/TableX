@@ -183,6 +183,7 @@ fn the_active_console_shows_its_mode_and_other_tabs_show_none(cx: &mut gpui_kit:
                 driver: std::sync::Arc::new(crate::db::fake::Fake::default()),
                 connection: None,
                 database: "app".into(),
+                schema: None,
             };
             cx.new(|cx| Console::new(target, "", window, cx))
         });

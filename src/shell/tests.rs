@@ -77,6 +77,7 @@ fn open_with_connection_tabs(
                 driver: this.driver.clone(),
                 connection: Some(local.id),
                 database: local.params.database(),
+                schema: None,
             },
             "",
             window,

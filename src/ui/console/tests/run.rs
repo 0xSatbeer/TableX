@@ -38,6 +38,7 @@ pub(super) fn console(
                 driver,
                 connection,
                 database: "app_db".into(),
+                schema: None,
             };
             cx.new(|cx| Console::new(target, &text, window, cx))
         })

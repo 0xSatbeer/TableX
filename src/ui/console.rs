@@ -12,6 +12,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Editor, EditorState, RopeExt as _},
+    menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -22,8 +23,8 @@ use crate::model::{
     ColumnMeta, ConnectionId, ConnectionParams, QueryError, QueryErrorKind, QueryLogEntry,
     QuerySource, QueryStatus, ResultSet, Row, Workspace,
 };
-use crate::ui::{explorer, grid};
-use crate::{sql, theme};
+use crate::ui::{explorer, grid, tabs};
+use crate::{ddl, sql, theme};
 
 actions!(console, [RunStatement, RunScript, Rerun, Cancel]);
 
@@ -47,12 +48,14 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
-/// Where a console runs: the connection (looked up in `workspace` at connect) and its database.
+/// Where a console runs: the connection (looked up in `workspace` at connect), its database
+/// and, when picked, the schema its `search_path` is set to.
 pub struct Target {
     pub workspace: Entity<Workspace>,
     pub driver: Arc<dyn Driver>,
     pub connection: Option<ConnectionId>,
     pub database: String,
+    pub schema: Option<String>,
 }
 
 pub enum ConsoleEvent {
@@ -60,6 +63,8 @@ pub enum ConsoleEvent {
     Logged(QueryLogEntry),
     /// A run ended, by finishing or failing.
     Finished,
+    /// The database or schema changed, so the tab's origin and title follow `Console::tail`.
+    Moved,
 }
 
 pub struct Console {
@@ -79,8 +84,12 @@ pub struct Console {
     /// Manual mode: runs open a transaction that only Commit or Rollback ends.
     manual: bool,
     pub in_transaction: bool,
+    /// What the toolbar's database and schema dropdowns offer, listed on the tab's session.
+    pub databases: Vec<String>,
+    pub schemas: Vec<String>,
     _run: Option<Task<()>>,
     _fetch: Option<Task<()>>,
+    _context: Option<Task<()>>,
 }
 
 /// One result tab: the rows read so far, shown a page at a time.
@@ -219,8 +228,11 @@ impl Console {
             running: false,
             manual: false,
             in_transaction: false,
+            databases: Vec::new(),
+            schemas: Vec::new(),
             _run: None,
             _fetch: None,
+            _context: None,
         }
     }
 
@@ -462,10 +474,11 @@ impl Console {
         }
         let (begin, autocommit) = (self.manual && !self.in_transaction, !self.manual);
         let driver = self.target.driver.clone();
+        let schema = self.target.schema.clone();
         self._run = Some(cx.spawn(async move |this, cx| {
             let session = match session {
                 Some(session) => session,
-                None => match driver.connect(&params).await {
+                None => match connect(&*driver, &params, schema).await {
                     Ok(session) => session,
                     Err(reason) => {
                         this.update(cx, |this, cx| this.finish(Some(reason), cx))
@@ -702,6 +715,24 @@ impl Console {
     }
 }
 
+/// A session on `params`, its `search_path` set to `schema` when there is one.
+async fn connect(
+    driver: &dyn Driver,
+    params: &ConnectionParams,
+    schema: Option<String>,
+) -> Result<Session, String> {
+    let session = driver.connect(params).await?;
+    if let Some(schema) = schema {
+        let set = driver.open(&session, search_path(&schema), false).await;
+        set.map_err(|error| error.message)?;
+    }
+    Ok(session)
+}
+
+fn search_path(schema: &str) -> String {
+    format!("SET search_path TO {}", ddl::ident(schema))
+}
+
 /// Every statement of `text`, with its byte offset.
 fn statements(text: &str) -> Vec<(usize, String)> {
     sql::split(text)
@@ -727,6 +758,215 @@ async fn run_one(
 }
 
 impl Console {
+    /// `database › schema`, as the tab's origin shows it.
+    pub fn tail(&self) -> String {
+        let schema = self.target.schema.as_deref().unwrap_or("");
+        tabs::join_path(&self.target.database, schema).to_string()
+    }
+
+    /// The Postgres connection's params on the console's database; SQLite has no context to pick.
+    fn pg_params(&self, cx: &App) -> Option<ConnectionParams> {
+        self.params(cx)
+            .filter(|p| matches!(p, ConnectionParams::Postgres { .. }))
+    }
+
+    /// Lists the databases and schemas the toolbar offers, connecting first when there is no session.
+    pub fn load_context(&mut self, cx: &mut Context<Self>) {
+        let Some(params) = self.pg_params(cx).filter(|_| !self.running) else {
+            return;
+        };
+        let session = self.session.clone().filter(|s| !s.is_closed());
+        let (driver, schema) = (self.target.driver.clone(), self.target.schema.clone());
+        self._context = Some(cx.spawn(async move |this, cx| {
+            let session = match session {
+                Some(session) => session,
+                None => match connect(&*driver, &params, schema).await {
+                    Ok(session) => session,
+                    Err(reason) => {
+                        this.update(cx, |this, cx| this.finish(Some(reason), cx))
+                            .ok();
+                        return;
+                    }
+                },
+            };
+            this.update(cx, |this, _| {
+                this.session.get_or_insert_with(|| session.clone());
+            })
+            .ok();
+            let (databases, schemas) = (driver.databases(&session), driver.schemas(&session));
+            let (databases, schemas) = (databases.await, schemas.await);
+            this.update(cx, |this, cx| {
+                (this.databases, this.schemas) =
+                    (databases.unwrap_or_default(), schemas.unwrap_or_default());
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Points the session's `search_path` at `schema`; without a session the next connect does.
+    pub fn pick_schema(&mut self, schema: String, cx: &mut Context<Self>) {
+        // A SET inside a transaction is undone by its rollback, leaving the toolbar wrong.
+        if self.running || self.in_transaction {
+            return;
+        }
+        let Some(session) = self.session.clone().filter(|s| !s.is_closed()) else {
+            self.target.schema = Some(schema);
+            cx.emit(ConsoleEvent::Moved);
+            cx.notify();
+            return;
+        };
+        self.running = true;
+        cx.notify();
+        let set = self
+            .target
+            .driver
+            .open(&session, search_path(&schema), false);
+        self._run = Some(cx.spawn(async move |this, cx| {
+            let result = set.await;
+            this.update(cx, |this, cx| {
+                this.running = false;
+                match result {
+                    Ok(_) => {
+                        this.target.schema = Some(schema);
+                        cx.emit(ConsoleEvent::Moved);
+                    }
+                    Err(error) => _ = this.failed(error, 0, Duration::ZERO, cx),
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Moves the console to `database` on a new session, first asking when that would roll back
+    /// an open transaction.
+    pub fn pick_database(&mut self, database: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.running || database == self.target.database {
+            return;
+        }
+        if !self.in_transaction {
+            self.switch_database(database, cx);
+            return;
+        }
+        let console = cx.entity();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let (console, database) = (console.clone(), database.clone());
+            dialog
+                .title(
+                    div()
+                        .debug_selector(|| "db-switch-title".into())
+                        .child("Roll back and switch database?"),
+                )
+                .footer(
+                    h_flex()
+                        .gap(theme::space_8())
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("db-switch-cancel")
+                                .debug_selector(|| "db-switch-cancel".into())
+                                .small()
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("db-switch-confirm")
+                                .debug_selector(|| "db-switch-confirm".into())
+                                .danger()
+                                .small()
+                                .label("Roll back and switch")
+                                .on_click(move |_, window, cx| {
+                                    let database = database.clone();
+                                    console.update(cx, |c, cx| c.switch_database(database, cx));
+                                    window.close_dialog(cx);
+                                }),
+                        ),
+                )
+        });
+    }
+
+    fn switch_database(&mut self, database: String, cx: &mut Context<Self>) {
+        self.close_session(cx);
+        (self.target.database, self.target.schema) = (database, None);
+        self.schemas.clear();
+        cx.emit(ConsoleEvent::Moved);
+        cx.notify();
+        self.load_context(cx);
+    }
+
+    /// `connection ▸ database ▸ schema`; only the connection on SQLite.
+    fn context(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let id = self.target.connection?;
+        let name = self
+            .target
+            .workspace
+            .read(cx)
+            .connections
+            .iter()
+            .find(|c| c.id == id)?
+            .name
+            .clone();
+        let crumbs = h_flex()
+            .gap(theme::space_4())
+            .text_size(theme::ui_sm())
+            .text_color(theme::text_secondary(cx.theme()))
+            .child(name);
+        if self.pg_params(cx).is_none() {
+            return Some(crumbs);
+        }
+        let console = cx.entity();
+        let pick = |id: &'static str, current: String, items: &[String], on_database: bool| {
+            let (console, items) = (console.clone(), items.to_vec());
+            let label = if current.is_empty() {
+                "Schema".to_string()
+            } else {
+                current.clone()
+            };
+            Button::new(id)
+                .ghost()
+                .xsmall()
+                .label(label)
+                .dropdown_caret(true)
+                .disabled(self.running || (!on_database && self.in_transaction))
+                .when(!on_database && self.in_transaction, |b| {
+                    b.tooltip("Commit or roll back to change the schema")
+                })
+                .dropdown_menu(move |menu, _, cx| {
+                    if items.is_empty() {
+                        console.update(cx, |c, cx| c.load_context(cx));
+                        return menu.item(PopupMenuItem::new("Loading…").disabled(true));
+                    }
+                    items.iter().fold(menu, |menu, item| {
+                        let (console, item) = (console.clone(), item.clone());
+                        menu.item(
+                            PopupMenuItem::new(item.clone())
+                                .checked(item == current)
+                                .on_click(move |_, window, cx| {
+                                    let item = item.clone();
+                                    console.update(cx, |c, cx| match on_database {
+                                        true => c.pick_database(item, window, cx),
+                                        false => c.pick_schema(item, cx),
+                                    });
+                                }),
+                        )
+                    })
+                })
+        };
+        let schema = self.target.schema.clone().unwrap_or_default();
+        Some(
+            crumbs
+                .child("▸")
+                .child(pick(
+                    "console-database",
+                    self.target.database.clone(),
+                    &self.databases,
+                    true,
+                ))
+                .child("▸")
+                .child(pick("console-schema", schema, &self.schemas, false)),
+        )
+    }
+
     fn mode_toggle(&self, cx: &mut Context<Self>) -> Button {
         let manual = self.manual;
         Button::new("console-mode")
@@ -777,6 +1017,7 @@ impl Render for Console {
             .border_b_1()
             .border_color(cx.theme().border)
             .gap(theme::space_4())
+            .children(self.context(cx))
             .child(run.ghost().xsmall())
             .child(self.mode_toggle(cx))
             .when(self.manual, |d| {
