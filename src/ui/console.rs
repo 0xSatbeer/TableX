@@ -305,7 +305,7 @@ impl Console {
     }
 
     /// The selection's statements, else the one under the cursor.
-    fn run_statement(&mut self, _: &RunStatement, _: &mut Window, cx: &mut Context<Self>) {
+    fn run_statement(&mut self, _: &RunStatement, window: &mut Window, cx: &mut Context<Self>) {
         let editor = self.editor.read(cx);
         let text = editor.value();
         let selected = editor.selected_range();
@@ -321,16 +321,16 @@ impl Console {
                 .map(|(offset, sql)| (start + offset, sql))
                 .collect()
         };
-        self.run(statements, cx);
+        self.run(statements, window, cx);
     }
 
-    fn run_script(&mut self, _: &RunScript, _: &mut Window, cx: &mut Context<Self>) {
+    fn run_script(&mut self, _: &RunScript, window: &mut Window, cx: &mut Context<Self>) {
         let statements = statements(&self.editor.read(cx).value());
-        self.run(statements, cx);
+        self.run(statements, window, cx);
     }
 
-    fn rerun(&mut self, _: &Rerun, _: &mut Window, cx: &mut Context<Self>) {
-        self.run_again(cx);
+    fn rerun(&mut self, _: &Rerun, window: &mut Window, cx: &mut Context<Self>) {
+        self.run_again(window, cx);
     }
 
     /// Stops the run: its running statement fails as cancelled, which ends the script.
@@ -348,8 +348,99 @@ impl Console {
             .detach();
     }
 
+    /// Runs `statements`, first asking when any of them writes to a production connection.
+    fn run(
+        &mut self,
+        statements: Vec<(usize, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let writes: Vec<&String> = statements
+            .iter()
+            .map(|(_, sql)| sql)
+            .filter(|sql| !sql::is_read_only(sql))
+            .collect();
+        match (self.production(cx), writes.first()) {
+            (Some(name), Some(first)) => {
+                let first = (*first).clone();
+                self.confirm_production(name, writes.len(), first, statements, window, cx)
+            }
+            _ => self.execute(statements, cx),
+        }
+    }
+
+    /// The connection's name when it is a production one.
+    fn production(&self, cx: &App) -> Option<String> {
+        let id = self.target.connection?;
+        let workspace = self.target.workspace.read(cx);
+        let conn = workspace.connections.iter().find(|c| c.id == id)?;
+        conn.is_production.then(|| conn.name.clone())
+    }
+
+    /// Asks before running `n` writing statements on production; only "Run on production" runs them.
+    fn confirm_production(
+        &self,
+        name: String,
+        n: usize,
+        first: String,
+        statements: Vec<(usize, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let console = cx.entity();
+        let noun = if n == 1 { "statement" } else { "statements" };
+        let title = format!("Run {n} writing {noun} on {name}?");
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let title = title.clone();
+            let (console, statements) = (console.clone(), statements.clone());
+            dialog
+                .title(
+                    h_flex()
+                        .gap(theme::space_8())
+                        .debug_selector({
+                            let title = title.clone();
+                            move || format!("prod-run-title {title}")
+                        })
+                        .child(theme::prod_badge(cx.theme()))
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .debug_selector(|| "prod-run-preview".into())
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(theme::ui_sm())
+                        .text_color(theme::text_secondary(cx.theme()))
+                        .child(first.clone()),
+                )
+                .footer(
+                    h_flex()
+                        .gap(theme::space_8())
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("prod-run-cancel")
+                                .debug_selector(|| "prod-run-cancel".into())
+                                .small()
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("prod-run-confirm")
+                                .debug_selector(|| "prod-run-confirm".into())
+                                .danger()
+                                .small()
+                                .label("Run on production")
+                                .on_click(move |_, window, cx| {
+                                    let statements = statements.clone();
+                                    console.update(cx, |c, cx| c.execute(statements, cx));
+                                    window.close_dialog(cx);
+                                }),
+                        ),
+                )
+        });
+    }
+
     /// Runs `statements` one after another, stopping at the first error. Replaces the last run's output.
-    fn run(&mut self, statements: Vec<(usize, String)>, cx: &mut Context<Self>) {
+    fn execute(&mut self, statements: Vec<(usize, String)>, cx: &mut Context<Self>) {
         if statements.is_empty() {
             return;
         }
@@ -583,8 +674,8 @@ impl Console {
     }
 
     /// Re-runs the last run, as the dropped-rows notice offers.
-    pub fn run_again(&mut self, cx: &mut Context<Self>) {
-        self.run(self.last.clone(), cx);
+    pub fn run_again(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.run(self.last.clone(), window, cx);
     }
 
     /// Rolls back an open transaction and closes the session's open result, as when the console

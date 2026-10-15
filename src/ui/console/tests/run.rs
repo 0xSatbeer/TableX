@@ -9,7 +9,7 @@ use crate::model::{
     ColumnMeta, QueryError, QueryErrorKind, QueryLogEntry, QuerySource, QueryStatus, Row, Value,
 };
 
-/// A console on the mock workspace's first connection (app_db) holding `text`, its editor focused,
+/// A console on the mock workspace's first connection (app_db), made non-production, holding `text`, its editor focused,
 /// and the log entries it emits.
 pub(super) fn console(
     cx: &mut gpui_kit::TestAppContext,
@@ -29,7 +29,9 @@ pub(super) fn console(
     let text = text.to_string();
     let (window, console) = cx.update(|cx| {
         gpui_kit::open_window(Default::default(), cx, |window, cx| {
-            let workspace = cx.new(|_| crate::mock::workspaces().remove(0));
+            let mut ws = crate::mock::workspaces().remove(0);
+            ws.connections[0].is_production = false;
+            let workspace = cx.new(|_| ws);
             let connection = Some(workspace.read(cx).connections[0].id);
             let target = Target {
                 workspace,

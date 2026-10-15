@@ -104,7 +104,7 @@ fn each_console_runs_on_its_own_session_and_logs_to_the_panel(cx: &mut gpui_kit:
     for key in ["1/app_db/public", "1/app_db"] {
         open_console(&mut cx, &shell, key);
         let before = connects(&fake);
-        cx.simulate_input("update t set x = 1");
+        cx.simulate_input("select 1");
         cx.simulate_keystrokes("ctrl-enter");
         cx.run_until_parked();
         assert_eq!(
@@ -126,10 +126,7 @@ fn each_console_runs_on_its_own_session_and_logs_to_the_panel(cx: &mut gpui_kit:
             .map(|e| (e.sql.clone(), e.source))
             .collect::<Vec<_>>()
     });
-    let entry = (
-        "update t set x = 1".to_string(),
-        crate::model::QuerySource::Console,
-    );
+    let entry = ("select 1".to_string(), crate::model::QuerySource::Console);
     assert_eq!(logged, [entry.clone(), entry]);
 }
 
@@ -140,7 +137,7 @@ fn closing_a_console_tab_closes_its_session(cx: &mut gpui_kit::TestAppContext) {
     cx.update(crate::ui::console::bind_keys);
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
     open_console(&mut cx, &shell, "1/app_db");
-    cx.simulate_input("update t set x = 1");
+    cx.simulate_input("select 1");
     cx.simulate_keystrokes("ctrl-enter");
     cx.run_until_parked();
     fake.resolve("connect app_db", Ok(crate::db::fake::session("app_db")));
@@ -159,7 +156,7 @@ fn deleting_a_connection_closes_its_consoles_sessions(cx: &mut gpui_kit::TestApp
     cx.update(crate::ui::console::bind_keys);
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
     open_console(&mut cx, &shell, "1/app_db");
-    cx.simulate_input("update t set x = 1");
+    cx.simulate_input("select 1");
     cx.simulate_keystrokes("ctrl-enter");
     cx.run_until_parked();
     fake.resolve("connect app_db", Ok(crate::db::fake::session("app_db")));

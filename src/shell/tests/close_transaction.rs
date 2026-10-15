@@ -1,6 +1,6 @@
 use super::support::*;
 
-/// The shell with a manual console on prod-pg whose transaction is open, its tab active.
+/// The shell with a manual console on prod-pg, made non-production so runs don't ask, whose transaction is open, its tab active.
 fn open_transaction(
     cx: &mut gpui_kit::TestAppContext,
 ) -> (
@@ -13,6 +13,8 @@ fn open_transaction(
     cx.update(|_, cx| crate::ui::console::bind_keys(cx));
     let driver: std::sync::Arc<dyn crate::db::Driver> = fake.clone();
     let editor = shell.update_in(&mut cx, |this, window, cx| {
+        this.workspace
+            .update(cx, |ws, _| ws.connections[0].is_production = false);
         let conn = this.workspace.read(cx).connections[0].clone();
         let target = crate::ui::console::Target {
             workspace: this.workspace.clone(),

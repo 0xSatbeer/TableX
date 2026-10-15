@@ -259,8 +259,8 @@ fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
                     Button::new("result-run-again")
                         .small()
                         .label("Run again")
-                        .on_click(move |_, _, cx| {
-                            console.update(cx, |console, cx| console.run_again(cx))
+                        .on_click(move |_, window, cx| {
+                            console.update(cx, |console, cx| console.run_again(window, cx))
                         }),
                 )
                 .into_any_element()
