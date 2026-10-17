@@ -2,7 +2,7 @@
 //! Type and default text is SQL the user typed, so it passes through raw.
 #![allow(dead_code, reason = "the object dialogs call these")]
 
-use crate::model::{Column, ForeignKey, Index, TableDef};
+use crate::model::{Column, ForeignKey, Index, TableDef, Trigger};
 
 /// A table as edited: `origins[i]` is the original name of `def.columns[i]`, `None` if new.
 #[derive(Clone, Debug, PartialEq)]
@@ -101,6 +101,17 @@ pub fn create_table(schema: &str, def: &TableDef) -> Vec<String> {
         .chain(indexes)
         .chain(fks)
         .collect()
+}
+
+/// The DDL tab's script: `create_table`'s statements, then each trigger's definition.
+pub fn table_ddl(schema: &str, def: &TableDef, triggers: &[Trigger]) -> String {
+    let triggers = triggers.iter().map(|t| t.definition.clone());
+    create_table(schema, def)
+        .into_iter()
+        .chain(triggers)
+        .map(|s| format!("{};\n", s.trim_end().trim_end_matches(';')))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Statements in a fixed order: rename table, drop FKs, drop the PK, drop indexes and UNIQUE

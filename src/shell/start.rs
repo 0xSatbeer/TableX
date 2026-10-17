@@ -1,7 +1,7 @@
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
-use crate::ui::{console, explorer, grid, panel, split, statusbar, tabs};
+use crate::ui::{console, explorer, grid, panel, split, statusbar, structure, tabs};
 use crate::{db, mock, model, theme};
 use std::rc::Rc;
 
@@ -91,9 +91,13 @@ impl Shell {
             };
             let mut tab = match table {
                 Some(table) => {
-                    let grid = cx.new(|cx| grid::Grid::table(table, cx));
+                    let grid = cx.new(|cx| grid::Grid::table(table.clone(), cx));
                     grid.update(cx, |grid, cx| grid.load(cx));
-                    grid_tab_of(ev.key.clone(), grid, cx)
+                    let key = ev.key.clone();
+                    let s = cx.new(|cx| structure::Structure::new(grid.clone(), table, key, cx));
+                    // Focus and the status bar's aggregate follow the shown sub-tab.
+                    cx.observe(&s, |_, _, cx| cx.notify()).detach();
+                    grid_tab_of(ev.key.clone(), grid, Some(s), cx)
                 }
                 None => grid_tab(ev.key.clone(), Rc::new(rows), cx),
             };
@@ -260,13 +264,14 @@ pub(super) fn grid_tab(
     cx: &mut Context<Shell>,
 ) -> tabs::EditorTab<TabContent> {
     let grid = cx.new(|cx| grid::Grid::new(source, cx));
-    grid_tab_of(key, grid, cx)
+    grid_tab_of(key, grid, None, cx)
 }
 
 /// A tab keyed `key` showing `grid`, whose queries go to the bottom panel's Logs.
 fn grid_tab_of(
     key: impl Into<SharedString>,
     grid: Entity<grid::Grid>,
+    structure: Option<Entity<structure::Structure>>,
     cx: &mut Context<Shell>,
 ) -> tabs::EditorTab<TabContent> {
     cx.subscribe(&grid, |this, _, grid::GridEvent::Logged(entry), cx| {
@@ -282,7 +287,7 @@ fn grid_tab_of(
         tooltip: None,
         preview: false,
         pinned: false,
-        content: TabContent::Grid(grid),
+        content: TabContent::Grid(grid, structure),
     }
 }
 

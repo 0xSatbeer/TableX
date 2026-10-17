@@ -9,5 +9,6 @@ pub mod object_dialog;
 pub mod panel;
 pub mod split;
 pub mod statusbar;
+pub mod structure;
 pub mod table_editor;
 pub mod tabs;

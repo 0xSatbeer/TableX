@@ -17,7 +17,7 @@ fn zoom_keys_change_only_the_focused_grid_or_editor(cx: &mut gpui_kit::TestAppCo
     cx.run_until_parked();
     let grid = shell.read_with(&cx, |this, _| {
         match this.tabs.active().map(|t| &t.content) {
-            Some(crate::shell::TabContent::Grid(grid)) => grid.clone(),
+            Some(crate::shell::TabContent::Grid(grid, _)) => grid.clone(),
             _ => panic!("launch opens on a grid"),
         }
     });
@@ -123,7 +123,7 @@ fn focus_ring_follows_the_focused_pane(cx: &mut gpui_kit::TestAppContext) {
     cx.run_until_parked();
     let grid = shell.read_with(&cx, |this, _| {
         match this.tabs.active().map(|t| &t.content) {
-            Some(crate::shell::TabContent::Grid(grid)) => grid.clone(),
+            Some(crate::shell::TabContent::Grid(grid, _)) => grid.clone(),
             _ => panic!("launch opens on a grid"),
         }
     });
@@ -211,7 +211,7 @@ fn aggregate_shows_only_while_the_grid_is_focused(cx: &mut gpui_kit::TestAppCont
         ));
         this.tab_changed(cx);
         match this.tabs.active().map(|t| &t.content) {
-            Some(crate::shell::TabContent::Grid(grid)) => grid.clone(),
+            Some(crate::shell::TabContent::Grid(grid, _)) => grid.clone(),
             _ => panic!("opened tab is a grid"),
         }
     });

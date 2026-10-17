@@ -32,7 +32,7 @@ impl Shell {
             _ => None,
         };
         let grid = match self.tabs.active().map(|t| &t.content) {
-            Some(TabContent::Grid(grid)) => Some(grid.clone()),
+            Some(TabContent::Grid(grid, _)) => Some(grid.clone()),
             _ => None,
         };
         let (origin, has_tab) = (

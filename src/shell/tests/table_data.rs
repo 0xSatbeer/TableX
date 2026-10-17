@@ -92,7 +92,7 @@ fn grid_rows(
 ) -> usize {
     shell.read_with(cx, |this, cx| {
         match &this.tabs.active().expect("a tab").content {
-            crate::shell::TabContent::Grid(grid) => grid.read(cx).row_count(),
+            crate::shell::TabContent::Grid(grid, _) => grid.read(cx).row_count(),
             crate::shell::TabContent::Console(_) => panic!("a grid tab is active"),
         }
     })
@@ -257,7 +257,7 @@ fn filter_inputs(
 ) {
     shell.read_with(cx, |this, cx| {
         match &this.tabs.active().expect("a tab").content {
-            crate::shell::TabContent::Grid(grid) => grid.read(cx).filter_inputs(),
+            crate::shell::TabContent::Grid(grid, _) => grid.read(cx).filter_inputs(),
             crate::shell::TabContent::Console(_) => panic!("a grid tab is active"),
         }
     })
@@ -386,7 +386,7 @@ fn grid(
 ) -> gpui_kit::Entity<crate::ui::grid::Grid> {
     shell.read_with(cx, |this, _| {
         match &this.tabs.active().expect("a tab").content {
-            crate::shell::TabContent::Grid(grid) => grid.clone(),
+            crate::shell::TabContent::Grid(grid, _) => grid.clone(),
             crate::shell::TabContent::Console(_) => panic!("a grid tab is active"),
         }
     })

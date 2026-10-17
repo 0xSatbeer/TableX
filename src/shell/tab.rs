@@ -22,7 +22,7 @@ impl Shell {
     ) -> AnyElement {
         let theme = cx.theme();
         let icon = match t.content {
-            TabContent::Grid(_) => Icon::empty().path(assets::object_icon("table", false)),
+            TabContent::Grid(_, _) => Icon::empty().path(assets::object_icon("table", false)),
             TabContent::Console(_) => Icon::new(IconName::SquareTerminal),
         };
         let active = ix == self.tabs.active;

@@ -15,6 +15,7 @@ use crate::ui::explorer::Explorer;
 pub(super) const TABLE_PAGE: usize = 500;
 
 /// Where a table tab reads its rows.
+#[derive(Clone)]
 pub struct Table {
     pub driver: Arc<dyn Driver>,
     pub connection: ConnectionId,

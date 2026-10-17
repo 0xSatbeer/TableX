@@ -3,7 +3,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::theme;
-use crate::ui::gallery;
+use crate::ui::{gallery, structure};
 
 use super::{PANEL_MAXIMIZED_CONTEXT, Shell, TabContent, layout::Edge};
 
@@ -34,10 +34,12 @@ impl Render for Shell {
         let content_focused = focused(self.content_focus(cx), cx);
         // The console editor shares the content pane; only the grid itself counts for the aggregate.
         let grid_focused = content_focused
-            && matches!(
-                self.tabs.active().map(|t| &t.content),
-                Some(TabContent::Grid(_))
-            );
+            && match self.tabs.active().map(|t| &t.content) {
+                Some(TabContent::Grid(_, s)) => s
+                    .as_ref()
+                    .is_none_or(|s| s.read(cx).sub == structure::Sub::Data),
+                _ => false,
+            };
         self.status_bar
             .update(cx, |bar, cx| bar.set_grid_focused(grid_focused, cx));
         let explorer_focused = focused(Some(self.explorer.focus_handle(cx)), cx);
@@ -48,7 +50,8 @@ impl Render for Shell {
         }
         let theme = cx.theme();
         let content = match self.tabs.active().map(|t| &t.content) {
-            Some(TabContent::Grid(grid)) => grid.clone().into_any_element(),
+            Some(TabContent::Grid(_, Some(s))) => s.clone().into_any_element(),
+            Some(TabContent::Grid(grid, None)) => grid.clone().into_any_element(),
             Some(TabContent::Console(console)) => {
                 let production = self.tabs.active().and_then(|t| t.origin.as_ref()).is_some_and(|o| o.production);
                 // ponytail: a rule, not the full background tint QX-012 brings with the console toolbar

@@ -16,7 +16,11 @@ mod tab_bar;
 use layout::LayoutState;
 
 enum TabContent {
-    Grid(Entity<grid::Grid>),
+    /// A live table or view also has its Structure and DDL sub-tabs.
+    Grid(
+        Entity<grid::Grid>,
+        Option<Entity<crate::ui::structure::Structure>>,
+    ),
     Console(Entity<console::Console>),
 }
 

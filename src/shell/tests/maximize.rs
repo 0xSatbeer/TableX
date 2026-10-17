@@ -110,7 +110,7 @@ fn every_way_out_of_panel_maximize_refocuses_the_content(cx: &mut gpui_kit::Test
             cx.run_until_parked();
             let (maximized, root, content) = shell.read_with(&cx, |this, cx| {
                 let content = match this.tabs.active().map(|t| &t.content) {
-                    Some(crate::shell::TabContent::Grid(grid)) => grid.focus_handle(cx),
+                    Some(crate::shell::TabContent::Grid(grid, _)) => grid.focus_handle(cx),
                     Some(crate::shell::TabContent::Console(_)) => {
                         super::console_1(this, cx).focus_handle(cx)
                     }

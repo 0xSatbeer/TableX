@@ -418,3 +418,33 @@ fn create_table_with_identity_pk_and_unique_key() {
         ])
     );
 }
+
+#[test]
+fn table_ddl_joins_statements_and_appends_triggers() {
+    let def = TableDef {
+        name: "t".into(),
+        columns: vec![
+            pk(col("id", "int", false, None)),
+            col("user_id", "int", true, None),
+        ],
+        indexes: vec![index("t_user_ix", &["user_id"], false)],
+        foreign_keys: vec![fk("t_user_fk", "user_id", "CASCADE")],
+        primary_key: Some("t_pkey".into()),
+        unique_keys: vec![],
+    };
+    let trigger = crate::model::Trigger {
+        name: "t_audit".into(),
+        timing: "AFTER".into(),
+        events: "INSERT".into(),
+        definition:
+            "CREATE TRIGGER t_audit AFTER INSERT ON s.t FOR EACH ROW EXECUTE FUNCTION audit()"
+                .into(),
+    };
+    assert_eq!(
+        table_ddl("s", &def, &[trigger]),
+        "CREATE TABLE \"s\".\"t\" (\"id\" int NOT NULL, \"user_id\" int, PRIMARY KEY (\"id\"));\n\n\
+         CREATE INDEX \"t_user_ix\" ON \"s\".\"t\" (\"user_id\");\n\n\
+         ALTER TABLE \"s\".\"t\" ADD CONSTRAINT \"t_user_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\" (\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;\n\n\
+         CREATE TRIGGER t_audit AFTER INSERT ON s.t FOR EACH ROW EXECUTE FUNCTION audit();\n"
+    );
+}

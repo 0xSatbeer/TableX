@@ -253,7 +253,7 @@ fn opening_a_table_loads_from_the_database_in_normal_mode_and_shows_mock_rows_in
         let (title, rows) = shell.read_with(&vcx, |this, cx| {
             let tab = this.tabs.active().expect("a tab opened");
             let rows = match &tab.content {
-                crate::shell::TabContent::Grid(grid) => grid.read(cx).row_count(),
+                crate::shell::TabContent::Grid(grid, _) => grid.read(cx).row_count(),
                 crate::shell::TabContent::Console(_) => panic!("{mode:?}: a grid tab opens"),
             };
             (tab.title.to_string(), rows)
