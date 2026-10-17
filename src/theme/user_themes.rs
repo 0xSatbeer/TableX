@@ -7,30 +7,6 @@ use gpui_kit::{App, SharedString, Window};
 
 use super::{BUILT_IN, scale_library_text};
 
-/// Where users drop gpui-kit theme-set JSON files (`*.json`). QueryX only reads it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UserThemeDir {
-    pub dir: PathBuf,
-}
-
-impl UserThemeDir {
-    /// `queryx/themes/` under the platform config dir; `env` reads an environment variable.
-    pub fn resolve(env: impl Fn(&str) -> Option<OsString>) -> Option<Self> {
-        // Empty or relative values count as unset, as the XDG spec says.
-        let abs = |k: &str| env(k).map(PathBuf::from).filter(|p| p.is_absolute());
-        let config = if cfg!(target_os = "macos") {
-            abs("HOME").map(|h| h.join("Library/Application Support"))
-        } else if cfg!(windows) {
-            abs("APPDATA")
-        } else {
-            abs("XDG_CONFIG_HOME").or_else(|| abs("HOME").map(|h| h.join(".config")))
-        };
-        config.map(|c| Self {
-            dir: c.join("queryx/themes"),
-        })
-    }
-}
-
 /// Loads every theme in `dir/*.json`, with one notification message per file or theme skipped.
 pub fn load_user_themes(dir: &Path) -> (Vec<Rc<ThemeConfig>>, Vec<String>) {
     let entries = match std::fs::read_dir(dir) {
@@ -97,7 +73,7 @@ pub fn user_theme_stamp(dir: &Path) -> Vec<(OsString, Option<std::time::SystemTi
 }
 
 /// The user's theme setting. `System` follows the OS light/dark preference live.
-/// `User` names a theme loaded from the `UserThemeDir`.
+/// `User` names a theme loaded from the user theme dir (`<ConfigDir>/themes`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ThemeChoice {
     #[default]

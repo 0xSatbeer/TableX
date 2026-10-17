@@ -3,6 +3,7 @@ mod db;
 mod ddl;
 mod mock;
 mod model;
+mod persist;
 mod shell;
 mod sql;
 mod theme;
@@ -79,9 +80,11 @@ fn main() {
                 window_min_size: Some(size(px(900.), px(600.))),
                 ..TitleBar::window_options()
             };
-            // No home or config dir: built-in themes only.
-            let user_themes = theme::UserThemeDir::resolve(|k| std::env::var_os(k));
-            shell::open_shell(mode, options, user_themes.map(|t| t.dir), cx).expect("open window");
+            // No home or config dir: built-in themes only, nothing saved.
+            let config = persist::ConfigDir::resolve(|k| std::env::var_os(k));
+            let themes = config.as_ref().map(|c| c.root.join("themes"));
+            shell::open_shell(mode, options, themes, config.map(|c| c.root), cx)
+                .expect("open window");
             cx.activate(true);
         });
 }

@@ -15,6 +15,7 @@ impl Shell {
                     id: 1,
                     name: "Workspace".into(),
                     connections: Vec::new(),
+                    id_floor: 0,
                 },
                 std::sync::Arc::new(db::Live::default()),
             ),
@@ -248,6 +249,7 @@ impl Shell {
             theme: theme::ThemeChoice::default(),
             user_themes: Vec::new(),
             user_theme_errors: Vec::new(),
+            workspaces_file: None,
             console_mono: theme::MONO,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| {
                 this.theme.apply(&this.user_themes, window, cx)
@@ -255,6 +257,47 @@ impl Shell {
         };
         this.tab_changed(cx);
         this
+    }
+}
+
+impl Shell {
+    /// Shows the workspaces saved under `root` and saves every later change to them there.
+    pub(super) fn persist_workspaces(
+        &mut self,
+        root: &std::path::Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (mut file, notice) = crate::persist::WorkspacesFile::load(root);
+        let active = file.active();
+        self.workspaces_file = Some(file);
+        self.workspace.update(cx, |ws, cx| {
+            *ws = active;
+            cx.notify();
+        });
+        cx.observe_in(&self.workspace, window, |this, _, window, cx| {
+            this.save_workspaces(window, cx)
+        })
+        .detach();
+        if let Some(notice) = notice {
+            // Deferred: this runs while the window is being built, and notifications need its Root.
+            cx.defer_in(window, move |_, window, cx| {
+                use gpui_kit::component::{WindowExt as _, notification::Notification};
+                window.push_notification(Notification::error(notice), cx);
+            });
+        }
+    }
+
+    /// Writes `workspaces.toml` when an add, edit or delete changed what it holds.
+    fn save_workspaces(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::{WindowExt as _, notification::Notification};
+        let Some(file) = self.workspaces_file.as_mut() else {
+            return;
+        };
+        if let Err(e) = file.save(self.workspace.read(cx)) {
+            let message = format!("Couldn't save {}: {e}", file.path.display());
+            window.push_notification(Notification::error(message), cx);
+        }
     }
 }
 

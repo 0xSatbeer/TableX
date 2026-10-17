@@ -42,6 +42,7 @@ fn a_console_origin_uses_the_dialog_database_or_the_sqlite_file_name() {
     for (params, databases, want) in cases {
         let label = format!("{params:?} {databases:?}");
         let conn = Connection {
+            save_password: false,
             id: ConnectionId(1),
             name: "c".into(),
             color: 0,

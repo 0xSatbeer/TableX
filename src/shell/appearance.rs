@@ -89,7 +89,7 @@ impl Shell {
     pub(super) fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity().downgrade();
         let current = self.theme.clone();
-        // User themes from the `UserThemeDir`, under the built-ins.
+        // User themes from the user theme dir (`<ConfigDir>/themes`), under the built-ins.
         let user = self
             .user_themes
             .iter()

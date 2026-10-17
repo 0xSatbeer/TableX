@@ -64,9 +64,11 @@ pub(crate) struct Shell {
     /// Set when a tab is activated; the next render moves keyboard focus into its content.
     focus_content: bool,
     theme: theme::ThemeChoice,
-    /// Themes loaded from the `UserThemeDir`, listed under the built-ins.
+    /// Themes loaded from the user theme dir (`<ConfigDir>/themes`), listed under the built-ins.
     user_themes: Vec<Rc<gpui_kit::component::theme::ThemeConfig>>,
-    /// Problems last notified for the `UserThemeDir`.
+    /// Normal mode's `workspaces.toml`; demo mode never reads or writes config.
+    workspaces_file: Option<crate::persist::WorkspacesFile>,
+    /// Problems last notified for the user theme dir (`<ConfigDir>/themes`).
     user_theme_errors: Vec<String>,
     /// Overflow list: open state and its search field (shown above `tabs::SEARCH_MIN_TABS` tabs).
     overflow_open: bool,
@@ -105,16 +107,21 @@ pub(crate) fn bind_panel_keys(cx: &mut App) {
     )]);
 }
 
-/// Opens the main window and starts watching `user_themes` (the user theme dir), if any.
+/// Opens the main window and starts watching `user_themes` (the user theme dir), if any. Normal
+/// mode loads and saves the workspaces in `config` (the `ConfigDir` root), if any.
 pub(crate) fn open_shell(
     mode: Mode,
     options: WindowOptions,
     user_themes: Option<std::path::PathBuf>,
+    config: Option<std::path::PathBuf>,
     cx: &mut App,
 ) -> Result<(AnyWindowHandle, Entity<Shell>)> {
     gpui_kit::open_window(options, cx, |window, cx| {
         cx.new(|cx| {
             let mut shell = Shell::new(mode, window, cx);
+            if let (Mode::Normal, Some(root)) = (mode, config) {
+                shell.persist_workspaces(&root, window, cx);
+            }
             if let Some(dir) = user_themes {
                 shell.watch_user_themes(dir, window, cx);
             }

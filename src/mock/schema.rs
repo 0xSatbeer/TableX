@@ -7,6 +7,7 @@ pub fn workspaces() -> Vec<Workspace> {
     let mut conn = |name: &str, color: u8, prod: bool, status, params, databases| {
         next_id += 1;
         Connection {
+            save_password: false,
             id: ConnectionId(next_id),
             name: name.into(),
             color,
@@ -31,6 +32,7 @@ pub fn workspaces() -> Vec<Workspace> {
 
     vec![
         Workspace {
+            id_floor: 0,
             id: 1,
             name: "Acme".into(),
             connections: vec![
@@ -61,6 +63,7 @@ pub fn workspaces() -> Vec<Workspace> {
             ],
         },
         Workspace {
+            id_floor: 0,
             id: 2,
             name: "Side projects".into(),
             connections: vec![
@@ -83,6 +86,7 @@ pub fn workspaces() -> Vec<Workspace> {
             ],
         },
         Workspace {
+            id_floor: 0,
             id: 3,
             name: "Analytics".into(),
             connections: vec![conn(

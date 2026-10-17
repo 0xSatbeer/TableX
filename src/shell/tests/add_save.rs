@@ -128,6 +128,7 @@ fn saving_a_valid_form_appends_the_connection_and_selects_its_row(
             added.id
         );
         let want = Connection {
+            save_password: false,
             id: added.id,
             name: name.into(),
             color,

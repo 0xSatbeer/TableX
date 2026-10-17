@@ -134,6 +134,7 @@ fn broken_theme_file_at_startup_is_reported_not_a_crash(cx: &mut gpui_kit::TestA
                 crate::shell::Mode::Normal,
                 Default::default(),
                 Some(dir),
+                None,
                 cx,
             )
         })

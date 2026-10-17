@@ -14,6 +14,7 @@ pub(super) fn pg(id: u32, name: &str, database: &str) -> crate::model::Connectio
         ssl: SslMode::Prefer,
     };
     Connection {
+        save_password: false,
         id: ConnectionId(id),
         name: name.into(),
         color: 0,
@@ -87,6 +88,7 @@ pub(super) fn open_explorer(
     let driver: Arc<dyn crate::db::Driver> = fake.clone();
     let workspace = cx.update(|cx| {
         cx.new(|_| crate::model::Workspace {
+            id_floor: 0,
             id: 1,
             name: "w".into(),
             connections,

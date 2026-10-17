@@ -8,6 +8,9 @@ edition = "2024"
 chrono = { version = "0.4", default-features = false }
 # JSON cells are checked before they are saved; already in the tree through gpui.
 serde_json = "1"
+# workspaces.toml and the other config files (src/persist).
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql"] }
 # Database IO (src/db): one tokio runtime runs every session (docs/adr/0001).
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }

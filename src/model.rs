@@ -12,6 +12,29 @@ pub struct Workspace {
     pub name: String,
     /// A connection belongs to exactly one workspace, so the workspace owns it.
     pub connections: Vec<Connection>,
+    /// The highest connection id any workspace used when `Workspaces::share_ids` last ran;
+    /// `add` goes past it so ids stay unique across workspaces.
+    pub id_floor: u32,
+}
+
+/// Every workspace, in display order, and the one shown (by id).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Workspaces {
+    pub active: u32,
+    pub list: Vec<Workspace>,
+}
+
+impl Workspaces {
+    /// Points every workspace's `add` past the ids all of them use.
+    pub fn share_ids(&mut self) {
+        let max = self
+            .list
+            .iter()
+            .flat_map(|w| w.connections.iter().map(|c| c.id.0).chain([w.id_floor]))
+            .max()
+            .unwrap_or(0);
+        self.list.iter_mut().for_each(|w| w.id_floor = max);
+    }
 }
 
 impl Workspace {
@@ -23,7 +46,8 @@ impl Workspace {
         is_production: bool,
         params: ConnectionParams,
     ) -> ConnectionId {
-        let id = ConnectionId(self.connections.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+        let used = self.connections.iter().map(|c| c.id.0).max().unwrap_or(0);
+        let id = ConnectionId(used.max(self.id_floor) + 1);
         self.connections.push(Connection {
             id,
             name,
@@ -31,6 +55,7 @@ impl Workspace {
             is_production,
             status: ConnectionStatus::Disconnected,
             params,
+            save_password: false,
             databases: None,
         });
         id
@@ -147,6 +172,8 @@ pub struct Connection {
     pub is_production: bool,
     pub status: ConnectionStatus,
     pub params: ConnectionParams,
+    /// The password lives in the keychain; false asks for it on connect.
+    pub save_password: bool,
     /// `None` until listed; each tree level below is loaded the same way, when first expanded.
     pub databases: Option<Vec<Database>>,
 }

@@ -30,6 +30,7 @@ fn open_bar(
         cx.set_reduce_motion(true);
     });
     let mut ws = Workspace {
+        id_floor: 0,
         id: 1,
         name: "w".into(),
         connections: Vec::new(),

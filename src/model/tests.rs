@@ -71,6 +71,7 @@ fn secret_debug_is_masked_and_a_password_only_edit_disconnects() {
     ];
     for (old, new, disconnects) in cases {
         let mut ws = Workspace {
+            id_floor: 0,
             id: 1,
             name: "w".into(),
             connections: Vec::new(),
@@ -130,4 +131,31 @@ fn values_display_like_postgres() {
     for (value, want) in cases {
         assert_eq!(value.to_string(), want);
     }
+}
+
+#[test]
+fn connection_ids_stay_unique_across_workspaces() {
+    let sqlite = || ConnectionParams::Sqlite {
+        path: PathBuf::from("x"),
+    };
+    let mut all = Workspaces {
+        active: 1,
+        list: crate::mock::workspaces(),
+    };
+    all.share_ids();
+    let mut added = Vec::new();
+    for ix in [1, 0, 1] {
+        added.push(all.list[ix].add("n".into(), 0, false, sqlite()));
+        all.share_ids();
+    }
+    let mut ids: Vec<u32> = all
+        .list
+        .iter()
+        .flat_map(|w| w.connections.iter().map(|c| c.id.0))
+        .collect();
+    let count = ids.len();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), count, "duplicate id in {ids:?}");
+    assert!(added.windows(2).all(|w| w[0].0 < w[1].0), "{added:?}");
 }

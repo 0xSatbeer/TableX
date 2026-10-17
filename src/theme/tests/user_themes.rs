@@ -1,35 +1,5 @@
 use super::*;
 
-#[cfg(target_os = "linux")]
-#[test]
-fn user_theme_dir_follows_xdg_then_home() {
-    use super::UserThemeDir;
-    use std::path::PathBuf;
-    // (XDG_CONFIG_HOME, HOME, expected dir)
-    let cases: [(Option<&str>, Option<&str>, Option<&str>); 7] = [
-        (Some("/x"), Some("/h"), Some("/x/queryx/themes")),
-        (None, Some("/h"), Some("/h/.config/queryx/themes")),
-        (Some(""), Some("/h"), Some("/h/.config/queryx/themes")), // empty counts as unset (XDG spec)
-        (Some("rel"), Some("/h"), Some("/h/.config/queryx/themes")), // relative is ignored (XDG spec)
-        (Some("/x"), None, Some("/x/queryx/themes")),
-        (None, None, None),
-        (None, Some(""), None),
-    ];
-    for (xdg, home, want) in cases {
-        let env = |k: &str| match k {
-            "XDG_CONFIG_HOME" => xdg.map(Into::into),
-            "HOME" => home.map(Into::into),
-            _ => None,
-        };
-        let got = UserThemeDir::resolve(env).map(|d| d.dir);
-        assert_eq!(
-            got,
-            want.map(PathBuf::from),
-            "XDG_CONFIG_HOME={xdg:?} HOME={home:?}"
-        );
-    }
-}
-
 #[test]
 fn missing_user_theme_dir_loads_nothing_and_reports_nothing() {
     let dir = test_dir("missing").join("themes");
