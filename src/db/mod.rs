@@ -11,7 +11,7 @@ use futures::future::BoxFuture;
 
 use crate::model::{
     Column, ColumnMeta, ConnectionParams, DbObject, QueryError, QueryErrorKind, ResultSet, Role,
-    Row, TableDef,
+    Row, TableDef, Trigger,
 };
 
 #[cfg(test)]
@@ -72,13 +72,19 @@ pub trait Driver: Send + Sync {
     /// The columns of table or view `object`, in ordinal order.
     fn columns(&self, session: &Session, schema: &str, object: &str) -> Reply<Vec<Column>>;
     /// Runs `statements` in order; in one transaction when `atomic`, else each on its own.
-    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()>;
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> QueryReply<()>;
     /// Every role on the server, sorted by name.
     fn roles(&self, session: &Session) -> Reply<Vec<Role>>;
     /// The owner of the database `session` is open on.
     fn database_owner(&self, session: &Session) -> Reply<String>;
     fn schema_owner(&self, session: &Session, schema: &str) -> Reply<String>;
     fn table_def(&self, session: &Session, schema: &str, table: &str) -> Reply<TableDef>;
+    /// The triggers on table `table`, sorted by name.
+    #[allow(dead_code)] // read by the table view's DDL tab, a later ticket
+    fn triggers(&self, session: &Session, schema: &str, table: &str) -> Reply<Vec<Trigger>>;
+    /// A view's SELECT (PG `pg_get_viewdef`, SQLite `sqlite_master.sql`).
+    #[allow(dead_code)]
+    fn view_def(&self, session: &Session, schema: &str, view: &str) -> Reply<String>;
     /// Runs one statement. Row-returning statements stay open for `fetch`. With `autocommit`,
     /// Postgres opens the portal inside an implicit transaction that commits on close/exhaustion.
     fn open(&self, session: &Session, sql: String, autocommit: bool) -> QueryReply<Opened>;
@@ -142,8 +148,16 @@ impl Driver for Live {
         self.on(session).columns(session, schema, object)
     }
 
-    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()> {
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> QueryReply<()> {
         self.on(session).execute(session, statements, atomic)
+    }
+
+    fn triggers(&self, session: &Session, schema: &str, table: &str) -> Reply<Vec<Trigger>> {
+        self.on(session).triggers(session, schema, table)
+    }
+
+    fn view_def(&self, session: &Session, schema: &str, view: &str) -> Reply<String> {
+        self.on(session).view_def(session, schema, view)
     }
 
     fn roles(&self, session: &Session) -> Reply<Vec<Role>> {

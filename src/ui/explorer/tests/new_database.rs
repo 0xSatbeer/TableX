@@ -97,7 +97,7 @@ fn new_database_creates_it_owned_by_the_connection_user_and_refreshes_the_connec
             false
         )]
     );
-    fake.resolve("execute app", Ok(()));
+    fake.resolve_query("execute app", Ok(()));
     cx.run_until_parked();
     assert!(cx.debug_bounds("dialog-layer").is_none(), "dialog closed");
     assert_eq!(

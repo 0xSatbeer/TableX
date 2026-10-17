@@ -266,6 +266,17 @@ pub struct ForeignKey {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Trigger {
+    pub name: String,
+    /// "BEFORE" | "AFTER" | "INSTEAD OF"
+    pub timing: String,
+    /// e.g. "INSERT OR UPDATE"
+    pub events: String,
+    /// The full CREATE TRIGGER statement as the server gives it.
+    pub definition: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct TableDef {
     pub name: String,
     pub columns: Vec<Column>, // existing Column; is_pk editable, enum_values ignored

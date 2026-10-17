@@ -194,7 +194,7 @@ fn renames_a_type_change_an_added_and_a_removed_column_run_atomically_and_refres
             true
         )]
     );
-    fake.resolve("execute app", Ok(()));
+    fake.resolve_query("execute app", Ok(()));
     cx.run_until_parked();
     assert!(cx.debug_bounds("dialog-layer").is_none(), "dialog closed");
     assert_eq!(

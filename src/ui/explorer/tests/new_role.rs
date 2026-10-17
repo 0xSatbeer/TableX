@@ -100,7 +100,7 @@ fn new_user_creates_a_login_role_with_its_password_and_membership_atomically(
             true
         )]
     );
-    fake.resolve("execute app", Ok(()));
+    fake.resolve_query("execute app", Ok(()));
     cx.run_until_parked();
     assert!(cx.debug_bounds("dialog-layer").is_none(), "dialog closed");
     assert!(fake.pending().is_empty(), "nothing refreshes");

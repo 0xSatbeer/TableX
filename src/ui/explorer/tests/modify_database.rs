@@ -140,7 +140,7 @@ fn apply_runs_both_statements_one_by_one_on_a_postgres_session_and_refreshes_the
         fake.executed(),
         [("postgres".to_string(), statements(), false)]
     );
-    fake.resolve("execute postgres", Ok(()));
+    fake.resolve_query("execute postgres", Ok(()));
     cx.run_until_parked();
     assert!(cx.debug_bounds("dialog-layer").is_none(), "dialog closed");
     assert_eq!(

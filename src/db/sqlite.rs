@@ -10,7 +10,7 @@ use futures::future::{BoxFuture, ready};
 use super::{Driver, Opened, QueryReply, Reply, Session, blocking, foreign, foreign_query};
 use crate::model::{
     Column, ColumnMeta, ConnectionParams, DbObject, ObjectKind, QueryError, QueryErrorKind,
-    ResultSet, Role, Row, TableDef, Value,
+    ResultSet, Role, Row, TableDef, Trigger, Value,
 };
 
 mod worker;
@@ -237,8 +237,19 @@ impl Driver for Sqlite {
         columns.map(move |got| session.reply(got)).boxed()
     }
 
-    fn execute(&self, _: &Session, _: Vec<String>, _: bool) -> Reply<()> {
-        unsupported()
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> QueryReply<()> {
+        let Session::Sqlite(session) = session else {
+            return foreign_query();
+        };
+        let done = session.run(move |conn| Ok(batch(conn, &statements, atomic)));
+        let session = session.clone();
+        done.map(move |got| match got {
+            Some(Ok(Err((statement, err)))) => session
+                .query_reply::<()>(Some(Err(err)))
+                .map_err(|err| QueryError { statement, ..err }),
+            got => session.query_reply(got.map(|done| done.map(drop))),
+        })
+        .boxed()
     }
 
     fn roles(&self, _: &Session) -> Reply<Vec<Role>> {
@@ -255,6 +266,51 @@ impl Driver for Sqlite {
 
     fn table_def(&self, _: &Session, _: &str, _: &str) -> Reply<TableDef> {
         unsupported()
+    }
+
+    fn triggers(&self, session: &Session, schema: &str, table: &str) -> Reply<Vec<Trigger>> {
+        let Session::Sqlite(session) = session else {
+            return foreign();
+        };
+        let (schema, table) = (schema.to_string(), table.to_string());
+        let triggers = session.run(move |conn| {
+            let sql = format!(
+                "SELECT name, sql FROM {}.sqlite_schema WHERE type = 'trigger' AND tbl_name = ?1 ORDER BY name",
+                quote(&schema)
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([&table], |row| {
+                let definition: String = row.get(1)?;
+                let (timing, events) = trigger_type(&definition);
+                Ok(Trigger {
+                    name: row.get(0)?,
+                    timing,
+                    events,
+                    definition,
+                })
+            })?;
+            rows.collect()
+        });
+        let session = session.clone();
+        triggers.map(move |got| session.reply(got)).boxed()
+    }
+
+    fn view_def(&self, session: &Session, schema: &str, view: &str) -> Reply<String> {
+        let Session::Sqlite(session) = session else {
+            return foreign();
+        };
+        let (schema, view) = (schema.to_string(), view.to_string());
+        let missing = format!("no such view: {view}");
+        let sql = session.run(move |conn| {
+            let sql = format!(
+                "SELECT sql FROM {}.sqlite_schema WHERE type = 'view' AND name = ?1",
+                quote(&schema)
+            );
+            rusqlite::OptionalExtension::optional(conn.query_row(&sql, [&view], |row| row.get(0)))
+        });
+        let session = session.clone();
+        sql.map(move |got| session.reply(got)?.ok_or(missing))
+            .boxed()
     }
 
     /// `autocommit` is ignored: SQLite commits each statement unless the caller's BEGIN is open.
@@ -307,6 +363,50 @@ impl Driver for Sqlite {
         let session = session.clone();
         result.map(move |got| session.query_reply(got)).boxed()
     }
+}
+
+/// Runs `statements` in order, in one transaction when `atomic`; on failure, the failing index and error.
+fn batch(
+    conn: &rusqlite::Connection,
+    statements: &[String],
+    atomic: bool,
+) -> Result<(), (usize, rusqlite::Error)> {
+    if atomic {
+        conn.execute_batch("BEGIN").map_err(|err| (0, err))?;
+    }
+    for (statement, sql) in statements.iter().enumerate() {
+        if let Err(err) = conn.execute_batch(sql) {
+            if atomic {
+                conn.execute_batch("ROLLBACK").ok();
+            }
+            return Err((statement, err));
+        }
+    }
+    if atomic && let Err(err) = conn.execute_batch("COMMIT") {
+        conn.execute_batch("ROLLBACK").ok();
+        return Err((statements.len().saturating_sub(1), err));
+    }
+    Ok(())
+}
+
+/// The timing and event a CREATE TRIGGER statement names; SQLite's default timing is BEFORE.
+fn trigger_type(sql: &str) -> (String, String) {
+    let words: Vec<String> = sql.split_whitespace().map(str::to_uppercase).collect();
+    let Some(at) = words
+        .iter()
+        .position(|w| matches!(w.as_str(), "INSERT" | "UPDATE" | "DELETE"))
+    else {
+        return ("BEFORE".into(), String::new());
+    };
+    let timing = match (
+        at.checked_sub(2).map(|i| words[i].as_str()),
+        words[at - 1].as_str(),
+    ) {
+        (Some("INSTEAD"), "OF") => "INSTEAD OF",
+        (_, "AFTER") => "AFTER",
+        _ => "BEFORE",
+    };
+    (timing.into(), words[at].clone())
 }
 
 fn unsupported<T: Send + 'static>() -> Reply<T> {

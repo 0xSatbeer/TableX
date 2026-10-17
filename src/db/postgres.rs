@@ -13,8 +13,8 @@ use super::{
     timeout_reason,
 };
 use crate::model::{
-    Column, ConnectionParams, DbObject, ForeignKey, Index, ObjectKind, ResultSet, Role, Row,
-    SslMode, TableDef,
+    Column, ConnectionParams, DbObject, ForeignKey, Index, ObjectKind, QueryError, ResultSet, Role,
+    Row, SslMode, TableDef, Trigger,
 };
 
 mod query;
@@ -66,27 +66,37 @@ impl PgSession {
     }
 
     /// Runs one statement without parameters, so DDL and transaction control work.
-    async fn run(&self, sql: &str) -> Result<(), String> {
+    async fn run(&self, sql: &str) -> Result<(), QueryError> {
         self.statements
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let conn = self.conn.lock().await;
-        conn.client.batch_execute(sql).await.map_err(|e| reason(&e))
+        conn.client
+            .batch_execute(sql)
+            .await
+            .map_err(|e| self.error(&e, sql))
     }
 
-    async fn run_all(&self, statements: &[String]) -> Result<(), String> {
-        for sql in statements {
-            self.run(sql).await?;
+    async fn run_all(&self, statements: &[String]) -> Result<(), QueryError> {
+        for (statement, sql) in statements.iter().enumerate() {
+            self.run(sql)
+                .await
+                .map_err(|err| QueryError { statement, ..err })?;
         }
         Ok(())
     }
 
-    async fn run_atomic(&self, statements: &[String]) -> Result<(), String> {
+    async fn run_atomic(&self, statements: &[String]) -> Result<(), QueryError> {
         self.run("BEGIN").await?;
         if let Err(err) = self.run_all(statements).await {
             self.run("ROLLBACK").await.ok();
             return Err(err);
         }
-        self.run("COMMIT").await
+        // A deferred constraint fails at COMMIT; blame the last statement.
+        let last = statements.len().saturating_sub(1);
+        self.run("COMMIT").await.map_err(|err| QueryError {
+            statement: last,
+            ..err
+        })
     }
 
     /// The owner named by `sql`'s one row, or `missing` when there is none.
@@ -276,8 +286,8 @@ impl Driver for Postgres {
         })
     }
 
-    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()> {
-        read(session, |session| async move {
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> QueryReply<()> {
+        run(session, |session| async move {
             match atomic {
                 true => session.run_atomic(&statements).await,
                 false => session.run_all(&statements).await,
@@ -330,6 +340,39 @@ impl Driver for Postgres {
                 unique_keys,
                 name: table,
             })
+        })
+    }
+
+    fn triggers(&self, session: &Session, schema: &str, table: &str) -> Reply<Vec<Trigger>> {
+        let (schema, table) = (schema.to_string(), table.to_string());
+        read(session, |session| async move {
+            let sql = "SELECT t.tgname::text, t.tgtype::int4, pg_get_triggerdef(t.oid, true) \
+                       FROM pg_trigger t \
+                       JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                       WHERE n.nspname = $1 AND c.relname = $2 AND NOT t.tgisinternal \
+                       ORDER BY t.tgname COLLATE \"C\"";
+            let rows = session.query(sql, &[&schema, &table]).await?;
+            Ok(rows
+                .iter()
+                .map(|row| {
+                    let (timing, events) = trigger_type(row.get(1));
+                    Trigger {
+                        name: row.get(0),
+                        timing,
+                        events,
+                        definition: row.get(2),
+                    }
+                })
+                .collect())
+        })
+    }
+
+    fn view_def(&self, session: &Session, schema: &str, view: &str) -> Reply<String> {
+        let (schema, view) = (schema.to_string(), view.to_string());
+        read(session, |session| async move {
+            let sql = "SELECT pg_get_viewdef(format('%I.%I', $1::text, $2::text)::regclass, true)";
+            let rows = session.query(sql, &[&schema, &view]).await?;
+            Ok(rows[0].get(0))
         })
     }
 
@@ -483,6 +526,27 @@ fn action(code: &str) -> String {
         _ => "NO ACTION",
     }
     .into()
+}
+
+/// The timing and events a `pg_trigger.tgtype` bitmask encodes (PG's `TRIGGER_TYPE_*`).
+fn trigger_type(tgtype: i32) -> (String, String) {
+    let timing = match tgtype {
+        t if t & 64 != 0 => "INSTEAD OF",
+        t if t & 2 != 0 => "BEFORE",
+        _ => "AFTER",
+    };
+    let events = [
+        (4, "INSERT"),
+        (8, "DELETE"),
+        (16, "UPDATE"),
+        (32, "TRUNCATE"),
+    ]
+    .into_iter()
+    .filter(|(bit, _)| tgtype & bit != 0)
+    .map(|(_, event)| event)
+    .collect::<Vec<_>>()
+    .join(" OR ");
+    (timing.into(), events)
 }
 
 /// Helpers for tests against the compose Postgres (`QUERYX_TEST_PG`); T02's listing tests use them too.

@@ -10,7 +10,7 @@ use futures::channel::oneshot;
 
 use super::{Driver, Opened, QueryReply, Reply, Session, server_error};
 use crate::model::{
-    Column, ConnectionParams, DbObject, QueryError, ResultSet, Role, Row, TableDef,
+    Column, ConnectionParams, DbObject, QueryError, ResultSet, Role, Row, TableDef, Trigger,
 };
 
 type Answer = Result<Box<dyn Any + Send>, String>;
@@ -158,14 +158,22 @@ impl Driver for Fake {
         self.call(format!("columns {}/{schema}/{object}", on(session)))
     }
 
-    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> Reply<()> {
+    fn execute(&self, session: &Session, statements: Vec<String>, atomic: bool) -> QueryReply<()> {
         let database = on(session).to_string();
         let label = format!("execute {database}");
         self.executed
             .lock()
             .unwrap()
             .push((database, statements, atomic));
-        self.call(label)
+        self.call_query(label)
+    }
+
+    fn triggers(&self, session: &Session, schema: &str, table: &str) -> Reply<Vec<Trigger>> {
+        self.call(format!("triggers {}/{schema}/{table}", on(session)))
+    }
+
+    fn view_def(&self, session: &Session, schema: &str, view: &str) -> Reply<String> {
+        self.call(format!("view_def {}/{schema}/{view}", on(session)))
     }
 
     fn roles(&self, session: &Session) -> Reply<Vec<Role>> {
@@ -334,7 +342,7 @@ mod tests {
             fake.executed(),
             [("app".to_string(), vec!["DROP TABLE t".to_string()], true)]
         );
-        fake.resolve("execute app", Ok(()));
+        fake.resolve_query("execute app", Ok(()));
         assert_eq!((&mut execute).now_or_never(), Some(Ok(())));
     }
 

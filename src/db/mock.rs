@@ -9,7 +9,7 @@ use gpui_kit::BackgroundExecutor;
 use super::{Driver, Opened, QueryReply, Reply, Session, foreign, foreign_query, server_error};
 use crate::model::{
     Column, ConnectionParams, Database, DbObject, ForeignKey, Index, Key, QueryError, QueryOutcome,
-    ResultSet, Role, Row, TableDef,
+    ResultSet, Role, Row, TableDef, Trigger,
 };
 
 pub struct Mock {
@@ -161,8 +161,16 @@ impl Driver for Mock {
         })
     }
 
-    fn execute(&self, _: &Session, _: Vec<String>, _: bool) -> Reply<()> {
+    fn execute(&self, _: &Session, _: Vec<String>, _: bool) -> QueryReply<()> {
         self.after_latency(Ok(()))
+    }
+
+    fn triggers(&self, _: &Session, _: &str, _: &str) -> Reply<Vec<Trigger>> {
+        self.after_latency(Ok(Vec::new()))
+    }
+
+    fn view_def(&self, _: &Session, schema: &str, view: &str) -> Reply<String> {
+        self.after_latency(Ok(format!(" SELECT *\n   FROM {schema}.{view}_source;")))
     }
 
     fn roles(&self, _: &Session) -> Reply<Vec<Role>> {

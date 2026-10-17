@@ -73,7 +73,7 @@ fn rename_and_owner_change_run_atomically_on_the_database_session_and_refresh_th
             true
         )]
     );
-    fake.resolve("execute app", Ok(()));
+    fake.resolve_query("execute app", Ok(()));
     cx.run_until_parked();
     assert!(cx.debug_bounds("dialog-layer").is_none(), "dialog closed");
     assert_eq!(

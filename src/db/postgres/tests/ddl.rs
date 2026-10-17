@@ -1,6 +1,6 @@
 use super::*;
 use crate::ddl::{TableEdit, alter_table};
-use crate::model::{ForeignKey, Index, Role, TableDef};
+use crate::model::{ForeignKey, Index, QueryErrorKind, Role, TableDef};
 
 fn strings(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
@@ -17,7 +17,10 @@ fn an_atomic_execute_that_fails_on_its_second_statement_leaves_no_trace_of_the_f
         strings(&[&format!("CREATE TABLE {s}.kept (a int)"), "SELECT 1/0"]),
         true,
     );
-    assert_eq!(block_on(run), Err("division by zero".to_string()));
+    assert_eq!(
+        block_on(run).map_err(|e| e.message),
+        Err("division by zero".to_string())
+    );
     let left = format!("SELECT count(*) FROM pg_tables WHERE schemaname = '{s}'");
     assert_eq!(admin(&pg, &left), ["0"]);
 
@@ -61,7 +64,10 @@ fn a_non_atomic_execute_creates_a_database_and_stops_at_the_first_error() {
         strings(&["SELECT 1/0", &format!("DROP DATABASE {name}")]),
         false,
     );
-    assert_eq!(block_on(run), Err("division by zero".to_string()));
+    assert_eq!(
+        block_on(run).map_err(|e| e.message),
+        Err("division by zero".to_string())
+    );
     assert_eq!(exists(), ["1"], "nothing runs after the failure");
 
     let run = Postgres::default().execute(
@@ -71,6 +77,25 @@ fn a_non_atomic_execute_creates_a_database_and_stops_at_the_first_error() {
     );
     assert_eq!(block_on(run), Ok(()));
     assert_eq!(exists(), ["0"]);
+}
+
+#[test]
+fn a_failing_third_statement_is_named_by_its_index() {
+    let Some(pg) = test_pg() else { return };
+    let session = session(&pg);
+    for atomic in [true, false] {
+        let run = Postgres::default().execute(
+            &session,
+            strings(&["SELECT 1", "SELECT 2", "SELECT 1/0"]),
+            atomic,
+        );
+        let err = block_on(run).unwrap_err();
+        assert_eq!(
+            (err.kind, err.statement, err.message.as_str()),
+            (QueryErrorKind::Server, 2, "division by zero"),
+            "atomic: {atomic}"
+        );
+    }
 }
 
 #[test]

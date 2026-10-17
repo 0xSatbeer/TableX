@@ -260,15 +260,11 @@ fn columns_come_in_ordinal_order_with_type_nullability_default_and_pk() {
 }
 
 #[test]
-fn ddl_and_metadata_calls_are_not_supported() {
+fn metadata_calls_are_not_supported() {
     let dir = tempfile::tempdir().unwrap();
     let session =
         block_on(Sqlite.connect(&params(&file(dir.path(), "a.db", "CREATE TABLE t (a)")))).unwrap();
     let want = Err("not supported on SQLite".to_string());
-    assert_eq!(
-        block_on(Sqlite.execute(&session, vec!["DROP TABLE t".into()], true)),
-        want
-    );
     assert_eq!(block_on(Sqlite.roles(&session)).map(drop), want);
     assert_eq!(block_on(Sqlite.database_owner(&session)).map(drop), want);
     assert_eq!(
@@ -454,4 +450,79 @@ fn query_calls_on_a_closed_session_are_disconnected() {
     assert!(session.is_closed());
     let err = block_on(Sqlite.query(&session, "SELECT * FROM t".into())).unwrap_err();
     assert_eq!(err.kind, QueryErrorKind::Disconnected);
+}
+
+#[test]
+fn a_failing_third_statement_is_named_by_its_index_and_atomic_rolls_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = session_on(dir.path(), "CREATE TABLE t (a)");
+    let count = |session: &Session| {
+        let rows = block_on(Sqlite.query(session, "SELECT count(*) FROM t".into())).unwrap();
+        rows.rows[0][0].clone()
+    };
+    let batch = |atomic| {
+        let statements = [
+            "INSERT INTO t VALUES (1)",
+            "INSERT INTO t VALUES (2)",
+            "INSERT INTO nope VALUES (3)",
+        ];
+        Sqlite.execute(&session, statements.map(String::from).to_vec(), atomic)
+    };
+
+    let err = block_on(batch(true)).unwrap_err();
+    assert_eq!(
+        (err.kind, err.statement, err.message.as_str()),
+        (QueryErrorKind::Server, 2, "no such table: nope")
+    );
+    assert_eq!(count(&session), Value::Int(0), "atomic rolled back");
+
+    assert_eq!(block_on(batch(false)).unwrap_err().statement, 2);
+    assert_eq!(
+        count(&session),
+        Value::Int(2),
+        "non-atomic kept the first two"
+    );
+}
+
+#[test]
+fn triggers_list_timing_and_events_sorted_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let guard = "CREATE TRIGGER a_guard BEFORE DELETE ON t BEGIN SELECT 1; END";
+    let audit = "CREATE TRIGGER \"b audit\" AFTER UPDATE OF a ON t BEGIN SELECT 1; END";
+    let plain = "CREATE TRIGGER c_plain INSERT ON t BEGIN SELECT 1; END";
+    let other = "CREATE TRIGGER d_other INSERT ON u BEGIN SELECT 1; END";
+    let session = session_on(
+        dir.path(),
+        &format!("CREATE TABLE t (a); CREATE TABLE u (a); {plain}; {audit}; {guard}; {other};"),
+    );
+
+    let triggers = block_on(Sqlite.triggers(&session, "main", "t")).unwrap();
+
+    let def = |name: &str, timing: &str, events: &str, definition: &str| Trigger {
+        name: name.into(),
+        timing: timing.into(),
+        events: events.into(),
+        definition: definition.into(),
+    };
+    assert_eq!(
+        triggers,
+        [
+            def("a_guard", "BEFORE", "DELETE", guard),
+            def("b audit", "AFTER", "UPDATE", audit),
+            def("c_plain", "BEFORE", "INSERT", plain),
+        ]
+    );
+}
+
+#[test]
+fn view_def_is_the_views_sql() {
+    let dir = tempfile::tempdir().unwrap();
+    let view = "CREATE VIEW v AS SELECT a FROM t WHERE a > 1";
+    let session = session_on(dir.path(), &format!("CREATE TABLE t (a); {view};"));
+
+    assert_eq!(
+        block_on(Sqlite.view_def(&session, "main", "v")),
+        Ok(view.to_string())
+    );
+    assert!(block_on(Sqlite.view_def(&session, "main", "t")).is_err());
 }

@@ -106,7 +106,7 @@ impl PgSession {
     }
 
     /// `err` as a query failure; `sql` is the statement it came from, for the error position.
-    fn error(&self, err: &Error, sql: &str) -> QueryError {
+    pub(super) fn error(&self, err: &Error, sql: &str) -> QueryError {
         let db = err.as_db_error();
         let fatal = db.is_some_and(|db| matches!(db.severity(), "FATAL" | "PANIC"));
         let cancelled = db.is_some_and(|db| *db.code() == SqlState::QUERY_CANCELED);

@@ -149,7 +149,7 @@ fn two_columns_an_index_and_an_fk_run_atomically_and_refresh_the_schema(
             true
         )]
     );
-    fake.resolve("execute app", Ok(()));
+    fake.resolve_query("execute app", Ok(()));
     cx.run_until_parked();
     assert!(cx.debug_bounds("dialog-layer").is_none(), "dialog closed");
     assert_eq!(

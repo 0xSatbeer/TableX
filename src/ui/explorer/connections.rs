@@ -457,7 +457,8 @@ impl Explorer {
                         }
                     })
                     .ok();
-                    driver.execute(&session, statements, atomic).await
+                    let done = driver.execute(&session, statements, atomic).await;
+                    done.map_err(|err| err.message)
                 }
                 Err(reason) => Err(reason),
             };
