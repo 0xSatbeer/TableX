@@ -114,7 +114,7 @@ pub enum SslMode {
     Require,
 }
 
-/// A password. In memory only, never written anywhere (QX-035 moves it to the keyring).
+/// A password. Only in memory and the OS keychain (`persist::Keychain`), never in a file.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
 

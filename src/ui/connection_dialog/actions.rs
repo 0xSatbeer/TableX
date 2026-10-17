@@ -19,6 +19,7 @@ impl ConnectionDialog {
             port: text(&self.port),
             user: text(&self.user),
             password: text(&self.password),
+            save_password: self.save_password,
             database: text(&self.database),
             ssl,
             path: text(&self.path),
@@ -35,16 +36,28 @@ impl ConnectionDialog {
         };
         self.test = None;
         let (color, is_production, editing) = (self.color, self.is_production, self.editing);
-        let id = self.workspace.update(cx, |ws, cx| {
+        let save = self.save_password && matches!(params, ConnectionParams::Postgres { .. });
+        let password = match &params {
+            ConnectionParams::Postgres { password, .. } => password.clone(),
+            ConnectionParams::Sqlite { .. } => None,
+        };
+        let (id, was_saved) = self.workspace.update(cx, |ws, cx| {
             cx.notify();
-            match editing {
+            let id = match editing {
                 Some(id) => {
                     ws.edit(id, name, color, is_production, params);
                     id
                 }
                 None => ws.add(name, color, is_production, params),
-            }
+            };
+            let conn = ws.connections.iter_mut().find(|c| c.id == id);
+            let conn = conn.expect("the saved connection");
+            (id, std::mem::replace(&mut conn.save_password, save))
         });
+        // An unread saved password stays as it is rather than being deleted as "empty".
+        if !(save && password.is_none() && self.prefill_failed) {
+            store_password(id, save.then_some(password).flatten(), was_saved, cx);
+        }
         cx.emit(Saved(id));
         true
     }
@@ -136,5 +149,18 @@ impl ConnectionDialog {
             .ok();
         }));
         cx.notify();
+    }
+}
+
+/// Puts `password` under connection `id` in the keychain, or removes the entry it may have.
+fn store_password(id: ConnectionId, password: Option<Secret>, was_saved: bool, cx: &mut App) {
+    let keychain = crate::persist::Keys::of(cx);
+    let result = match &password {
+        Some(password) => keychain.set(id, password),
+        None if was_saved => keychain.delete(id),
+        None => Ok(()),
+    };
+    if let Err(error) = result {
+        crate::ui::password_prompt::keychain_failed(&error, cx);
     }
 }

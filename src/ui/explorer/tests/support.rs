@@ -9,7 +9,8 @@ pub(super) fn pg(id: u32, name: &str, database: &str) -> crate::model::Connectio
         host: "h".into(),
         port: 5432,
         user: "u".into(),
-        password: None,
+        // In memory, as after a prompt, so connecting doesn't ask.
+        password: Some(crate::model::Secret::new("pw")),
         database: database.into(),
         ssl: SslMode::Prefer,
     };

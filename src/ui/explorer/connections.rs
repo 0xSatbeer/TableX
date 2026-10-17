@@ -2,12 +2,18 @@
 
 use super::*;
 use crate::db::Reply;
+use crate::model::Secret;
+use crate::persist::Keys;
+use crate::ui::password_prompt::{Entered, PasswordPrompt, keychain_failed};
 use futures::FutureExt as _;
 
 impl Explorer {
     /// Connects connection `ci`, then lists its databases. Expanding a connection that is not
     /// connected and Retry on a failed one both come here. `all` expands everything it lists, as `*` does.
     pub(super) fn connect(&mut self, ci: usize, all: bool, cx: &mut Context<Self>) {
+        if !self.password_ready(ci, cx) {
+            return self.ask_password(ci, all, cx);
+        }
         let key = self.workspace.read(cx).connections[ci].id.0.to_string();
         // Opened even when a connect is already running, so an expand while Connecting isn't lost.
         self.expanded.insert(key.clone());
@@ -50,6 +56,66 @@ impl Explorer {
         })
         .detach();
         self.refresh(cx);
+    }
+
+    /// Whether connection `ci` has what it connects with: no password needed, one in memory,
+    /// or one the keychain gives (then kept in memory).
+    fn password_ready(&mut self, ci: usize, cx: &mut Context<Self>) -> bool {
+        let conn = &self.workspace.read(cx).connections[ci];
+        let ConnectionParams::Postgres { password: None, .. } = conn.params else {
+            return true;
+        };
+        if !conn.save_password {
+            return false;
+        }
+        let id = conn.id;
+        // shortcut: the keychain is read on the UI thread; move it off if a slow D-Bus shows.
+        match Keys::of(cx).get(id) {
+            Ok(Some(password)) => {
+                self.remember_password(id, password, cx);
+                true
+            }
+            Ok(None) => false,
+            Err(error) => {
+                keychain_failed(&error, cx);
+                false
+            }
+        }
+    }
+
+    /// Asks for connection `ci`'s password, then connects with it; Cancel leaves it as it was.
+    fn ask_password(&mut self, ci: usize, all: bool, cx: &mut Context<Self>) {
+        let conn = &self.workspace.read(cx).connections[ci];
+        let (id, name, window) = (conn.id, conn.name.clone(), self.window);
+        let this = cx.entity().downgrade();
+        // Deferred: this runs inside the window's event handling, which holds the window.
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let prompt = PasswordPrompt::open(&name, window, cx);
+                let _ = this.update(cx, |_, cx| {
+                    cx.subscribe(&prompt, move |this, _, Entered(password), cx| {
+                        this.remember_password(id, password.clone(), cx);
+                        this.connect_connection_all(id, all, cx);
+                    })
+                    .detach()
+                });
+            });
+        });
+    }
+
+    /// Keeps `password` on connection `id` until quit, without counting as a params edit.
+    fn remember_password(&mut self, id: ConnectionId, secret: Secret, cx: &mut Context<Self>) {
+        let params = self.workspace.update(cx, |ws, cx| {
+            let conn = ws.connections.iter_mut().find(|c| c.id == id)?;
+            if let ConnectionParams::Postgres { password, .. } = &mut conn.params {
+                *password = Some(secret);
+            }
+            cx.notify();
+            Some(conn.params.clone())
+        });
+        if let Some(params) = params {
+            self.params.insert(id, params);
+        }
     }
 
     /// Where the table or view row keyed `key` reads its rows: on the session for its database.
@@ -126,6 +192,10 @@ impl Explorer {
 
     /// Connects connection `id` as Retry on its error row does (Connect or Retry in the status bar).
     pub fn connect_connection(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        self.connect_connection_all(id, false, cx);
+    }
+
+    fn connect_connection_all(&mut self, id: ConnectionId, all: bool, cx: &mut Context<Self>) {
         if let Some(ci) = self
             .workspace
             .read(cx)
@@ -133,7 +203,7 @@ impl Explorer {
             .iter()
             .position(|c| c.id == id)
         {
-            self.connect(ci, false, cx);
+            self.connect(ci, all, cx);
         }
     }
 
@@ -225,6 +295,10 @@ impl Explorer {
             ws.delete(id)
         });
         let Some(ix) = removed else { return };
+        // Even when not saved now: an earlier failed delete may have left the entry behind.
+        if let Err(error) = Keys::of(cx).delete(id) {
+            keychain_failed(&error, cx);
+        }
         // A rename holds a position; the delete ends it and the marked rows.
         self.rename = None;
         self.marked.clear();

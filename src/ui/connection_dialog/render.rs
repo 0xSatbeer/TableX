@@ -126,7 +126,19 @@ impl Render for ConnectionDialog {
                 field(
                     "password",
                     "Password",
-                    Input::new(&self.password).small(),
+                    h_flex()
+                        .gap(theme::space_8())
+                        .child(div().flex_1().child(Input::new(&self.password).small()))
+                        .child(
+                            Checkbox::new("save-password")
+                                .debug_selector(|| "save-password".into())
+                                .label("Save password")
+                                .checked(self.save_password)
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.save_password = *checked;
+                                    cx.notify();
+                                })),
+                        ),
                     &errors,
                     cx,
                 )

@@ -42,6 +42,7 @@ fn add_dialog_opens_with_the_spec_defaults(cx: &mut gpui_kit::TestAppContext) {
         port: "5432".into(),
         user: "".into(),
         password: "".into(),
+        save_password: true,
         database: "postgres".into(),
         ssl: SslMode::Prefer,
         path: "".into(),

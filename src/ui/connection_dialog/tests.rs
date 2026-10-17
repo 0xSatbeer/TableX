@@ -270,6 +270,7 @@ fn new_form_defaults() {
             port: "5432".into(),
             user: "".into(),
             password: "".into(),
+            save_password: true,
             database: "postgres".into(),
             ssl: SslMode::Prefer,
             path: "".into(),
@@ -296,5 +297,153 @@ fn delete_enabled_cases() {
             want,
             "{name} {prod} {typed:?}"
         );
+    }
+}
+
+/// A window holding the dialog for `editing` on `connections`, with `keychain` installed.
+fn open_dialog(
+    cx: &mut gpui_kit::TestAppContext,
+    connections: Vec<Connection>,
+    editing: Option<ConnectionId>,
+    keychain: Arc<dyn crate::persist::Keychain>,
+) -> (
+    gpui_kit::VisualTestContext,
+    Entity<ConnectionDialog>,
+    Entity<Workspace>,
+) {
+    cx.update(gpui_kit::init);
+    cx.update(|cx| cx.set_global(crate::persist::Keys::new(keychain)));
+    let workspace = cx.update(|cx| {
+        cx.new(|_| Workspace {
+            id_floor: 0,
+            id: 1,
+            name: "w".into(),
+            connections,
+        })
+    });
+    let driver: Arc<dyn Driver> = Arc::new(crate::db::fake::Fake::default());
+    let ws = workspace.clone();
+    let (window, dialog) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            cx.new(|cx| ConnectionDialog::new(ws, driver, editing, window, cx))
+        })
+        .expect("open test window")
+    });
+    let cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    (cx, dialog, workspace)
+}
+
+#[gpui_kit::test]
+fn save_keeps_the_password_in_the_keychain_when_checked_and_removes_it_when_not(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use crate::persist::{Keychain as _, MemKeychain};
+    let saved = Connection {
+        id: ConnectionId(1),
+        name: "pg".into(),
+        color: 0,
+        is_production: false,
+        status: ConnectionStatus::Disconnected,
+        params: ok_pg().params().unwrap(),
+        save_password: true,
+        databases: None,
+    };
+    // (editing, box checked, password typed or None to keep the prefill, entry after)
+    let cases = [
+        (true, true, None, Some("old")),
+        (true, true, Some("new"), Some("new")),
+        (true, false, None, None),
+        (true, true, Some(""), None),
+        (false, true, Some("pw"), Some("pw")),
+        (false, false, Some("pw"), None),
+    ];
+    for (editing, checked, typed, want) in cases {
+        let label = format!("editing {editing} checked {checked} typed {typed:?}");
+        let (id, keychain) = (ConnectionId(1), Arc::new(MemKeychain::default()));
+        let (connections, editing) = match editing {
+            true => (vec![saved.clone()], Some(id)),
+            false => (vec![], None),
+        };
+        if editing.is_some() {
+            keychain.set(id, &Secret::new("old")).unwrap();
+        }
+        let (mut cx, dialog, workspace) =
+            open_dialog(cx, connections, editing, keychain.clone() as _);
+        if editing.is_some() {
+            let prefill = dialog.read_with(&cx, |d, cx| d.form(cx).password);
+            assert_eq!(prefill, "old", "{label}: prefilled from the keychain");
+        }
+        dialog.update_in(&mut cx, |d, window, cx| {
+            let fields = [(&d.name, "pg"), (&d.host, "h"), (&d.user, "u")];
+            for (input, text) in fields.into_iter().chain(typed.map(|t| (&d.password, t))) {
+                input.update(cx, |i, cx| i.set_value(text, window, cx));
+            }
+            d.save_password = checked;
+            assert!(d.save(cx), "{label}: saved");
+        });
+        let entry = keychain.get(id).unwrap();
+        assert_eq!(entry.as_ref().map(Secret::expose), want, "{label}");
+        let flag = workspace.read_with(&cx, |ws, _| ws.connections[0].save_password);
+        assert_eq!(flag, checked, "{label}: save_password");
+    }
+}
+
+/// Holds entries but can't read them, like a Secret Service whose unlock was dismissed.
+#[derive(Default)]
+struct Locked(crate::persist::MemKeychain);
+
+impl crate::persist::Keychain for Locked {
+    fn get(&self, _: ConnectionId) -> Result<Option<Secret>, String> {
+        Err("locked".into())
+    }
+    fn set(&self, id: ConnectionId, password: &Secret) -> Result<(), String> {
+        self.0.set(id, password)
+    }
+    fn delete(&self, id: ConnectionId) -> Result<(), String> {
+        self.0.delete(id)
+    }
+}
+
+#[gpui_kit::test]
+fn a_saved_password_the_keychain_could_not_read_on_open_survives_save(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use crate::persist::Keychain as _;
+    let saved = Connection {
+        id: ConnectionId(1),
+        name: "pg".into(),
+        color: 0,
+        is_production: false,
+        status: ConnectionStatus::Disconnected,
+        params: ok_pg().params().unwrap(),
+        save_password: true,
+        databases: None,
+    };
+    // (box checked, password typed, entry after)
+    let cases = [
+        (true, None, Some("old")),
+        (true, Some("new"), Some("new")),
+        (false, None, None),
+    ];
+    for (checked, typed, want) in cases {
+        let label = format!("checked {checked} typed {typed:?}");
+        let keychain = Arc::new(Locked::default());
+        keychain
+            .0
+            .set(ConnectionId(1), &Secret::new("old"))
+            .unwrap();
+        let editing = Some(ConnectionId(1));
+        let (mut cx, dialog, _) = open_dialog(cx, vec![saved.clone()], editing, keychain.clone());
+        dialog.update_in(&mut cx, |d, window, cx| {
+            if let Some(text) = typed {
+                d.password.update(cx, |i, cx| i.set_value(text, window, cx));
+            }
+            d.name
+                .update(cx, |i, cx| i.set_value("renamed", window, cx));
+            d.save_password = checked;
+            assert!(d.save(cx), "{label}: saved");
+        });
+        let entry = keychain.0.get(ConnectionId(1)).unwrap();
+        assert_eq!(entry.as_ref().map(Secret::expose), want, "{label}");
     }
 }

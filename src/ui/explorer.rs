@@ -155,6 +155,8 @@ impl EventEmitter<ConnectionDeleted> for Explorer {}
 pub struct Explorer {
     workspace: Entity<Workspace>,
     driver: Arc<dyn Driver>,
+    /// The window the password prompt opens over.
+    window: AnyWindowHandle,
     expanded: HashSet<String>,
     /// Nodes whose children are loading or failed to.
     loads: HashMap<String, Load>,
@@ -210,6 +212,7 @@ impl Explorer {
         })
         .detach();
         Self {
+            window: window.window_handle(),
             field,
             workspace,
             driver,

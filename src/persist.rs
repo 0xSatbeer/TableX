@@ -4,8 +4,10 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod keychain;
 mod workspaces;
 
+pub use keychain::*;
 pub use workspaces::*;
 
 /// `queryx/` under the platform config dir; every config file lives below it.

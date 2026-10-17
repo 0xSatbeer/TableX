@@ -80,6 +80,7 @@ fn main() {
                 window_min_size: Some(size(px(900.), px(600.))),
                 ..TitleBar::window_options()
             };
+            cx.set_global(persist::Keys::new(std::sync::Arc::new(persist::OsKeychain)));
             // No home or config dir: built-in themes only, nothing saved.
             let config = persist::ConfigDir::resolve(|k| std::env::var_os(k));
             let themes = config.as_ref().map(|c| c.root.join("themes"));

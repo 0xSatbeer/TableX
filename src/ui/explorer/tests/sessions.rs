@@ -27,9 +27,9 @@ fn editing_the_params_or_deleting_a_connected_connection_closes_its_sessions(
         workspace.update(&mut cx, |ws, cx| {
             match change {
                 "password" => ws.edit(id, "pg".into(), 0, false, pg_params(Some("secret"), "app")),
-                "database" => ws.edit(id, "pg".into(), 0, false, pg_params(None, "other")),
-                "name" => ws.edit(id, "renamed".into(), 0, false, pg_params(None, "app")),
-                "nothing" => ws.edit(id, "pg".into(), 0, false, pg_params(None, "app")),
+                "database" => ws.edit(id, "pg".into(), 0, false, pg_params(Some("pw"), "other")),
+                "name" => ws.edit(id, "renamed".into(), 0, false, pg_params(Some("pw"), "app")),
+                "nothing" => ws.edit(id, "pg".into(), 0, false, pg_params(Some("pw"), "app")),
                 _ => drop(ws.delete(id)),
             }
             cx.notify();

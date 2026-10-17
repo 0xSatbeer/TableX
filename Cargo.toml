@@ -22,6 +22,8 @@ bytes = "1"
 # TLS for Postgres on ring only; default features would pull in aws-lc-rs.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# Saved passwords (C5): the OS keychain only, no bundled crypto or async runtime.
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "apple-native", "windows-native"] }
 
 [dev-dependencies]
 tempfile = "3"

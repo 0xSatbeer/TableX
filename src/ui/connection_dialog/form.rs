@@ -13,6 +13,8 @@ pub struct Form {
     pub port: String,
     pub user: String,
     pub password: String,
+    /// "Save password": keep it in the keychain rather than asking on connect.
+    pub save_password: bool,
     pub database: String,
     pub ssl: SslMode,
     pub path: String,
@@ -39,6 +41,7 @@ impl Form {
             port: "5432".into(),
             user: String::new(),
             password: String::new(),
+            save_password: true,
             database: "postgres".into(),
             ssl: SslMode::Prefer,
             path: String::new(),
@@ -69,6 +72,7 @@ impl Form {
                 password: password
                     .as_ref()
                     .map_or(String::new(), |p| p.expose().to_string()),
+                save_password: conn.save_password,
                 database: database.clone(),
                 ssl: *ssl,
                 ..base

@@ -16,6 +16,7 @@ fn right_click_edit_opens_the_dialog_prefilled_with_the_type_locked(
         port: "5432".into(),
         user: "".into(),
         password: "".into(),
+        save_password: true,
         database: "postgres".into(),
         ssl: SslMode::Prefer,
         path: "".into(),
@@ -31,6 +32,8 @@ fn right_click_edit_opens_the_dialog_prefilled_with_the_type_locked(
                 host: "db.acme.internal".into(),
                 user: "app".into(),
                 database: "app_db".into(),
+                password: "mock".into(),
+                save_password: false,
                 ..blank.clone()
             },
             "kind-sqlite",
@@ -43,6 +46,8 @@ fn right_click_edit_opens_the_dialog_prefilled_with_the_type_locked(
                 host: "staging.acme.internal".into(),
                 user: "app".into(),
                 database: "app_db".into(),
+                password: "mock".into(),
+                save_password: false,
                 ..blank.clone()
             },
             "kind-sqlite",

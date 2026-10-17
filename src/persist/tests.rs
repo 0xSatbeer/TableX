@@ -202,3 +202,18 @@ fn config_dir_follows_xdg_then_home() {
         );
     }
 }
+
+#[test]
+fn the_mem_keychain_keeps_one_password_per_connection_account() {
+    let keychain = MemKeychain::default();
+    keychain.set(ConnectionId(3), &Secret::new("pw")).unwrap();
+    keychain
+        .set(ConnectionId(4), &Secret::new("other"))
+        .unwrap();
+    keychain.delete(ConnectionId(4)).unwrap();
+    keychain.delete(ConnectionId(9)).unwrap();
+    let accounts: Vec<String> = keychain.0.lock().unwrap().keys().cloned().collect();
+    assert_eq!(accounts, ["connection-3"]);
+    assert_eq!(keychain.get(ConnectionId(3)), Ok(Some(Secret::new("pw"))));
+    assert_eq!(keychain.get(ConnectionId(4)), Ok(None));
+}

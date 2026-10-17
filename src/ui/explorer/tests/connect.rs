@@ -264,9 +264,9 @@ fn a_connect_whose_connection_is_edited_or_deleted_while_connecting_is_dropped(
         let id = crate::model::ConnectionId(1);
         workspace.update(&mut cx, |ws, cx| {
             match change {
-                "database" => ws.edit(id, "pg".into(), 0, false, pg_params(None, "other")),
+                "database" => ws.edit(id, "pg".into(), 0, false, pg_params(Some("pw"), "other")),
                 "password" => ws.edit(id, "pg".into(), 0, false, pg_params(Some("secret"), "app")),
-                "name" => ws.edit(id, "renamed".into(), 0, false, pg_params(None, "app")),
+                "name" => ws.edit(id, "renamed".into(), 0, false, pg_params(Some("pw"), "app")),
                 _ => drop(ws.delete(id)),
             }
             cx.notify();

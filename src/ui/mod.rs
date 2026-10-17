@@ -7,6 +7,7 @@ pub mod gallery;
 pub mod grid;
 pub mod object_dialog;
 pub mod panel;
+pub mod password_prompt;
 pub mod split;
 pub mod statusbar;
 pub mod structure;

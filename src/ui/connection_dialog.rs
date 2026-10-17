@@ -17,6 +17,7 @@ use std::sync::Arc;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IndexPath, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonGroup, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
     select::{Select, SelectEvent, SelectState},
@@ -56,6 +57,9 @@ pub struct ConnectionDialog {
     editing: Option<ConnectionId>,
     color: u8,
     is_production: bool,
+    save_password: bool,
+    /// The keychain failed to give the saved password on open, so an empty field means unknown.
+    prefill_failed: bool,
     kind: DbKind,
     pub name: Entity<InputState>,
     pub host: Entity<InputState>,
@@ -158,10 +162,17 @@ impl ConnectionDialog {
         cx: &mut Context<Self>,
     ) -> Self {
         let connections = &workspace.read(cx).connections;
-        let form = match connections.iter().find(|c| Some(c.id) == editing) {
+        let mut form = match connections.iter().find(|c| Some(c.id) == editing) {
             Some(conn) => Form::of(conn),
             None => Form::new(&connections.iter().map(|c| c.color).collect::<Vec<_>>()),
         };
+        let mut prefill_failed = false;
+        if let Some(id) = editing.filter(|_| form.save_password && form.password.is_empty()) {
+            match crate::persist::Keys::of(cx).get(id) {
+                Ok(saved) => form.password = saved.map_or(String::new(), |p| p.expose().into()),
+                Err(_) => prefill_failed = true,
+            }
+        }
         let mut input = |value: &str, placeholder: &str| {
             let (value, placeholder) = (value.to_string(), placeholder.to_string());
             cx.new(|cx| {
@@ -220,6 +231,8 @@ impl ConnectionDialog {
             editing,
             color: form.color,
             is_production: form.is_production,
+            save_password: form.save_password,
+            prefill_failed,
             kind: form.kind,
             name,
             host,

@@ -21,7 +21,8 @@ pub fn workspaces() -> Vec<Workspace> {
         host: host.into(),
         port: 5432,
         user: "app".into(),
-        password: None,
+        // The mock driver takes any password; one in memory keeps connect from asking.
+        password: Some(Secret::new("mock")),
         database: db.into(),
         ssl: SslMode::Prefer,
     };
