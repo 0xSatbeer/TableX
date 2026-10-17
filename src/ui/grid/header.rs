@@ -67,12 +67,15 @@ impl Render for DragColumn {
 
 impl Grid {
     /// Header sort button: ascending, descending, off.
-    pub(super) fn cycle_sort(&mut self, c: usize, cx: &mut Context<Self>) {
+    pub(super) fn cycle_sort(&mut self, c: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.sort = match self.sort {
             Some((sc, true)) if sc == c => Some((c, false)),
             Some((sc, false)) if sc == c => None,
             _ => Some((c, true)),
         };
+        if self.is_live() {
+            return self.sort_live(window, cx);
+        }
         self.order = self.sort.map(|(c, asc)| {
             let keys: Vec<Value> = (0..self.source.row_count())
                 .map(|r| self.page_row(r)[c].clone())
@@ -233,6 +236,7 @@ impl Grid {
                                 };
                                 div()
                                     .id(("sort", s))
+                                    .debug_selector(|| format!("sort-{s}"))
                                     // Fixed width: autofit reserves exactly this much beside the header text.
                                     .flex_none()
                                     .w(theme::space_16())
@@ -253,8 +257,8 @@ impl Grid {
                                                 )
                                             })
                                             .hover(|d| d.text_color(theme.foreground))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.cycle_sort(s, cx)
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.cycle_sort(s, window, cx)
                                             })),
                                         SortAvail::Disabled(why) => d
                                             .text_color(theme::text_disabled(theme))

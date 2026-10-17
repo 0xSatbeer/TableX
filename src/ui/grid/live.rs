@@ -7,7 +7,9 @@ use gpui_kit::component::spinner::Spinner;
 use super::*;
 use crate::db::{Driver, Reply, Session};
 use crate::ddl::ident;
-use crate::model::{Column, ConnectionId, QueryError, QueryLogEntry, QuerySource, QueryStatus};
+use crate::model::{
+    Column, ConnectionId, QueryError, QueryErrorKind, QueryLogEntry, QuerySource, QueryStatus,
+};
 use crate::ui::explorer::Explorer;
 
 pub(super) const TABLE_PAGE: usize = 500;
@@ -33,6 +35,13 @@ pub(super) struct Live {
     /// The last page came back with `TABLE_PAGE` rows, so more may follow.
     full: bool,
     total: Option<usize>,
+    /// The applied WHERE and ORDER BY fragments, inserted raw.
+    where_: String,
+    order_by: String,
+    /// Why the last filtered read failed, shown under the toolbar over the old rows.
+    filter_error: Option<String>,
+    /// The where, order by, offset and total the shown rows came from, while an applied filter is unread.
+    before: Option<(String, String, usize, Option<usize>)>,
     state: LiveState,
     _load: Option<Task<()>>,
     _count: Option<Task<()>>,
@@ -55,24 +64,41 @@ pub(crate) fn page_sql(
     name: &str,
     key: &[String],
     rowid: bool,
+    (where_, order_by): (&str, &str),
     offset: usize,
 ) -> String {
     let select = if rowid { "rowid, *" } else { "*" };
-    let order = if key.is_empty() {
+    let order = if !order_by.is_empty() {
+        format!(" ORDER BY {order_by}")
+    } else if key.is_empty() {
         String::new()
     } else {
         let cols: Vec<_> = key.iter().map(|c| ident(c)).collect();
         format!(" ORDER BY {}", cols.join(", "))
     };
     format!(
-        "SELECT {select} FROM {}.{}{order} LIMIT {TABLE_PAGE} OFFSET {offset}",
+        "SELECT {select} FROM {}.{}{}{order} LIMIT {TABLE_PAGE} OFFSET {offset}",
         ident(schema),
-        ident(name)
+        ident(name),
+        where_clause(where_)
     )
 }
 
-pub(crate) fn count_sql(schema: &str, name: &str) -> String {
-    format!("SELECT COUNT(*) FROM {}.{}", ident(schema), ident(name))
+pub(crate) fn count_sql(schema: &str, name: &str, where_: &str) -> String {
+    format!(
+        "SELECT COUNT(*) FROM {}.{}{}",
+        ident(schema),
+        ident(name),
+        where_clause(where_)
+    )
+}
+
+fn where_clause(where_: &str) -> String {
+    if where_.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE ({where_})")
+    }
 }
 
 fn primary_key(columns: Vec<Column>) -> Vec<String> {
@@ -98,6 +124,10 @@ impl Grid {
             offset: 0,
             full: false,
             total: None,
+            where_: String::new(),
+            order_by: String::new(),
+            filter_error: None,
+            before: None,
             state: LiveState::Loading,
             _load: None,
             _count: None,
@@ -117,6 +147,7 @@ impl Grid {
             live.key.clone(),
             live.offset,
         );
+        let (where_, order_by) = (live.where_.clone(), live.order_by.clone());
         let sqlite_table = t.sqlite_table;
         let session = self.session(cx);
         let Some(live) = &mut self.live else { return };
@@ -137,7 +168,7 @@ impl Grid {
                 }
             };
             let rowid = sqlite_table && key.is_empty();
-            let sql = page_sql(&schema, &name, &key, rowid, offset);
+            let sql = page_sql(&schema, &name, &key, rowid, (&where_, &order_by), offset);
             this.update(cx, |this, _| {
                 if let Some(live) = &mut this.live {
                     live.key = Some(key);
@@ -150,7 +181,7 @@ impl Grid {
                 this.log(sql, at, started, &result, cx);
                 match result {
                     Ok(rs) => this.paged(rs, rowid, cx),
-                    Err(error) => this.failed(error.message, cx),
+                    Err(error) => this.query_failed(error, cx),
                 }
             })
             .ok();
@@ -163,6 +194,61 @@ impl Grid {
             live.offset = offset;
             self.load(cx);
         }
+    }
+
+    /// Reads page 1 with the filter bar's WHERE and ORDER BY (Enter, a header sort click).
+    pub(super) fn apply_filter(&mut self, cx: &mut Context<Self>) {
+        let Some((where_input, order_input)) = &self.filter else {
+            return;
+        };
+        let (where_, order_by) = (
+            where_input.read(cx).value().trim().to_string(),
+            order_input.read(cx).value().trim().to_string(),
+        );
+        let Some(live) = &mut self.live else { return };
+        let (old_where, old_order) = (
+            std::mem::replace(&mut live.where_, where_),
+            std::mem::replace(&mut live.order_by, order_by),
+        );
+        let (offset, total) = (live.offset, live.total.take());
+        live.before
+            .get_or_insert((old_where, old_order, offset, total));
+        live.offset = 0;
+        self.load(cx);
+    }
+
+    /// The ORDER BY a header sort writes: `"col" ASC|DESC`, or nothing.
+    pub(super) fn sort_order_by(&self) -> String {
+        self.sort.map_or(String::new(), |(c, asc)| {
+            let dir = if asc { "ASC" } else { "DESC" };
+            format!("{} {dir}", ident(&self.all.columns()[c].name))
+        })
+    }
+
+    /// A header sort click on a table tab: the server sorts, through the ORDER BY box.
+    pub(super) fn sort_live(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let order_by = self.sort_order_by();
+        if let Some((_, input)) = &self.filter {
+            input.update(cx, |input, cx| input.set_value(order_by, window, cx));
+        }
+        self.apply_filter(cx);
+    }
+
+    /// A failed page read: with a filter applied it is the filter's fault, so the old rows stay.
+    /// The tab goes back to what the shown rows came from.
+    fn query_failed(&mut self, error: QueryError, cx: &mut Context<Self>) {
+        let Some(live) = &mut self.live else { return };
+        let filtered =
+            live.before.is_some() || !live.where_.is_empty() || !live.order_by.is_empty();
+        if let Some(before) = live.before.take() {
+            (live.where_, live.order_by, live.offset, live.total) = before;
+        }
+        if !filtered || error.kind != QueryErrorKind::Server {
+            return self.failed(error.message, cx);
+        }
+        live.filter_error = Some(error.message);
+        live.state = LiveState::Ready;
+        cx.notify();
     }
 
     fn failed(&mut self, reason: String, cx: &mut Context<Self>) {
@@ -179,11 +265,16 @@ impl Grid {
             live.total = Some(live.offset + rs.rows.len());
         }
         live.state = LiveState::Ready;
+        live.filter_error = None;
+        live.before = None;
         let reset = rs.columns != self.all.columns();
         self.all = Rc::new(rs);
         self.edits.clear();
         self.editing = None;
+        // The server sorted these rows; the header keeps showing which way.
+        let sort = self.sort;
         self.set_page(0, TABLE_PAGE, cx);
+        self.sort = sort.filter(|_| !reset);
         if reset {
             let n = self.all.columns().len();
             (self.widths, self.hidden) = (vec![DEFAULT_WIDTH; n], vec![false; n]);
@@ -202,7 +293,7 @@ impl Grid {
     fn count(&mut self, cx: &mut Context<Self>) {
         let session = self.session(cx);
         let Some(live) = &mut self.live else { return };
-        let sql = count_sql(&live.table.schema, &live.table.name);
+        let sql = count_sql(&live.table.schema, &live.table.name, &live.where_);
         let driver = live.table.driver.clone();
         live._count = Some(cx.spawn(async move |this, cx| {
             let Ok(session) = session.await else { return };
@@ -343,6 +434,26 @@ impl Grid {
                     IconName::ChevronLast,
                     "Last page",
                     last,
+                )),
+        )
+    }
+
+    /// Why the filtered read failed, under the toolbar.
+    pub(super) fn render_filter_error(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let reason = self.live.as_ref()?.filter_error.clone()?;
+        let theme = cx.theme();
+        Some(
+            div()
+                .debug_selector(|| format!("filter-error:{reason}"))
+                .flex_none()
+                .px(theme::space_8())
+                .py(theme::space_2())
+                .border_b_1()
+                .border_color(theme.border)
+                .text_size(theme::ui_sm())
+                .text_color(theme.danger)
+                .child(format!(
+                    "The filter failed: {reason}. Fix WHERE or ORDER BY and press Enter."
                 )),
         )
     }

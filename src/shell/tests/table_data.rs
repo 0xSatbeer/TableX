@@ -238,3 +238,135 @@ fn retry_after_the_session_dropped_connects_again_and_keeps_it(cx: &mut gpui_kit
         "the new session is kept for the next read"
     );
 }
+
+fn filter_inputs(
+    shell: &gpui_kit::Entity<crate::shell::Shell>,
+    cx: &gpui_kit::VisualTestContext,
+) -> (
+    gpui_kit::Entity<gpui_kit::component::input::InputState>,
+    gpui_kit::Entity<gpui_kit::component::input::InputState>,
+) {
+    shell.read_with(cx, |this, cx| {
+        match &this.tabs.active().expect("a tab").content {
+            crate::shell::TabContent::Grid(grid) => grid.read(cx).filter_inputs(),
+            crate::shell::TabContent::Console(_) => panic!("a grid tab is active"),
+        }
+    })
+}
+
+/// Types `where_` and `order_by` into the filter bar and presses Enter in the WHERE box.
+fn apply_filter(
+    shell: &gpui_kit::Entity<crate::shell::Shell>,
+    where_: &str,
+    order_by: &str,
+    cx: &mut gpui_kit::VisualTestContext,
+) {
+    let (where_input, order_input) = filter_inputs(shell, cx);
+    type_into(cx, order_input, order_by);
+    type_into(cx, where_input, where_);
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+}
+
+const FILTERED: &str =
+    r#"SELECT * FROM "public"."users" WHERE (id > 5) ORDER BY id DESC LIMIT 500 OFFSET 0"#;
+
+#[gpui_kit::test]
+fn enter_applies_where_and_order_by_from_page_one(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(rows(500)), &mut cx);
+    click(&mut cx, "grid-next");
+    answer(&fake, Ok(rows(500)), &mut cx);
+    click(&mut cx, "grid-count:1,000+");
+    let mut total = rows(1);
+    total.rows = vec![vec![Value::Int(1234)].into()];
+    answer(&fake, Ok(total), &mut cx);
+    apply_filter(&shell, "id > 5", "id DESC", &mut cx);
+    assert_eq!(fake.queried().last().map(String::as_str), Some(FILTERED));
+    answer(&fake, Ok(rows(500)), &mut cx);
+    assert!(
+        cx.debug_bounds("grid-count:500+").is_some(),
+        "the count starts over"
+    );
+    cx.simulate_keystrokes("f5");
+    cx.run_until_parked();
+    assert_eq!(
+        fake.queried().last().map(String::as_str),
+        Some(FILTERED),
+        "F5 keeps the filter"
+    );
+    answer(&fake, Ok(rows(500)), &mut cx);
+    click(&mut cx, "grid-count:500+");
+    assert_eq!(
+        fake.queried().last().map(String::as_str),
+        Some(r#"SELECT COUNT(*) FROM "public"."users" WHERE (id > 5)"#)
+    );
+}
+
+#[gpui_kit::test]
+fn a_failing_filter_shows_the_error_and_keeps_the_rows(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(rows(500)), &mut cx);
+    click(&mut cx, "grid-next");
+    answer(&fake, Ok(rows(3)), &mut cx);
+    apply_filter(&shell, "nope", "", &mut cx);
+    let error = QueryError {
+        kind: QueryErrorKind::Server,
+        message: r#"column "nope" does not exist"#.into(),
+        position: None,
+        statement: 0,
+    };
+    answer(&fake, Err(error), &mut cx);
+    assert!(
+        cx.debug_bounds(r#"filter-error:column "nope" does not exist"#)
+            .is_some()
+    );
+    assert!(cx.debug_bounds("table-retry").is_none(), "no overlay");
+    assert_eq!(grid_rows(&shell, &cx), 3, "the old rows stay");
+    assert!(
+        cx.debug_bounds("grid-count:503").is_some(),
+        "the pager still describes the shown rows"
+    );
+    cx.simulate_keystrokes("f5");
+    cx.run_until_parked();
+    assert_eq!(
+        fake.queried().last().map(String::as_str),
+        Some(r#"SELECT * FROM "public"."users" ORDER BY "id" LIMIT 500 OFFSET 500"#),
+        "F5 reads the shown page, not the failed filter"
+    );
+    answer(&fake, Ok(rows(3)), &mut cx);
+    apply_filter(&shell, "id > 1", "", &mut cx);
+    answer(&fake, Ok(rows(1)), &mut cx);
+    assert!(
+        cx.debug_bounds(r#"filter-error:column "nope" does not exist"#)
+            .is_none()
+    );
+    assert_eq!(grid_rows(&shell, &cx), 1);
+}
+
+#[gpui_kit::test]
+fn header_clicks_cycle_the_sort_through_order_by(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(rows(2)), &mut cx);
+    let order_by = |cx: &gpui_kit::VisualTestContext| {
+        filter_inputs(&shell, cx)
+            .1
+            .read_with(cx, |input, _| input.value().to_string())
+    };
+    let page = |order: &str| {
+        format!(r#"SELECT * FROM "public"."users" ORDER BY {order} LIMIT 500 OFFSET 0"#)
+    };
+    for (order, sql) in [
+        (r#""id" ASC"#, page(r#""id" ASC"#)),
+        (r#""id" DESC"#, page(r#""id" DESC"#)),
+        ("", PAGE_1.to_string()),
+    ] {
+        click(&mut cx, "sort-0");
+        assert_eq!(order_by(&cx), order);
+        assert_eq!(fake.queried().last(), Some(&sql));
+        answer(&fake, Ok(rows(2)), &mut cx);
+    }
+}

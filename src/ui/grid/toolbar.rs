@@ -145,21 +145,18 @@ impl Grid {
             )
     }
 
-    // shortcut: no query backend yet, so WHERE / ORDER BY are typed but not applied; wire to the query once drivers land.
     pub(super) fn render_filter_bar(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (where_input, order_input) = self
-            .filter
-            .get_or_insert_with(|| {
-                let mut input = |placeholder: &'static str, cx: &mut Context<Self>| {
-                    cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
-                };
-                (input("WHERE", cx), input("ORDER BY", cx))
-            })
-            .clone();
+        if self.filter.is_none() {
+            self.filter = Some((
+                filter_input("WHERE", window, cx),
+                filter_input("ORDER BY", window, cx),
+            ));
+        }
+        let (where_input, order_input) = self.filter.clone().expect("made above");
         let theme = cx.theme();
         let icon = |name: IconName| Icon::new(name).xsmall().text_color(theme.muted_foreground);
         h_flex()
@@ -202,6 +199,30 @@ impl Grid {
                 ),
             )
     }
+}
+
+/// A filter bar box; Enter in it applies both boxes.
+fn filter_input(
+    placeholder: &'static str,
+    window: &mut Window,
+    cx: &mut Context<Grid>,
+) -> Entity<InputState> {
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+    cx.subscribe(&input, |this, _, ev: &InputEvent, cx| {
+        if let InputEvent::PressEnter { .. } = ev {
+            // A typed ORDER BY replaces the header's sort.
+            let order_by = this
+                .filter
+                .as_ref()
+                .map(|(_, o)| o.read(cx).value().trim().to_string());
+            if order_by.is_some_and(|o| o != this.sort_order_by()) {
+                this.sort = None;
+            }
+            this.apply_filter(cx);
+        }
+    })
+    .detach();
+    input
 }
 
 /// The row range, which opens the rows-per-page menu of a result in memory.

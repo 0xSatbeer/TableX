@@ -135,6 +135,11 @@ impl Grid {
     }
 
     #[cfg(test)]
+    pub fn filter_inputs(&self) -> (Entity<InputState>, Entity<InputState>) {
+        self.filter.clone().expect("the filter bar is drawn")
+    }
+
+    #[cfg(test)]
     pub fn columns(&self) -> &[ColumnMeta] {
         self.all.columns()
     }
