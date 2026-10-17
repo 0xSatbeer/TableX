@@ -5,7 +5,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 
-use crate::theme;
+use crate::{persist, theme};
 
 use super::Shell;
 
@@ -15,9 +15,55 @@ impl Shell {
         theme::scaled(self.console_mono)
     }
 
-    pub(super) fn zoom_console(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
+    pub(super) fn zoom_console(
+        &mut self,
+        step: theme::Zoom,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.console_mono = theme::zoom(self.console_mono, step);
+        self.save_config(window, cx);
         cx.notify();
+    }
+
+    /// Applies `<root>/config.toml` and saves every later theme, UI scale or console zoom change there.
+    pub(super) fn persist_config(
+        &mut self,
+        root: &std::path::Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (config, notice) = persist::load_config(root);
+        // A user theme that doesn't exist falls back to Dark once the theme dir is read.
+        self.theme = config.theme;
+        self.theme.apply(&self.user_themes, window, cx);
+        theme::set_ui_scale(config.ui_scale, cx);
+        self.console_mono = px(config.console_font_px);
+        self.config_root = Some(root.to_path_buf());
+        if let Some(notice) = notice {
+            // Deferred: this runs while the window is being built, and notifications need its Root.
+            cx.defer_in(window, move |_, window, cx| {
+                use gpui_kit::component::{WindowExt as _, notification::Notification};
+                window.push_notification(Notification::error(notice), cx);
+            });
+        }
+    }
+
+    /// Writes `config.toml` with the current theme, UI scale and console font size.
+    pub(super) fn save_config(&self, window: &mut Window, cx: &mut App) {
+        use gpui_kit::component::{WindowExt as _, notification::Notification};
+        let Some(root) = &self.config_root else {
+            return;
+        };
+        let config = persist::Config {
+            theme: self.theme.clone(),
+            ui_scale: theme::ui_scale(),
+            console_font_px: self.console_mono.into(),
+        };
+        if let Err(e) = persist::save_config(root, &config) {
+            let message = format!("Couldn't save {}: {e}", root.join("config.toml").display());
+            window.push_notification(Notification::error(message), cx);
+        }
     }
 
     /// Loads user themes from `dir` and reloads them when its files change. Never writes to `dir`.
@@ -114,6 +160,7 @@ impl Shell {
                                 _ = shell.update(cx, |this, cx| {
                                     this.theme = choice.clone();
                                     this.theme.apply(&this.user_themes, window, cx);
+                                    this.save_config(window, cx);
                                     cx.notify();
                                 });
                             }),
@@ -121,11 +168,13 @@ impl Shell {
                 }
                 menu = menu.separator().label("UI scale");
                 for percent in theme::UI_SCALES {
+                    let shell = shell.clone();
                     menu = menu.item(
                         PopupMenuItem::new(format!("{percent}%"))
                             .checked(percent == theme::ui_scale())
                             .on_click(move |_, window, cx| {
                                 theme::set_ui_scale(percent, cx);
+                                _ = shell.update(cx, |this, cx| this.save_config(window, cx));
                                 window.refresh();
                             }),
                     );

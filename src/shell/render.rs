@@ -62,9 +62,9 @@ impl Render for Shell {
                         div()
                             .flex_1()
                             .h_full()
-                            .on_action(cx.listener(|this, _: &theme::ZoomIn, _, cx| this.zoom_console(theme::Zoom::In, cx)))
-                            .on_action(cx.listener(|this, _: &theme::ZoomOut, _, cx| this.zoom_console(theme::Zoom::Out, cx)))
-                            .on_action(cx.listener(|this, _: &theme::ZoomReset, _, cx| this.zoom_console(theme::Zoom::Reset, cx)))
+                            .on_action(cx.listener(|this, _: &theme::ZoomIn, window, cx| this.zoom_console(theme::Zoom::In, window, cx)))
+                            .on_action(cx.listener(|this, _: &theme::ZoomOut, window, cx| this.zoom_console(theme::Zoom::Out, window, cx)))
+                            .on_action(cx.listener(|this, _: &theme::ZoomReset, window, cx| this.zoom_console(theme::Zoom::Reset, window, cx)))
                             .child(console.clone()),
                     )
                     .into_any_element()

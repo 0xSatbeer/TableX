@@ -4,9 +4,11 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod config;
 mod keychain;
 mod workspaces;
 
+pub use config::*;
 pub use keychain::*;
 pub use workspaces::*;
 

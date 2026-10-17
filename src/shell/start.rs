@@ -250,6 +250,7 @@ impl Shell {
             user_themes: Vec::new(),
             user_theme_errors: Vec::new(),
             workspaces_file: None,
+            config_root: None,
             console_mono: theme::MONO,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| {
                 this.theme.apply(&this.user_themes, window, cx)

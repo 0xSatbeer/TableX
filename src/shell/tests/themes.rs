@@ -152,3 +152,45 @@ fn broken_theme_file_at_startup_is_reported_not_a_crash(cx: &mut gpui_kit::TestA
         "{errors:?}"
     );
 }
+
+/// config.toml applies at start, and Ctrl+K Ctrl+T writes the new theme to it.
+#[gpui_kit::test]
+fn the_saved_settings_apply_at_start_and_a_theme_change_writes_config_toml(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use crate::theme::ThemeChoice;
+    let dir = crate::theme::tests::test_dir("config-toml");
+    let path = dir.join("config.toml");
+    std::fs::write(
+        &path,
+        "version = 1\ntheme = \"light\"\nui_scale = 110\nconsole_font_px = 15.0\n",
+    )
+    .unwrap();
+    cx.update(gpui_kit::init);
+    let (window, shell) = cx
+        .update(|cx| {
+            crate::shell::open_shell(
+                crate::shell::Mode::Normal,
+                Default::default(),
+                None,
+                Some(dir.clone()),
+                cx,
+            )
+        })
+        .expect("open test window");
+    let mut vcx = gpui_kit::VisualTestContext::from_window(window, cx);
+    vcx.run_until_parked();
+    let (theme, mono) = shell.read_with(&vcx, |this, _| (this.theme.clone(), this.console_mono));
+    assert_eq!(
+        (theme, mono, crate::theme::ui_scale()),
+        (ThemeChoice::Light, gpui_kit::px(15.), 110)
+    );
+
+    vcx.dispatch_action(crate::CycleTheme);
+    vcx.run_until_parked();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "version = 1\ntheme = \"system\"\nui_scale = 110\nconsole_font_px = 15.0\n"
+    );
+    crate::theme::set_ui_scale(crate::theme::DEFAULT_UI_SCALE, &mut vcx.app.borrow_mut());
+}

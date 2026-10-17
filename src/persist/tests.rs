@@ -217,3 +217,70 @@ fn the_mem_keychain_keeps_one_password_per_connection_account() {
     assert_eq!(keychain.get(ConnectionId(3)), Ok(Some(Secret::new("pw"))));
     assert_eq!(keychain.get(ConnectionId(4)), Ok(None));
 }
+
+#[test]
+fn each_theme_choice_a_scale_and_a_font_size_round_trip_through_config_toml() {
+    use crate::theme::ThemeChoice;
+    let dir = test_dir("config");
+    assert_eq!(load_config(&dir), (Config::default(), None), "absent file");
+    for theme in [
+        ThemeChoice::Dark,
+        ThemeChoice::Light,
+        ThemeChoice::System,
+        ThemeChoice::User("Nord".into()),
+    ] {
+        let config = Config {
+            theme,
+            ui_scale: 120,
+            console_font_px: 14.5,
+        };
+        save_config(&dir, &config).unwrap();
+        assert_eq!(load_config(&dir), (config, None));
+    }
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.toml")).unwrap(),
+        "version = 1\ntheme = \"user:Nord\"\nui_scale = 120\nconsole_font_px = 14.5\n"
+    );
+}
+
+#[test]
+fn invalid_config_values_fall_back_to_defaults_and_a_corrupt_file_moves_to_bak() {
+    let dir = test_dir("config-bad");
+    let path = dir.join("config.toml");
+    let default = Config::default();
+    // (file text, expected config)
+    let cases = [
+        (
+            "version = 1\ntheme = \"neon\"\nui_scale = 100\nconsole_font_px = 13\n",
+            Config {
+                console_font_px: 13.,
+                ..default.clone()
+            },
+        ),
+        (
+            "version = 1\ntheme = \"light\"\nui_scale = 105\n",
+            Config {
+                theme: crate::theme::ThemeChoice::Light,
+                ..default.clone()
+            },
+        ),
+        ("version = 1\nconsole_font_px = 99\n", default.clone()),
+        (
+            "version = 1\ntheme = \"user:\"\nconsole_font_px = 0\n",
+            default.clone(),
+        ),
+        ("", default.clone()),
+    ];
+    for (text, want) in cases {
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(load_config(&dir), (want, None), "{text:?}");
+    }
+    std::fs::write(&path, "theme = [").unwrap();
+    let (config, notice) = load_config(&dir);
+    assert_eq!(config, default);
+    assert!(notice.unwrap().starts_with("config.toml could not be read"));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.toml.bak")).unwrap(),
+        "theme = ["
+    );
+}

@@ -125,6 +125,7 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
     .on_action(cx.listener(|this, _: &CycleTheme, window, cx| {
         this.theme = this.theme.next();
         this.theme.apply(&this.user_themes, window, cx);
+        this.save_config(window, cx);
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &ToggleGallery, _, cx| {
