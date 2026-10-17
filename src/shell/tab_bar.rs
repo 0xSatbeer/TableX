@@ -7,6 +7,7 @@ use gpui_kit::component::{
     popover::Popover,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::theme;
@@ -17,12 +18,16 @@ use super::{OVERFLOW_CONTEXT, Shell, TabContent, tab::TabDrag};
 impl Shell {
     /// Points the status bar at the active tab: its origin, and the cursor only for the console.
     pub(super) fn tab_changed(&mut self, cx: &mut Context<Self>) {
-        // Every close goes through here; a closed console gives back its session.
+        // Every close goes through here; a closed console gives back its session and its file.
         for tab in &self.tabs.closed {
             if let TabContent::Console(console) = &tab.content {
-                console.update(cx, |console, cx| console.close_session(cx));
+                console.update(cx, |console, cx| {
+                    console.close_session(cx);
+                    console.discard_file();
+                });
             }
         }
+        self.assign_console_files(cx);
         let editor = match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Console(console)) => Some(console.read(cx).editor.clone()),
             _ => None,
@@ -76,8 +81,33 @@ impl Shell {
         cx.notify();
     }
 
+    /// Gives each console on a connection its `consoles/<id>.sql`, so its text autosaves there.
+    /// Consoles on nothing aren't in the session, so they get no file.
+    fn assign_console_files(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.sessions_root.clone() else {
+            return;
+        };
+        for t in &self.tabs.tabs {
+            let TabContent::Console(console) = &t.content else {
+                continue;
+            };
+            let c = console.read(cx);
+            if c.file().is_some() || c.target().connection.is_none() {
+                continue;
+            }
+            let next = &mut self.next_console;
+            let id = *self.console_ids.entry(t.key.clone()).or_insert_with(|| {
+                *next += 1;
+                *next
+            });
+            let file = root.join("consoles").join(format!("{id}.sql"));
+            console.update(cx, |c, _| c.set_file(file));
+        }
+    }
+
     /// Closes tabs `ixs`; when one is a console with an open transaction, asks first, and
-    /// confirming rolls it back as the console closes.
+    /// confirming rolls it back as the console closes. Else a console holding text asks
+    /// whether to discard it.
     pub(super) fn close_tabs(
         &mut self,
         ixs: Vec<usize>,
@@ -92,37 +122,51 @@ impl Shell {
         let open_transaction = doomed
             .iter()
             .any(|t| matches!(&t.content, TabContent::Console(c) if c.read(cx).in_transaction));
-        if !open_transaction {
+        let has_text = doomed.iter().any(
+            |t| matches!(&t.content, TabContent::Console(c) if !c.read(cx).text(cx).is_empty()),
+        );
+        if !open_transaction && !has_text {
             self.close_keys(&keys, cx);
             return;
         }
+        let (id, title, body, confirm) = if open_transaction {
+            (
+                "tab-close",
+                "Roll back and close?",
+                Some("This console has an open transaction; its changes are discarded."),
+                "Roll back and close",
+            )
+        } else {
+            ("tab-discard", "Discard console text?", None, "Discard")
+        };
+        let selector = move |part: &str| -> SharedString { format!("{id}-{part}").into() };
         let shell = cx.entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let (shell, keys) = (shell.clone(), keys.clone());
             dialog
                 .title(
                     div()
-                        .debug_selector(|| "tab-close-title".into())
-                        .child("Roll back and close?"),
+                        .debug_selector(move || selector("title").into())
+                        .child(title),
                 )
-                .child("This console has an open transaction; its changes are discarded.")
+                .when_some(body, |d, body| d.child(body))
                 .footer(
                     h_flex()
                         .gap(theme::space_8())
                         .child(div().flex_1())
                         .child(
-                            Button::new("tab-close-cancel")
-                                .debug_selector(|| "tab-close-cancel".into())
+                            Button::new(selector("cancel"))
+                                .debug_selector(move || selector("cancel").into())
                                 .small()
                                 .label("Cancel")
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
-                            Button::new("tab-close-confirm")
-                                .debug_selector(|| "tab-close-confirm".into())
+                            Button::new(selector("confirm"))
+                                .debug_selector(move || selector("confirm").into())
                                 .danger()
                                 .small()
-                                .label("Roll back and close")
+                                .label(confirm)
                                 .on_click(move |_, window, cx| {
                                     shell.update(cx, |this, cx| this.close_keys(&keys, cx));
                                     window.close_dialog(cx);

@@ -150,6 +150,7 @@ fn closing_a_console_tab_closes_its_session(cx: &mut gpui_kit::TestAppContext) {
     cx.run_until_parked();
     cx.dispatch_action(crate::CloseTab);
     cx.run_until_parked();
+    click(&mut cx, "tab-discard-confirm");
     assert!(fake.pending().contains(&"close app_db".to_string()));
 }
 
@@ -211,4 +212,80 @@ fn picking_a_schema_moves_the_tab_origin_and_title_but_keeps_its_key(
             Some(format!("{name} › app_db › sales").into()),
         )
     );
+}
+
+/// A console on app_db whose text autosaves under a temp config dir, and its file.
+fn saved_console(
+    cx: &mut gpui_kit::TestAppContext,
+) -> (
+    gpui_kit::VisualTestContext,
+    gpui_kit::Entity<crate::shell::Shell>,
+    tempfile::TempDir,
+    std::path::PathBuf,
+) {
+    let (window, shell) = open_plain(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    shell.update(&mut cx, |this, _| this.sessions_root = Some(root));
+    open_console(&mut cx, &shell, "1/app_db");
+    let file = shell.read_with(&cx, |this, cx| {
+        match this.tabs.active().map(|t| &t.content) {
+            Some(crate::shell::TabContent::Console(c)) => c.read(cx).file().unwrap().to_path_buf(),
+            _ => panic!("a console tab is active"),
+        }
+    });
+    assert_eq!(file.parent(), Some(dir.path().join("consoles").as_path()));
+    (cx, shell, dir, file)
+}
+
+fn console_count(
+    shell: &gpui_kit::Entity<crate::shell::Shell>,
+    cx: &gpui_kit::VisualTestContext,
+) -> usize {
+    shell.read_with(cx, |this, _| {
+        let consoles = this.tabs.tabs.iter();
+        consoles
+            .filter(|t| matches!(t.content, crate::shell::TabContent::Console(_)))
+            .count()
+    })
+}
+
+#[gpui_kit::test]
+fn closing_an_empty_console_deletes_its_file_without_asking(cx: &mut gpui_kit::TestAppContext) {
+    let (mut cx, shell, _dir, file) = saved_console(cx);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "").unwrap();
+    let before = console_count(&shell, &cx);
+    cx.dispatch_action(crate::CloseTab);
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("tab-discard-title").is_none(),
+        "no question"
+    );
+    assert_eq!(console_count(&shell, &cx), before - 1);
+    assert!(!file.exists());
+}
+
+#[gpui_kit::test]
+fn closing_a_console_with_text_asks_and_discard_deletes_its_file(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (mut cx, shell, _dir, file) = saved_console(cx);
+    cx.simulate_input("select 1");
+    cx.executor().advance_clock(crate::ui::console::SAVE_DELAY);
+    cx.run_until_parked();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "select 1");
+    let before = console_count(&shell, &cx);
+    cx.dispatch_action(crate::CloseTab);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("tab-discard-title").is_some(), "asks first");
+    click(&mut cx, "tab-discard-cancel");
+    assert_eq!(console_count(&shell, &cx), before, "Cancel keeps it");
+    assert!(file.exists());
+    cx.dispatch_action(crate::CloseTab);
+    cx.run_until_parked();
+    click(&mut cx, "tab-discard-confirm");
+    assert_eq!(console_count(&shell, &cx), before - 1);
+    assert!(!file.exists());
 }

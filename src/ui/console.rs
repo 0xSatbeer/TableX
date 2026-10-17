@@ -11,7 +11,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Editor, EditorState, RopeExt as _},
+    input::{Editor, EditorState, InputEvent, RopeExt as _},
     menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
@@ -29,6 +29,8 @@ use crate::{ddl, sql, theme};
 actions!(console, [RunStatement, RunScript, Rerun, Cancel]);
 
 const CONTEXT: &str = "Console";
+/// How long after the last edit the text is saved.
+pub const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// Rows a result page shows and each fetch reads.
 const PAGE: usize = 500;
 /// Rows a result keeps in memory; past it the oldest pages are dropped.
@@ -90,6 +92,9 @@ pub struct Console {
     _run: Option<Task<()>>,
     _fetch: Option<Task<()>>,
     _context: Option<Task<()>>,
+    /// `consoles/<id>.sql`, set by the shell; the text autosaves there.
+    file: Option<std::path::PathBuf>,
+    _save: Option<Task<()>>,
 }
 
 /// One result tab: the rows read so far, shown a page at a time.
@@ -212,12 +217,25 @@ enum Ran {
 impl Console {
     pub fn new(target: Target, text: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text = text.to_string();
+        let editor = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("sql")
+                .default_value(text)
+        });
+        cx.subscribe(&editor, |this, _, ev: &InputEvent, cx| {
+            if let InputEvent::Change = ev {
+                this.text_changed(cx);
+            }
+        })
+        .detach();
+        // A change still inside its debounce is written before the app goes.
+        cx.on_app_quit(|this, cx| {
+            this.save_text(cx);
+            async {}
+        })
+        .detach();
         Self {
-            editor: cx.new(|cx| {
-                EditorState::new(window, cx)
-                    .language("sql")
-                    .default_value(text)
-            }),
+            editor,
             target,
             session: None,
             last: Vec::new(),
@@ -233,6 +251,51 @@ impl Console {
             _run: None,
             _fetch: None,
             _context: None,
+            file: None,
+            _save: None,
+        }
+    }
+
+    /// Autosaves the text to `file` from now on.
+    pub fn set_file(&mut self, file: std::path::PathBuf) {
+        self.file = Some(file);
+    }
+
+    pub fn file(&self) -> Option<&std::path::Path> {
+        self.file.as_deref()
+    }
+
+    pub fn text(&self, cx: &App) -> String {
+        self.editor.read(cx).value().to_string()
+    }
+
+    /// Saves the text `SAVE_DELAY` after the last edit.
+    fn text_changed(&mut self, cx: &mut Context<Self>) {
+        if self.file.is_none() {
+            return;
+        }
+        self._save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SAVE_DELAY).await;
+            this.update(cx, |this, cx| this.save_text(cx)).ok();
+        }));
+    }
+
+    /// Writes the text to `file` now, ending any pending debounce.
+    pub fn save_text(&mut self, cx: &App) {
+        let Some(file) = &self.file else {
+            return;
+        };
+        self._save = None;
+        if let Err(e) = crate::persist::write_atomic(file, self.text(cx).as_bytes()) {
+            eprintln!("Couldn't save {}: {e}", file.display());
+        }
+    }
+
+    /// Deletes `file` and stops autosaving, as closing the console does.
+    pub fn discard_file(&mut self) {
+        self._save = None;
+        if let Some(file) = self.file.take() {
+            _ = std::fs::remove_file(file);
         }
     }
 

@@ -75,7 +75,10 @@ impl Shell {
         let old = std::mem::replace(&mut self.tabs, tabs::Tabs::new(restored));
         for tab in old.tabs {
             if let TabContent::Console(console) = tab.content {
-                console.update(cx, |console, cx| console.close_session(cx));
+                console.update(cx, |console, cx| {
+                    console.save_text(cx);
+                    console.close_session(cx);
+                });
             }
         }
         self.tabs.activate(active);

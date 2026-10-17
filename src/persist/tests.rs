@@ -284,3 +284,26 @@ fn invalid_config_values_fall_back_to_defaults_and_a_corrupt_file_moves_to_bak()
         "theme = ["
     );
 }
+
+#[test]
+fn the_next_console_id_counts_sql_files_and_sessions() {
+    let dir = test_dir("console-ids");
+    let consoles = dir.join("consoles");
+    std::fs::create_dir_all(&consoles).unwrap();
+    for name in ["3.sql", "9.sql", "x.sql", "12.txt"] {
+        std::fs::write(consoles.join(name), "").unwrap();
+    }
+    let session = SessionFile {
+        tabs: vec![SessionTab::Console {
+            connection: 1,
+            database: "app_db".into(),
+            schema: String::new(),
+            console: 5,
+            autocommit: true,
+            pinned: false,
+        }],
+        ..SessionFile::default()
+    };
+    save_session(&dir, 1, &session).unwrap();
+    assert_eq!(max_console_id(&dir), 9);
+}

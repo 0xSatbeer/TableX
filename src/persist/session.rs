@@ -82,20 +82,26 @@ pub fn save_session(root: &Path, workspace: u32, session: &SessionFile) -> std::
     super::write_atomic(&session_path(root, workspace), text.as_bytes())
 }
 
-/// The largest console id any saved session uses, so new consoles never reuse another's file.
+/// The largest console id any saved session or `consoles/<id>.sql` file uses, so new consoles
+/// never reuse another's file.
 pub fn max_console_id(root: &Path) -> u32 {
-    let Ok(entries) = std::fs::read_dir(root.join("sessions")) else {
-        return 0;
+    let files = |dir: &str| {
+        std::fs::read_dir(root.join(dir))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
     };
-    entries
-        .flatten()
-        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+    let in_sessions = files("sessions")
+        .filter_map(|p| std::fs::read_to_string(p).ok())
         .filter_map(|text| toml::from_str::<SessionFile>(&text).ok())
         .flat_map(|s| s.tabs)
         .filter_map(|t| match t {
             SessionTab::Console { console, .. } => Some(console),
             SessionTab::Table { .. } => None,
-        })
-        .max()
-        .unwrap_or(0)
+        });
+    let on_disk = files("consoles")
+        .filter(|p| p.extension().is_some_and(|e| e == "sql"))
+        .filter_map(|p| p.file_stem()?.to_str()?.parse().ok());
+    in_sessions.chain(on_disk).max().unwrap_or(0)
 }

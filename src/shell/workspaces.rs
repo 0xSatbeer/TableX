@@ -268,7 +268,10 @@ impl Shell {
     pub(super) fn close_connection_tabs(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
         for tab in self.tabs.drop_connection(id) {
             if let TabContent::Console(console) = tab.content {
-                console.update(cx, |console, cx| console.close_session(cx));
+                console.update(cx, |console, cx| {
+                    console.save_text(cx);
+                    console.close_session(cx);
+                });
             }
         }
         self.tab_changed(cx);
