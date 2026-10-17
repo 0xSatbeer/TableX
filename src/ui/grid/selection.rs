@@ -222,6 +222,10 @@ impl Grid {
         if self.on_picker_key(&ev.keystroke.key, window, cx) {
             return cx.stop_propagation();
         }
+        if ev.keystroke.key == "f5" && self.is_live() {
+            self.load(cx);
+            return cx.stop_propagation();
+        }
         if self.editing.is_some() && ev.keystroke.key == "escape" {
             self.stop_editing(false, window, cx);
             return;

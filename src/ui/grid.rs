@@ -32,6 +32,7 @@ mod edit;
 mod format;
 mod header;
 mod layout;
+mod live;
 mod parse;
 mod paste;
 mod picker;
@@ -40,6 +41,7 @@ mod selection;
 mod source;
 mod toolbar;
 
+pub use self::live::{GridEvent, Table};
 pub use self::source::{BigEvents, GridSource};
 use self::{copy::*, format::*, layout::*, parse::*, selection::*, source::*};
 #[cfg(test)]
@@ -108,6 +110,8 @@ pub struct Grid {
     before_click: Option<Selection>,
     /// A left button pressed on a cell is still down, so moving over cells extends the selection.
     drag_selecting: bool,
+    /// A table tab's database reads; `None` for a result already in memory.
+    live: Option<live::Live>,
 }
 
 /// An open cell editor: the display cell it sits on and every cell its value goes to.
@@ -172,6 +176,7 @@ impl Grid {
             notice: None,
             before_click: None,
             drag_selecting: false,
+            live: None,
         };
         // Open fitted to the first rows, so timestamps and UUIDs don't arrive clipped.
         for c in 0..n {
@@ -275,6 +280,7 @@ impl Render for Grid {
                                 .id("grid-scrollbar")
                                 .mode(ScrollbarMode::Always),
                         )
+                        .children(self.render_live_state(cx))
                         .context_menu({
                             let focus = self.focus.clone();
                             move |menu, _, _| {

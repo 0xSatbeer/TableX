@@ -138,9 +138,4 @@ impl Grid {
     pub fn columns(&self) -> &[ColumnMeta] {
         self.all.columns()
     }
-
-    /// Whether the grid has no columns at all, as a table tab has before its data can be read.
-    pub fn is_blank(&self) -> bool {
-        self.all.columns().is_empty()
-    }
 }

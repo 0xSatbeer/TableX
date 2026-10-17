@@ -77,7 +77,10 @@ impl Shell {
         )
         .detach();
         cx.subscribe(&explorer, move |this, _, ev: &explorer::OpenObject, cx| {
-            // Table data needs query execution (QX-033); until then only the demo shows rows.
+            let open = this.tabs.tabs.iter().any(|t| t.key == ev.key);
+            let table = (!demo && !open)
+                .then(|| this.explorer.update(cx, |e, cx| e.table(&ev.key, cx)))
+                .flatten();
             let rows = match demo.then(|| mock::run_query(&format!("SELECT * FROM {}", ev.name))) {
                 None => model::ResultSet {
                     columns: Vec::new(),
@@ -86,7 +89,14 @@ impl Shell {
                 Some(model::QueryOutcome::Rows(rs)) => rs,
                 Some(_) => mock::edge_cases(),
             };
-            let mut tab = grid_tab(ev.key.clone(), Rc::new(rows), cx);
+            let mut tab = match table {
+                Some(table) => {
+                    let grid = cx.new(|cx| grid::Grid::table(table, cx));
+                    grid.update(cx, |grid, cx| grid.load(cx));
+                    grid_tab_of(ev.key.clone(), grid, cx)
+                }
+                None => grid_tab(ev.key.clone(), Rc::new(rows), cx),
+            };
             (tab.title, tab.origin, tab.preview) =
                 (ev.name.clone(), Some(ev.origin.clone()), ev.preview);
             tab.tooltip = Some(ev.path.clone());
@@ -249,6 +259,21 @@ pub(super) fn grid_tab(
     source: Rc<dyn grid::GridSource>,
     cx: &mut Context<Shell>,
 ) -> tabs::EditorTab<TabContent> {
+    let grid = cx.new(|cx| grid::Grid::new(source, cx));
+    grid_tab_of(key, grid, cx)
+}
+
+/// A tab keyed `key` showing `grid`, whose queries go to the bottom panel's Logs.
+fn grid_tab_of(
+    key: impl Into<SharedString>,
+    grid: Entity<grid::Grid>,
+    cx: &mut Context<Shell>,
+) -> tabs::EditorTab<TabContent> {
+    cx.subscribe(&grid, |this, _, grid::GridEvent::Logged(entry), cx| {
+        this.bottom_panel
+            .update(cx, |panel, cx| panel.push(entry.clone(), cx))
+    })
+    .detach();
     let key = key.into();
     tabs::EditorTab {
         title: key.clone(),
@@ -257,7 +282,7 @@ pub(super) fn grid_tab(
         tooltip: None,
         preview: false,
         pinned: false,
-        content: TabContent::Grid(cx.new(|cx| grid::Grid::new(source, cx))),
+        content: TabContent::Grid(grid),
     }
 }
 

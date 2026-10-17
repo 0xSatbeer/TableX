@@ -1,6 +1,8 @@
 //! Connecting, and adding, editing and deleting connections.
 
 use super::*;
+use crate::db::Reply;
+use futures::FutureExt as _;
 
 impl Explorer {
     /// Connects connection `ci`, then lists its databases. Expanding a connection that is not
@@ -48,6 +50,68 @@ impl Explorer {
         })
         .detach();
         self.refresh(cx);
+    }
+
+    /// Where the table or view row keyed `key` reads its rows: on the session for its database.
+    pub fn table(&self, key: &str, cx: &Context<Self>) -> Option<crate::ui::grid::Table> {
+        let node = self.nodes.iter().find(|n| n.key == key)?;
+        let NodeKind::Object(kind) = node.kind else {
+            return None;
+        };
+        let conn = &self.workspace.read(cx).connections[node.conn];
+        let mut parts = segments(key).into_iter().skip(1);
+        let (database, schema) = (parts.next()?, parts.next()?);
+        Some(crate::ui::grid::Table {
+            driver: self.driver.clone(),
+            connection: conn.id,
+            explorer: cx.entity().downgrade(),
+            name: parts.nth(1)?,
+            database,
+            schema,
+            sqlite_table: conn.kind() == DbKind::Sqlite && kind == ObjectKind::Table,
+        })
+    }
+
+    /// The open session on connection `id`'s database `db`; without one, a new one, kept for the
+    /// next caller unless the connection changed meanwhile.
+    pub fn session(
+        &mut self,
+        id: ConnectionId,
+        db: &str,
+        cx: &mut Context<Self>,
+    ) -> Reply<Session> {
+        let at = (id, db.to_string());
+        if let Some(session) = self.sessions.get(&at).filter(|s| !s.is_closed()) {
+            return Box::pin(futures::future::ready(Ok(session.clone())));
+        }
+        let Some(conn) = self
+            .workspace
+            .read(cx)
+            .connections
+            .iter()
+            .find(|c| c.id == id)
+        else {
+            return Box::pin(futures::future::ready(Err(
+                "The connection was deleted".into()
+            )));
+        };
+        let reply = self.driver.connect(&on_database(&conn.params, db)).shared();
+        let generation = *self.gens.entry(id).or_default();
+        let keep = reply.clone();
+        cx.spawn(async move |this, cx| {
+            let Ok(session) = keep.await else { return };
+            this.update(cx, |this, _| {
+                if this.gens.get(&id) == Some(&generation) {
+                    let kept = this.sessions.entry(at).or_insert_with(|| session.clone());
+                    if kept.is_closed() {
+                        *kept = session;
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
+        reply.boxed()
     }
 
     /// Connects connection `id` as Retry on its error row does (Connect or Retry in the status bar).

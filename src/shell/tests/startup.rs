@@ -213,7 +213,7 @@ fn a_demo_start_shows_the_acme_workspace_the_sample_tabs_and_the_mock_log(
 }
 
 #[gpui_kit::test]
-fn opening_a_table_shows_a_placeholder_in_normal_mode_and_mock_rows_in_demo_mode(
+fn opening_a_table_loads_from_the_database_in_normal_mode_and_shows_mock_rows_in_demo_mode(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     use gpui_kit::AppContext as _;
@@ -221,12 +221,12 @@ fn opening_a_table_shows_a_placeholder_in_normal_mode_and_mock_rows_in_demo_mode
         gpui_kit::init(cx);
         cx.set_reduce_motion(true);
     });
-    // (mode, rows in the tab's grid, placeholder text shown)
+    // (mode, rows in the tab's grid, still loading from the database)
     let cases = [
         (crate::shell::Mode::Normal, 0, true),
         (crate::shell::Mode::Demo, 1, false),
     ];
-    for (mode, min_rows, placeholder) in cases {
+    for (mode, min_rows, loading) in cases {
         let (window, shell) = cx.update(|cx| {
             gpui_kit::open_window(Default::default(), cx, |window, cx| {
                 cx.new(|cx| {
@@ -259,16 +259,15 @@ fn opening_a_table_shows_a_placeholder_in_normal_mode_and_mock_rows_in_demo_mode
             (tab.title.to_string(), rows)
         });
         assert_eq!(title, "users", "{mode:?}");
-        if placeholder {
+        if loading {
             assert_eq!(rows, 0, "{mode:?}: an empty grid");
         } else {
             assert!(rows >= min_rows, "{mode:?}: mock rows");
         }
         assert_eq!(
-            vcx.debug_bounds("table-placeholder:Table data arrives in a later version")
-                .is_some(),
-            placeholder,
-            "{mode:?}: the placeholder text"
+            vcx.debug_bounds("table-loading").is_some(),
+            loading,
+            "{mode:?}: the loading state"
         );
     }
 }

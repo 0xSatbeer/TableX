@@ -4,6 +4,9 @@ use super::*;
 
 impl Grid {
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let live_pager = self
+            .render_live_pager(cx)
+            .map(IntoElement::into_any_element);
         let theme = cx.theme();
         let (page, size, last) = (
             self.page,
@@ -31,7 +34,6 @@ impl Grid {
                 grouped(self.all.row_count())
             )
         };
-        // shortcut: no query backend yet, so these stay disabled until results come from a live connection.
         let pending = |id: &'static str, icon: IconName, tip: &'static str| {
             Button::new(id)
                 .ghost()
@@ -59,57 +61,47 @@ impl Grid {
             .border_b_1()
             .border_color(theme.border)
             .text_size(theme::ui())
-            .child(page_button(
-                "grid-first",
-                IconName::ChevronFirst,
-                "First page",
-                0,
-            ))
-            .child(page_button(
-                "grid-prev",
-                IconName::ChevronLeft,
-                "Previous page",
-                page.saturating_sub(1),
-            ))
-            .child(
-                Button::new("grid-page-size")
+            .map(|d| match live_pager {
+                Some(pager) => d.child(pager),
+                None => d
+                    .child(page_button(
+                        "grid-first",
+                        IconName::ChevronFirst,
+                        "First page",
+                        0,
+                    ))
+                    .child(page_button(
+                        "grid-prev",
+                        IconName::ChevronLeft,
+                        "Previous page",
+                        page.saturating_sub(1),
+                    ))
+                    .child(local_pager_size(range, size, start, pager))
+                    .child(page_button(
+                        "grid-next",
+                        IconName::ChevronRight,
+                        "Next page",
+                        (page + 1).min(last),
+                    ))
+                    .child(page_button(
+                        "grid-last",
+                        IconName::ChevronLast,
+                        "Last page",
+                        last,
+                    )),
+            })
+            .child(divider())
+            .child(if self.is_live() {
+                Button::new("grid-refresh")
                     .ghost()
                     .small()
-                    .label(range)
-                    .dropdown_caret(true)
-                    .tooltip("Rows per page")
-                    .dropdown_menu(move |menu, _, _| {
-                        PAGE_SIZES
-                            .into_iter()
-                            .fold(menu.label("Rows per page"), |menu, n| {
-                                let pager = pager.clone();
-                                menu.item(
-                                    PopupMenuItem::new(grouped(n)).checked(n == size).on_click(
-                                        move |_, _, cx| {
-                                            // Stay on the page holding the current first row.
-                                            _ = pager.update(cx, |this, cx| {
-                                                this.set_page(start / n, n, cx)
-                                            });
-                                        },
-                                    ),
-                                )
-                            })
-                    }),
-            )
-            .child(page_button(
-                "grid-next",
-                IconName::ChevronRight,
-                "Next page",
-                (page + 1).min(last),
-            ))
-            .child(page_button(
-                "grid-last",
-                IconName::ChevronLast,
-                "Last page",
-                last,
-            ))
-            .child(divider())
-            .child(pending("grid-refresh", IconName::RefreshCw, "Refresh"))
+                    .icon(IconName::RefreshCw)
+                    .tooltip("Refresh (F5)")
+                    .accessibility_label("Refresh")
+                    .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
+            } else {
+                pending("grid-refresh", IconName::RefreshCw, "Refresh")
+            })
             .child(pending("grid-stop", IconName::Square, "Stop query"))
             .child(divider())
             .child(pending("grid-add-row", IconName::Plus, "Add row"))
@@ -210,4 +202,32 @@ impl Grid {
                 ),
             )
     }
+}
+
+/// The row range, which opens the rows-per-page menu of a result in memory.
+fn local_pager_size(
+    range: String,
+    size: usize,
+    start: usize,
+    pager: WeakEntity<Grid>,
+) -> impl IntoElement {
+    Button::new("grid-page-size")
+        .ghost()
+        .small()
+        .label(range)
+        .dropdown_caret(true)
+        .tooltip("Rows per page")
+        .dropdown_menu(move |menu, _, _| {
+            PAGE_SIZES
+                .into_iter()
+                .fold(menu.label("Rows per page"), |menu, n| {
+                    let pager = pager.clone();
+                    menu.item(PopupMenuItem::new(grouped(n)).checked(n == size).on_click(
+                        move |_, _, cx| {
+                            // Stay on the page holding the current first row.
+                            _ = pager.update(cx, |this, cx| this.set_page(start / n, n, cx));
+                        },
+                    ))
+                })
+        })
 }
