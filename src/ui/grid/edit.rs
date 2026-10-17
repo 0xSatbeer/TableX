@@ -37,6 +37,9 @@ impl Grid {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only().is_some() {
+            return;
+        }
         let meta = &self.source.columns()[self.col_order[cell.1]];
         let value = self.row(cell.0)[self.col_order[cell.1]].clone();
         let text = if value == Value::Null {

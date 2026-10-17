@@ -39,6 +39,7 @@ mod picker;
 mod rows;
 mod selection;
 mod source;
+mod submit;
 mod toolbar;
 
 pub use self::live::{GridEvent, Table};
@@ -251,6 +252,7 @@ impl Render for Grid {
             .child(self.render_toolbar(cx))
             .child(self.render_filter_bar(window, cx))
             .children(self.render_filter_error(cx))
+            .children(self.render_submit_error(cx))
             .when(!self.record, |d| d.child(self.render_header(window, cx)))
             .when(self.record && self.source.row_count() > 0, |d| {
                 d.child(self.render_record(cx))

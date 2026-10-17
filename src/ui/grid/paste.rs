@@ -55,6 +55,9 @@ impl Grid {
         cells: Vec<((usize, usize), Value)>,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only().is_some() {
+            return;
+        }
         self.notice = None;
         for ((r, c), value) in cells {
             self.edits

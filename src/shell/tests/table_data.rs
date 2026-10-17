@@ -37,6 +37,18 @@ fn open_users(
     gpui_kit::AnyWindowHandle,
     gpui_kit::Entity<crate::shell::Shell>,
 ) {
+    open_users_with(cx, vec![column("id", true), column("email", false)])
+}
+
+/// `open_users`, with `columns` as the table's columns.
+fn open_users_with(
+    cx: &mut gpui_kit::TestAppContext,
+    columns: Vec<Column>,
+) -> (
+    Arc<Fake>,
+    gpui_kit::AnyWindowHandle,
+    gpui_kit::Entity<crate::shell::Shell>,
+) {
     use gpui_kit::AppContext as _;
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -69,10 +81,7 @@ fn open_users(
     vcx.run_until_parked();
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     vcx.run_until_parked();
-    fake.resolve(
-        "columns app_db/public/users",
-        Ok(vec![column("id", true), column("email", false)]),
-    );
+    fake.resolve("columns app_db/public/users", Ok(columns));
     vcx.run_until_parked();
     (fake, window, shell)
 }
@@ -369,4 +378,149 @@ fn header_clicks_cycle_the_sort_through_order_by(cx: &mut gpui_kit::TestAppConte
         assert_eq!(fake.queried().last(), Some(&sql));
         answer(&fake, Ok(rows(2)), &mut cx);
     }
+}
+
+fn grid(
+    shell: &gpui_kit::Entity<crate::shell::Shell>,
+    cx: &gpui_kit::VisualTestContext,
+) -> gpui_kit::Entity<crate::ui::grid::Grid> {
+    shell.read_with(cx, |this, _| {
+        match &this.tabs.active().expect("a tab").content {
+            crate::shell::TabContent::Grid(grid) => grid.clone(),
+            crate::shell::TabContent::Console(_) => panic!("a grid tab is active"),
+        }
+    })
+}
+
+/// Rows `id`, `email`, `name` with ids 1..=n.
+fn people(n: usize) -> ResultSet {
+    let meta = |name: &str, ty: &str| ColumnMeta {
+        name: name.into(),
+        data_type: ty.into(),
+        ..Default::default()
+    };
+    ResultSet {
+        columns: vec![
+            meta("id", "int4"),
+            meta("email", "text"),
+            meta("name", "text"),
+        ],
+        rows: (1..=n)
+            .map(|i| {
+                vec![
+                    Value::Int(i as i64),
+                    Value::Text(format!("{i}@x").into()),
+                    Value::Null,
+                ]
+                .into()
+            })
+            .collect(),
+    }
+}
+
+fn set(
+    shell: &gpui_kit::Entity<crate::shell::Shell>,
+    cells: &[((usize, usize), &str)],
+    cx: &mut gpui_kit::VisualTestContext,
+) {
+    grid(shell, cx).update(cx, |g, cx| {
+        for &(cell, text) in cells {
+            g.set_cell(cell, Value::Text(text.into()), cx);
+        }
+    });
+    cx.run_until_parked();
+}
+
+fn pending_edits(
+    shell: &gpui_kit::Entity<crate::shell::Shell>,
+    cx: &gpui_kit::VisualTestContext,
+) -> usize {
+    grid(shell, cx).read_with(cx, |g, _| g.pending_edits())
+}
+
+const UPDATE_ROW_1: &str =
+    r#"UPDATE "public"."users" SET "email" = 'ann@x', "name" = 'Ann' WHERE "id" = 1"#;
+
+#[gpui_kit::test]
+fn production_submit_shows_the_sql_and_runs_only_on_confirm(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(people(2)), &mut cx);
+    set(&shell, &[((0, 1), "ann@x"), ((0, 2), "Ann")], &mut cx);
+    click(&mut cx, "grid-submit");
+    let preview: &'static str = format!("prod-submit-sql:{UPDATE_ROW_1}").leak();
+    assert!(cx.debug_bounds(preview).is_some(), "the exact SQL is shown");
+    assert!(fake.executed().is_empty(), "nothing runs until confirmed");
+    click(&mut cx, "prod-submit-cancel");
+    assert!(cx.debug_bounds(preview).is_none());
+    assert!(fake.executed().is_empty(), "Cancel runs nothing");
+    assert_eq!(pending_edits(&shell, &cx), 2, "Cancel keeps the edits");
+
+    click(&mut cx, "grid-submit");
+    click(&mut cx, "prod-submit-confirm");
+    assert_eq!(
+        fake.executed(),
+        [("app_db".to_string(), vec![UPDATE_ROW_1.to_string()], true)],
+        "one UPDATE, in one transaction"
+    );
+    fake.resolve_query("execute app_db", Ok(()));
+    cx.run_until_parked();
+    assert_eq!(pending_edits(&shell, &cx), 0, "success clears the edits");
+    assert_eq!(fake.queried(), [PAGE_1, PAGE_1], "and reads the page again");
+    let logged = shell.read_with(&cx, |this, cx| {
+        let log = this.bottom_panel.read(cx).logged();
+        log.iter().find(|e| e.sql == UPDATE_ROW_1).map(|e| e.source)
+    });
+    assert_eq!(logged, Some(QuerySource::TableView));
+}
+
+#[gpui_kit::test]
+fn a_failing_second_statement_keeps_the_edits_and_marks_its_row(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(people(3)), &mut cx);
+    set(&shell, &[((2, 1), "c@x"), ((0, 1), "a@x")], &mut cx);
+    click(&mut cx, "grid-submit");
+    click(&mut cx, "prod-submit-confirm");
+    let statements = &fake.executed()[0].1;
+    assert!(
+        statements[1].ends_with(r#"WHERE "id" = 3"#),
+        "rows go in order"
+    );
+    let error = QueryError {
+        kind: QueryErrorKind::Server,
+        message: "duplicate key value".into(),
+        position: None,
+        statement: 1,
+    };
+    fake.resolve_query("execute app_db", Err::<(), _>(error));
+    cx.run_until_parked();
+    assert_eq!(pending_edits(&shell, &cx), 2, "the edits stay");
+    assert!(
+        cx.debug_bounds("submit-error:duplicate key value")
+            .is_some()
+    );
+    assert!(
+        cx.debug_bounds("failed-row:2").is_some(),
+        "the failing row is marked"
+    );
+    assert!(cx.debug_bounds("failed-row:0").is_none());
+    assert_eq!(fake.queried(), [PAGE_1], "nothing is read again");
+
+    click(&mut cx, "grid-revert");
+    assert_eq!(pending_edits(&shell, &cx), 0, "Revert drops the edits");
+    assert!(cx.debug_bounds("failed-row:2").is_none());
+}
+
+#[gpui_kit::test]
+fn a_postgres_table_without_a_key_is_read_only(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users_with(cx, vec![column("id", false)]);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(people(2)), &mut cx);
+    assert!(
+        cx.debug_bounds("grid-read-only:No primary key: read-only")
+            .is_some()
+    );
+    set(&shell, &[((0, 1), "x")], &mut cx);
+    assert_eq!(pending_edits(&shell, &cx), 0, "edits are refused");
 }

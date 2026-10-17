@@ -139,6 +139,17 @@ impl Grid {
         self.filter.clone().expect("the filter bar is drawn")
     }
 
+    /// Sets display cell `cell` as a typed edit would.
+    #[cfg(test)]
+    pub fn set_cell(&mut self, cell: (usize, usize), value: Value, cx: &mut Context<Self>) {
+        self.set_values(vec![(cell, value)], cx);
+    }
+
+    #[cfg(test)]
+    pub fn pending_edits(&self) -> usize {
+        self.edits.len()
+    }
+
     #[cfg(test)]
     pub fn columns(&self) -> &[ColumnMeta] {
         self.all.columns()

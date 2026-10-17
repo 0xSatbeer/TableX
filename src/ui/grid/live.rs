@@ -25,12 +25,14 @@ pub struct Table {
     pub name: String,
     /// A SQLite table, which reads its `rowid` when it has no primary key.
     pub sqlite_table: bool,
+    /// A view (or materialized view): never editable.
+    pub view: bool,
 }
 
 pub(super) struct Live {
-    table: Table,
+    pub(super) table: Table,
     /// Primary key columns, read before the first page.
-    key: Option<Vec<String>>,
+    pub(super) key: Option<Vec<String>>,
     offset: usize,
     /// The last page came back with `TABLE_PAGE` rows, so more may follow.
     full: bool,
@@ -43,6 +45,9 @@ pub(super) struct Live {
     /// The where, order by, offset and total the shown rows came from, while an applied filter is unread.
     before: Option<(String, String, usize, Option<usize>)>,
     state: LiveState,
+    /// The last Submit's failing row in `all` and why; its edits stay pending.
+    pub(super) submit_error: Option<(Option<usize>, String)>,
+    pub(super) _submit: Option<Task<()>>,
     _load: Option<Task<()>>,
     _count: Option<Task<()>>,
 }
@@ -129,6 +134,8 @@ impl Grid {
             filter_error: None,
             before: None,
             state: LiveState::Loading,
+            submit_error: None,
+            _submit: None,
             _load: None,
             _count: None,
         });
@@ -267,6 +274,7 @@ impl Grid {
         live.state = LiveState::Ready;
         live.filter_error = None;
         live.before = None;
+        live.submit_error = None;
         let reset = rs.columns != self.all.columns();
         self.all = Rc::new(rs);
         self.edits.clear();
@@ -319,7 +327,7 @@ impl Grid {
     }
 
     /// The explorer's open session on the table's database, connecting a new one when it has none.
-    fn session(&self, cx: &mut Context<Self>) -> Reply<Session> {
+    pub(super) fn session(&self, cx: &mut Context<Self>) -> Reply<Session> {
         let gone = || -> Reply<Session> {
             Box::pin(futures::future::ready(Err("The explorer is closed".into())))
         };
@@ -341,11 +349,21 @@ impl Grid {
         result: &Result<ResultSet, QueryError>,
         cx: &mut Context<Self>,
     ) {
-        let Some(live) = &self.live else { return };
-        let (rows, status) = match result {
+        let outcome = match result {
             Ok(rs) => (Some(rs.rows.len() as u64), QueryStatus::Ok),
             Err(error) => (None, QueryStatus::Err(error.message.clone())),
         };
+        self.log_status(sql, (at, started), outcome, cx);
+    }
+
+    pub(super) fn log_status(
+        &self,
+        sql: String,
+        (at, started): (SystemTime, Instant),
+        (rows, status): (Option<u64>, QueryStatus),
+        cx: &mut Context<Self>,
+    ) {
+        let Some(live) = &self.live else { return };
         cx.emit(GridEvent::Logged(QueryLogEntry {
             at,
             connection_id: live.table.connection,

@@ -15,6 +15,7 @@ mod editor;
 mod format;
 mod header;
 mod live_pages;
+mod submit;
 mod values;
 
 /// The open in-cell text input.

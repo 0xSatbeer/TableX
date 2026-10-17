@@ -69,7 +69,17 @@ impl Explorer {
             database,
             schema,
             sqlite_table: conn.kind() == DbKind::Sqlite && kind == ObjectKind::Table,
+            view: kind != ObjectKind::Table,
         })
+    }
+
+    /// Whether connection `id` is marked production now.
+    pub fn is_production(&self, id: ConnectionId, cx: &App) -> bool {
+        let workspace = self.workspace.read(cx);
+        workspace
+            .connections
+            .iter()
+            .any(|c| c.id == id && c.is_production)
     }
 
     /// The open session on connection `id`'s database `db`; without one, a new one, kept for the

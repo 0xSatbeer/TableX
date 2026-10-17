@@ -106,7 +106,48 @@ impl Grid {
             .child(divider())
             .child(pending("grid-add-row", IconName::Plus, "Add row"))
             .child(pending("grid-delete-row", IconName::Minus, "Delete row"))
-            .child(pending("grid-submit", IconName::ArrowUp, "Submit changes"))
+            .child(if self.is_live() {
+                let idle = self.edits.is_empty();
+                h_flex()
+                    .gap(theme::space_2())
+                    .child(
+                        div().debug_selector(|| "grid-submit".into()).child(
+                            Button::new("grid-submit")
+                                .ghost()
+                                .small()
+                                .icon(IconName::ArrowUp)
+                                .tooltip("Submit changes (Ctrl+Enter)")
+                                .accessibility_label("Submit changes")
+                                .disabled(idle)
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.submit(window, cx)),
+                                ),
+                        ),
+                    )
+                    .child(
+                        div().debug_selector(|| "grid-revert".into()).child(
+                            Button::new("grid-revert")
+                                .ghost()
+                                .small()
+                                .icon(IconName::Undo2)
+                                .tooltip("Revert changes")
+                                .accessibility_label("Revert changes")
+                                .disabled(idle)
+                                .on_click(cx.listener(|this, _, _, cx| this.revert(cx))),
+                        ),
+                    )
+                    .into_any_element()
+            } else {
+                pending("grid-submit", IconName::ArrowUp, "Submit changes").into_any_element()
+            })
+            .children(self.read_only().map(|note| {
+                div()
+                    .debug_selector(move || format!("grid-read-only:{note}"))
+                    .px(theme::space_4())
+                    .text_size(theme::ui_sm())
+                    .text_color(theme.muted_foreground)
+                    .child(note)
+            }))
             .child(div().flex_1())
             .child(
                 Button::new("grid-copy-format")

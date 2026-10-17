@@ -28,6 +28,7 @@ impl Grid {
         let cols = visible_cols(&offsets, scroll_x, view, OVERSCAN);
         let total = *offsets.last().unwrap_or(&Pixels::ZERO);
         let editing_cell = self.editing.as_ref().map(|e| e.cell);
+        let failed_row = self.failed_row();
         let text_editor = match self.editing.as_ref().map(|e| &e.editor) {
             Some(Editor::Text(input)) => Some(input.clone()),
             _ => None,
@@ -125,6 +126,10 @@ impl Grid {
                         theme.table_even
                     } else {
                         theme.table
+                    })
+                    .when(failed_row == Some(at), |d| {
+                        d.debug_selector(move || format!("failed-row:{at}"))
+                            .bg(theme.danger.opacity(0.14))
                     })
                     .hover(|d| d.bg(theme.table_hover))
                     .border_b_1()

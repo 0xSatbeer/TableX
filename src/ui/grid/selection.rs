@@ -238,6 +238,7 @@ impl Grid {
         match ev.keystroke.key.as_str() {
             "c" if m.secondary() => return self.copy_as(if self.copy_csv { csv } else { tsv }, cx),
             "v" if m.secondary() => return self.paste(cx),
+            "enter" if m.secondary() && self.is_live() => return self.submit(window, cx),
             "enter" | "f2" if !m.secondary() && !m.shift => {
                 return self.start_editing(self.head, window, cx);
             }
