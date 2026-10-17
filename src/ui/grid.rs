@@ -2,7 +2,7 @@
 //! prefix-summed widths against the horizontal scroll offset.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -35,6 +35,7 @@ mod layout;
 mod live;
 mod parse;
 mod paste;
+mod pending;
 mod picker;
 mod rows;
 mod selection;
@@ -66,7 +67,12 @@ actions!(
 pub struct Grid {
     /// The current page of `all`; everything but paging works on it.
     source: Rc<Page>,
+    /// `loaded` under the `added` new rows; row indices into it are what edits and marks key by.
     all: Rc<dyn GridSource>,
+    loaded: Rc<dyn GridSource>,
+    added: usize,
+    /// Rows in `all` marked for deletion on Submit.
+    deleted: BTreeSet<usize>,
     page: usize,
     page_size: usize,
     widths: Vec<Pixels>,
@@ -150,7 +156,10 @@ impl Grid {
         let n = source.columns().len();
         let mut grid = Self {
             source: Rc::new(Page::new(source.clone(), 0, PAGE_SIZES[1])),
-            all: source,
+            all: source.clone(),
+            loaded: source,
+            added: 0,
+            deleted: BTreeSet::new(),
             page: 0,
             page_size: PAGE_SIZES[1],
             widths: vec![DEFAULT_WIDTH; n],

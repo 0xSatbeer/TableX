@@ -230,11 +230,18 @@ impl Grid {
             self.stop_editing(false, window, cx);
             return;
         }
+        let m = ev.keystroke.modifiers;
+        if self.is_live() && self.focus.is_focused(window) {
+            match ev.keystroke.key.as_str() {
+                "insert" if m.alt => return self.add_row(cx),
+                "delete" if m.secondary() => return self.delete_rows(cx),
+                _ => {}
+            }
+        }
         // Keys typed into the filter inputs bubble up here; they are not grid navigation.
         if rows == 0 || self.widths.is_empty() || !self.focus.is_focused(window) {
             return;
         }
-        let m = ev.keystroke.modifiers;
         match ev.keystroke.key.as_str() {
             "c" if m.secondary() => return self.copy_as(if self.copy_csv { csv } else { tsv }, cx),
             "v" if m.secondary() => return self.paste(cx),

@@ -8,6 +8,7 @@ use super::{
     sort_availability, sql_in_list, sql_insert, timestamp_value, tsv, visible_cols, wall_time,
 };
 
+mod add_delete;
 mod cell_edit;
 mod columns;
 mod copy;

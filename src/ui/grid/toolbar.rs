@@ -104,10 +104,47 @@ impl Grid {
             })
             .child(pending("grid-stop", IconName::Square, "Stop query"))
             .child(divider())
-            .child(pending("grid-add-row", IconName::Plus, "Add row"))
-            .child(pending("grid-delete-row", IconName::Minus, "Delete row"))
+            .children(if self.is_live() {
+                let read_only = self.read_only().is_some();
+                let row_button =
+                    |id: &'static str,
+                     icon,
+                     tip: &'static str,
+                     key,
+                     run: fn(&mut Self, &mut Context<Self>)| {
+                        Button::new(id)
+                            .ghost()
+                            .small()
+                            .icon(icon)
+                            .tooltip(format!("{tip} ({key})"))
+                            .accessibility_label(tip)
+                            .disabled(read_only)
+                            .on_click(cx.listener(move |this, _, _, cx| run(this, cx)))
+                    };
+                [
+                    row_button(
+                        "grid-add-row",
+                        IconName::Plus,
+                        "Add row",
+                        "Alt+Insert",
+                        Self::add_row,
+                    ),
+                    row_button(
+                        "grid-delete-row",
+                        IconName::Minus,
+                        "Delete row",
+                        "Ctrl+Delete",
+                        Self::delete_rows,
+                    ),
+                ]
+            } else {
+                [
+                    pending("grid-add-row", IconName::Plus, "Add row"),
+                    pending("grid-delete-row", IconName::Minus, "Delete row"),
+                ]
+            })
             .child(if self.is_live() {
-                let idle = self.edits.is_empty();
+                let idle = !self.has_changes();
                 h_flex()
                     .gap(theme::space_2())
                     .child(

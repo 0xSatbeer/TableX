@@ -1,10 +1,18 @@
 //! The UPDATEs pending edits become, and which tables can't take them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
-use super::super::submit::{read_only_note, updates};
+use super::super::submit::{changes, read_only_note};
 use super::*;
 use crate::model::ResultSet;
+
+fn updates(
+    target: (&str, &str, &[String]),
+    all: &dyn GridSource,
+    edits: &HashMap<(usize, usize), Value>,
+) -> Vec<(usize, String)> {
+    changes(target, all, 0, edits, &BTreeSet::new())
+}
 
 fn users() -> ResultSet {
     ResultSet {

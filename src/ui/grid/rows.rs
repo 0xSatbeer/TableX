@@ -36,6 +36,7 @@ impl Grid {
         range
             .map(|r| {
                 let (row, at) = (self.row(r), self.abs_row(r));
+                let added = at < self.added;
                 let cells = cols
                     .clone()
                     .map(|c| (c, self.col_order[c]))
@@ -102,7 +103,10 @@ impl Grid {
                                     .child(self.render_problem(why, cx))
                             })
                             .when(editing_cell != Some((r, c)) || text_editor.is_none(), |d| {
-                                d.child(if kind == CellKind::Null {
+                                d.child(if added && !self.edits.contains_key(&(at, s)) {
+                                    // Left blank, a new row's cell takes the column default.
+                                    div()
+                                } else if kind == CellKind::Null {
                                     div()
                                         .px(theme::space_4())
                                         .rounded(theme::radius_sm())
@@ -126,6 +130,12 @@ impl Grid {
                         theme.table_even
                     } else {
                         theme.table
+                    })
+                    .when(added, |d| d.bg(theme::grid_inserted(theme)))
+                    .when(self.deleted.contains(&at), |d| {
+                        d.debug_selector(move || format!("deleted-row:{at}"))
+                            .bg(theme::grid_deleted(theme))
+                            .line_through()
                     })
                     .when(failed_row == Some(at), |d| {
                         d.debug_selector(move || format!("failed-row:{at}"))
@@ -157,7 +167,13 @@ impl Grid {
                                     this.select_band(Some(r), None, ev.modifiers.shift, cx);
                                 }),
                             )
-                            .child((self.source.start + r + 1).to_string()),
+                            .child(if added {
+                                "+".to_string()
+                            } else {
+                                (self.source.start + r + 1)
+                                    .saturating_sub(self.added)
+                                    .to_string()
+                            }),
                     )
             })
             .collect()

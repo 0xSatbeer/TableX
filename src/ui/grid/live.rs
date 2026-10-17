@@ -276,7 +276,9 @@ impl Grid {
         live.before = None;
         live.submit_error = None;
         let reset = rs.columns != self.all.columns();
-        self.all = Rc::new(rs);
+        self.loaded = Rc::new(rs);
+        self.all = self.loaded.clone();
+        (self.added, self.deleted) = (0, BTreeSet::new());
         self.edits.clear();
         self.editing = None;
         // The server sorted these rows; the header keeps showing which way.
@@ -383,7 +385,7 @@ impl Grid {
     /// First, Previous, the row range with its count, Next and Last for a table tab.
     pub(super) fn render_live_pager(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let live = self.live.as_ref()?;
-        let (offset, len) = (live.offset, self.all.row_count());
+        let (offset, len) = (live.offset, self.loaded.row_count());
         let last = live
             .total
             .map(|n| n.saturating_sub(1) / TABLE_PAGE * TABLE_PAGE);

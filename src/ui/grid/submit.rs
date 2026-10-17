@@ -1,4 +1,4 @@
-//! Pending edits as UPDATEs by key, submitted in one transaction; Revert drops them.
+//! Pending edits, deletions and added rows as one transaction of SQL; Revert drops them.
 
 use std::collections::BTreeMap;
 use std::time::{Instant, SystemTime};
@@ -21,48 +21,81 @@ pub(super) fn read_only_note(
     (key.is_empty() && !sqlite_table).then_some("No primary key: read-only")
 }
 
-/// One `UPDATE` per edited row of `all`, in row order, as (row, SQL). Rows are matched by the
-/// key columns' values as read, so an edited key still finds its row.
-pub(super) fn updates(
+/// The whole batch as (row, SQL): a DELETE per row in `deleted`, an UPDATE per other edited
+/// loaded row, then an INSERT per row of `all` under `added`, naming only the cells filled in.
+pub(super) fn changes(
     (schema, table, key): (&str, &str, &[String]),
     all: &dyn GridSource,
+    added: usize,
     edits: &HashMap<(usize, usize), Value>,
+    deleted: &BTreeSet<usize>,
 ) -> Vec<(usize, String)> {
     let columns = all.columns();
+    let target = format!("{}.{}", ident(schema), ident(table));
     let mut rows: BTreeMap<usize, Vec<(usize, &Value)>> = BTreeMap::new();
     for (&(r, c), value) in edits {
         rows.entry(r).or_default().push((c, value));
     }
-    let pairs = |cells: &mut dyn Iterator<Item = (usize, &Value)>, sep: &str| {
-        cells
-            .map(|(c, v)| format!("{} = {}", ident(&columns[c].name), sql_literal(v)))
-            .collect::<Vec<_>>()
-            .join(sep)
+    rows.values_mut()
+        .for_each(|cells| cells.sort_by_key(|&(c, _)| c));
+    let name = |c: usize| ident(&columns[c].name);
+    // Rows are matched by the key columns' values as read, so an edited key still finds its row.
+    let key_of = |r: usize| {
+        let row = all.row(r);
+        let cells = key
+            .iter()
+            .filter_map(|k| columns.iter().position(|c| *c.name == **k))
+            .map(|c| (c, &row[c]));
+        pairs(columns, cells, " AND ")
     };
-    rows.into_iter()
-        .map(|(r, mut cells)| {
-            cells.sort_by_key(|&(c, _)| c);
-            let row = all.row(r);
-            let mut key_cells = key
-                .iter()
-                .filter_map(|k| columns.iter().position(|c| *c.name == **k))
-                .map(|c| (c, &row[c]));
+    let deletes = deleted
+        .iter()
+        .map(|&r| (r, format!("DELETE FROM {target} WHERE {}", key_of(r))));
+    let updates = rows
+        .range(added..)
+        .filter(|(r, _)| !deleted.contains(r))
+        .map(|(&r, cells)| {
             let sql = format!(
-                "UPDATE {}.{} SET {} WHERE {}",
-                ident(schema),
-                ident(table),
-                pairs(&mut cells.into_iter(), ", "),
-                pairs(&mut key_cells, " AND ")
+                "UPDATE {target} SET {} WHERE {}",
+                pairs(columns, cells.iter().copied(), ", "),
+                key_of(r)
             );
             (r, sql)
-        })
-        .collect()
+        });
+    let inserts = (0..added).map(|r| {
+        let sql = match rows.get(&r) {
+            None => format!("INSERT INTO {target} DEFAULT VALUES"),
+            Some(cells) => {
+                let list = |f: &dyn Fn(&(usize, &Value)) -> String| {
+                    cells.iter().map(f).collect::<Vec<_>>().join(", ")
+                };
+                format!(
+                    "INSERT INTO {target} ({}) VALUES ({})",
+                    list(&|&(c, _)| name(c)),
+                    list(&|&(_, v)| sql_literal(v))
+                )
+            }
+        };
+        (r, sql)
+    });
+    deletes.chain(updates).chain(inserts).collect()
+}
+
+fn pairs<'a>(
+    columns: &[ColumnMeta],
+    cells: impl Iterator<Item = (usize, &'a Value)>,
+    sep: &str,
+) -> String {
+    cells
+        .map(|(c, v)| format!("{} = {}", ident(&columns[c].name), sql_literal(v)))
+        .collect::<Vec<_>>()
+        .join(sep)
 }
 
 impl Grid {
     /// Submit and Ctrl+Enter: the pending edits as one transaction, after a confirm on production.
     pub(super) fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.stop_editing(true, window, cx) || self.edits.is_empty() {
+        if !self.stop_editing(true, window, cx) || !self.has_changes() {
             return;
         }
         let Some(live) = &self.live else { return };
@@ -72,7 +105,13 @@ impl Grid {
         let t = &live.table;
         let rowid = ["rowid".to_string()];
         let key = if key.is_empty() { &rowid[..] } else { key };
-        let statements = updates((&t.schema, &t.name, key), &*self.all, &self.edits);
+        let statements = changes(
+            (&t.schema, &t.name, key),
+            &*self.all,
+            self.added,
+            &self.edits,
+            &self.deleted,
+        );
         let production = t
             .explorer
             .upgrade()
@@ -214,7 +253,11 @@ impl Grid {
 
     pub(super) fn revert(&mut self, cx: &mut Context<Self>) {
         self.edits.clear();
+        self.deleted.clear();
         self.revision += 1;
+        if self.added > 0 {
+            self.set_added(0, cx);
+        }
         if let Some(live) = &mut self.live {
             live.submit_error = None;
         }
