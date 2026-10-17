@@ -34,7 +34,7 @@ fn log_keeps_the_newest_10k_entries() {
         (10_001, 10_000, Some(1)),
         (10_005, 10_000, Some(5)),
     ] {
-        let mut log = Vec::new();
+        let mut log = std::collections::VecDeque::new();
         for i in 0..pushed as usize {
             super::push_log(
                 &mut log,
@@ -43,12 +43,12 @@ fn log_keeps_the_newest_10k_entries() {
         }
         assert_eq!(log.len(), len, "length after {pushed} pushes");
         assert_eq!(
-            log.first().map(|e| e.sql.clone()),
+            log.front().map(|e| e.sql.clone()),
             oldest.map(|i| format!("q{i}")),
             "oldest after {pushed} pushes"
         );
         assert_eq!(
-            log.last().map(|e| e.sql.clone()),
+            log.back().map(|e| e.sql.clone()),
             (pushed as usize).checked_sub(1).map(|i| format!("q{i}")),
             "newest after {pushed} pushes"
         );

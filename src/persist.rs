@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 
 mod config;
 mod keychain;
+mod query_log;
 mod session;
 mod workspaces;
 
 pub use config::*;
 pub use keychain::*;
+pub use query_log::*;
 pub use session::*;
 pub use workspaces::*;
 

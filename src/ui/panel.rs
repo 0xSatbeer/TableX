@@ -5,7 +5,8 @@ mod render;
 mod row;
 pub(crate) mod sql;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
+use std::path::PathBuf;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -29,7 +30,9 @@ pub struct BottomPanel {
     /// Set by the shell: the active console, whose results and messages show here; other tabs hide Results.
     pub console: Option<Entity<Console>>,
     tab: usize,
-    log: Vec<QueryLogEntry>,
+    log: VecDeque<QueryLogEntry>,
+    /// Normal mode's `ConfigDir` root, whose `logs/queries.jsonl` gets every pushed entry.
+    log_root: Option<PathBuf>,
     filter: LogFilter,
     search: Entity<InputState>,
     /// Indexes into `log` that pass the filters.
@@ -81,7 +84,7 @@ impl BottomPanel {
             cx.notify();
         })
         .detach();
-        let log = log.into_iter().fold(Vec::new(), |mut log, entry| {
+        let log = log.into_iter().fold(VecDeque::new(), |mut log, entry| {
             push_log(&mut log, entry);
             log
         });
@@ -92,6 +95,7 @@ impl BottomPanel {
             console: None,
             tab: RESULTS,
             log,
+            log_root: None,
             filter,
             search,
             list: ListState::new(rows.len(), ListAlignment::Top, px(240.)),
@@ -116,7 +120,28 @@ impl BottomPanel {
 
     /// Logs `entry` as the newest row.
     pub fn push(&mut self, entry: QueryLogEntry, cx: &mut Context<Self>) {
+        if let Some(root) = &self.log_root
+            && let Err(e) = crate::persist::append_query_log(root, &entry)
+        {
+            eprintln!("could not append to the query log: {e}");
+        }
         push_log(&mut self.log, entry);
+        self.refilter(cx);
+        cx.notify();
+    }
+
+    /// Loads the query log saved under `root` ahead of the rows logged so far, and appends every
+    /// later entry there.
+    pub fn persist_log(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+        let saved = crate::persist::load_query_log(&root);
+        let mut log = VecDeque::new();
+        saved
+            .into_iter()
+            .chain(self.log.drain(..))
+            .for_each(|e| push_log(&mut log, e));
+        self.log = log;
+        self.log_root = Some(root);
+        self.expanded.clear();
         self.refilter(cx);
         cx.notify();
     }
@@ -128,8 +153,8 @@ impl BottomPanel {
     }
 
     #[cfg(test)]
-    pub fn logged(&self) -> &[QueryLogEntry] {
-        &self.log
+    pub fn logged(&self) -> Vec<QueryLogEntry> {
+        self.log.iter().cloned().collect()
     }
 
     /// The connections the query log has rows for.
@@ -188,11 +213,10 @@ impl BottomPanel {
 pub const LOG_CAP: usize = 10_000;
 
 /// Appends the newest entry (the list shows the last one first); past `LOG_CAP` the oldest drops.
-fn push_log(log: &mut Vec<QueryLogEntry>, entry: QueryLogEntry) {
-    log.push(entry);
-    // shortcut: O(n) shift on overflow, fine at 10k and a few pushes a second; use a VecDeque when logging goes live.
+fn push_log(log: &mut VecDeque<QueryLogEntry>, entry: QueryLogEntry) {
+    log.push_back(entry);
     if log.len() > LOG_CAP {
-        log.remove(0);
+        log.pop_front();
     }
 }
 

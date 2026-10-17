@@ -151,15 +151,20 @@ impl Default for LogFilter {
 }
 
 /// Indexes of `log` entries that pass `filter`.
-pub(super) fn filter_rows(log: &[QueryLogEntry], filter: &LogFilter) -> Vec<usize> {
+pub(super) fn filter_rows<'a>(
+    log: impl IntoIterator<Item = &'a QueryLogEntry>,
+    filter: &LogFilter,
+) -> Vec<usize> {
     let text = filter.text.to_lowercase();
-    (0..log.len())
-        .filter(|&ix| filter.statuses.contains(&StatusKind::of(&log[ix].status)))
-        .filter(|&ix| filter.introspection || log[ix].source != QuerySource::Introspection)
-        .filter(|&ix| {
-            filter.connections.is_empty() || filter.connections.contains(&log[ix].connection_id.0)
+    log.into_iter()
+        .enumerate()
+        .filter(|(_, e)| filter.statuses.contains(&StatusKind::of(&e.status)))
+        .filter(|(_, e)| filter.introspection || e.source != QuerySource::Introspection)
+        .filter(|(_, e)| {
+            filter.connections.is_empty() || filter.connections.contains(&e.connection_id.0)
         })
-        .filter(|&ix| text.is_empty() || log[ix].sql.to_lowercase().contains(&text))
+        .filter(|(_, e)| text.is_empty() || e.sql.to_lowercase().contains(&text))
+        .map(|(ix, _)| ix)
         .collect()
 }
 
