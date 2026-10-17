@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 
 mod config;
 mod keychain;
+mod session;
 mod workspaces;
 
 pub use config::*;
 pub use keychain::*;
+pub use session::*;
 pub use workspaces::*;
 
 /// `queryx/` under the platform config dir; every config file lives below it.

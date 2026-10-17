@@ -9,6 +9,7 @@ mod actions;
 mod appearance;
 mod layout;
 mod render;
+mod session;
 mod start;
 mod tab;
 mod tab_bar;
@@ -67,6 +68,15 @@ pub(crate) struct Shell {
     workspaces_file: Option<crate::persist::WorkspacesFile>,
     /// Normal mode's `ConfigDir` root, where `config.toml` is saved; demo mode never writes it.
     config_root: Option<std::path::PathBuf>,
+    /// Normal mode's `ConfigDir` root, where `sessions/<workspace id>.toml` are saved.
+    sessions_root: Option<std::path::PathBuf>,
+    /// The session last saved or waiting to be, so an unchanged one isn't written again.
+    session_saved: Option<crate::persist::SessionFile>,
+    /// The pending debounced save; replacing it cancels the one before.
+    _session_save: Option<Task<()>>,
+    /// Each console tab's id (`consoles/<id>.sql`), by tab key; the largest handed out is `next_console`.
+    console_ids: std::collections::HashMap<SharedString, u32>,
+    next_console: u32,
     /// Problems last notified for the user theme dir (`<ConfigDir>/themes`).
     user_theme_errors: Vec<String>,
     /// Overflow list: open state and its search field (shown above `tabs::SEARCH_MIN_TABS` tabs).
@@ -121,6 +131,7 @@ pub(crate) fn open_shell(
             if let (Mode::Normal, Some(root)) = (mode, config) {
                 shell.persist_config(&root, window, cx);
                 shell.persist_workspaces(&root, window, cx);
+                shell.persist_session(&root, window, cx);
             }
             if let Some(dir) = user_themes {
                 shell.watch_user_themes(dir, window, cx);

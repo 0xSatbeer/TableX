@@ -96,11 +96,7 @@ impl Shell {
                 Some(table) => {
                     let grid = cx.new(|cx| grid::Grid::table(table.clone(), cx));
                     grid.update(cx, |grid, cx| grid.load(cx));
-                    let key = ev.key.clone();
-                    let s = cx.new(|cx| structure::Structure::new(grid.clone(), table, key, cx));
-                    // Focus and the status bar's aggregate follow the shown sub-tab.
-                    cx.observe(&s, |_, _, cx| cx.notify()).detach();
-                    grid_tab_of(ev.key.clone(), grid, Some(s), cx)
+                    table_tab(ev.key.clone(), grid, table, cx)
                 }
                 None => grid_tab(ev.key.clone(), Rc::new(rows), cx),
             };
@@ -117,11 +113,7 @@ impl Shell {
             &explorer,
             window,
             |this, _, ev: &explorer::OpenConsole, window, cx| {
-                let key: SharedString = match &ev.schema {
-                    Some(schema) => format!("console:{}/{}/{schema}", ev.conn.0, ev.database),
-                    None => format!("console:{}/{}", ev.conn.0, ev.database),
-                }
-                .into();
+                let key = console_key(ev.conn, &ev.database, ev.schema.as_deref());
                 if let Some(ix) = this.tabs.tabs.iter().position(|t| t.key == key) {
                     this.tabs.activate(ix);
                 } else {
@@ -131,34 +123,19 @@ impl Shell {
                         .connections
                         .iter()
                         .find(|c| c.id == ev.conn)
+                        .cloned()
                     else {
                         return;
                     };
-                    let tail = tabs::join_path(&ev.database, ev.schema.as_deref().unwrap_or(""));
-                    let origin = tabs::Origin {
-                        connection: conn.id,
-                        color: conn.color,
-                        production: conn.is_production,
-                        path: tabs::join_path(&conn.name, &tail),
-                        tail,
-                    };
-                    let title = format!("{} — console", ev.database);
-                    let target = console::Target {
-                        workspace: this.workspace.clone(),
-                        driver: this.driver.clone(),
-                        connection: Some(conn.id),
-                        database: ev.database.clone(),
-                        schema: ev.schema.clone(),
-                    };
-                    this.tabs.open(console_tab(
-                        key,
-                        title,
-                        Some(origin),
-                        target,
+                    let tab = this.connection_console(
+                        &conn,
+                        ev.database.clone(),
+                        ev.schema.clone(),
                         "",
                         window,
                         cx,
-                    ));
+                    );
+                    this.tabs.open(tab);
                 }
                 this.tab_changed(cx);
             },
@@ -253,6 +230,11 @@ impl Shell {
             user_theme_errors: Vec::new(),
             workspaces_file: None,
             config_root: None,
+            sessions_root: None,
+            session_saved: None,
+            _session_save: None,
+            console_ids: std::collections::HashMap::new(),
+            next_console: 0,
             console_mono: theme::MONO,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| {
                 this.theme.apply(&this.user_themes, window, cx)
@@ -304,6 +286,60 @@ impl Shell {
     }
 }
 
+impl Shell {
+    /// A console tab on `conn`'s `database` (and `schema`), holding `text`.
+    pub(super) fn connection_console(
+        &mut self,
+        conn: &model::Connection,
+        database: String,
+        schema: Option<String>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> tabs::EditorTab<TabContent> {
+        let key = console_key(conn.id, &database, schema.as_deref());
+        let tail = tabs::join_path(&database, schema.as_deref().unwrap_or(""));
+        let origin = tabs::Origin {
+            connection: conn.id,
+            color: conn.color,
+            production: conn.is_production,
+            path: tabs::join_path(&conn.name, &tail),
+            tail,
+        };
+        let title = format!("{database} — console");
+        let target = console::Target {
+            workspace: self.workspace.clone(),
+            driver: self.driver.clone(),
+            connection: Some(conn.id),
+            database,
+            schema,
+        };
+        console_tab(key, title, Some(origin), target, text, window, cx)
+    }
+}
+
+/// The key of the console on `conn`'s `database` (and `schema`); opening it again activates it.
+fn console_key(conn: model::ConnectionId, database: &str, schema: Option<&str>) -> SharedString {
+    match schema {
+        Some(schema) => format!("console:{}/{database}/{schema}", conn.0),
+        None => format!("console:{}/{database}", conn.0),
+    }
+    .into()
+}
+
+/// A table tab keyed `key` showing `grid`, which reads `table`, with its Structure and DDL sub-tabs.
+pub(super) fn table_tab(
+    key: SharedString,
+    grid: Entity<grid::Grid>,
+    table: grid::Table,
+    cx: &mut Context<Shell>,
+) -> tabs::EditorTab<TabContent> {
+    let s = cx.new(|cx| structure::Structure::new(grid.clone(), table, key.clone(), cx));
+    // Focus and the status bar's aggregate follow the shown sub-tab.
+    cx.observe(&s, |_, _, cx| cx.notify()).detach();
+    grid_tab_of(key, grid, Some(s), cx)
+}
+
 pub(super) fn grid_tab(
     key: impl Into<SharedString>,
     source: Rc<dyn grid::GridSource>,
@@ -322,7 +358,9 @@ fn grid_tab_of(
 ) -> tabs::EditorTab<TabContent> {
     cx.subscribe(&grid, |this, _, grid::GridEvent::Logged(entry), cx| {
         this.bottom_panel
-            .update(cx, |panel, cx| panel.push(entry.clone(), cx))
+            .update(cx, |panel, cx| panel.push(entry.clone(), cx));
+        // A page read follows every filter apply; the session keeps what it settled on.
+        this.session_changed(cx);
     })
     .detach();
     let key = key.into();

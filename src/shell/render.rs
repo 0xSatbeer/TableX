@@ -24,7 +24,10 @@ impl Render for Shell {
         if self.layout.panel_maximized {
             self.focus_content = true;
         } else if std::mem::take(&mut self.focus_content)
-            && let Some(handle) = self.content_focus(cx)
+            // With no tab open the tree takes focus, so the window's keys still have a target.
+            && let Some(handle) = self
+                .content_focus(cx)
+                .or_else(|| Some(self.explorer.focus_handle(cx)))
         {
             window.focus(&handle, cx);
         }

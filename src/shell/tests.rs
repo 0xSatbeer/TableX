@@ -16,6 +16,7 @@ mod open_console;
 mod overflow;
 mod races;
 mod rename;
+mod session_restore;
 mod startup;
 mod support;
 mod table_data;

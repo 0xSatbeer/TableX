@@ -236,6 +236,16 @@ impl Console {
         }
     }
 
+    /// Where this console runs.
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
+
+    /// Whether each statement commits on its own (not manual mode).
+    pub fn autocommit(&self) -> bool {
+        !self.manual
+    }
+
     /// What the status bar shows for this console.
     pub fn mode(&self) -> &'static str {
         match (self.manual, self.in_transaction) {

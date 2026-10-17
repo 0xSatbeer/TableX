@@ -54,6 +54,8 @@ pub(super) struct Live {
 }
 
 enum LiveState {
+    /// A restored production tab: nothing is read until Connect is clicked.
+    Disconnected,
     Loading,
     Failed(String),
     Ready,
@@ -141,6 +143,38 @@ impl Grid {
             _count: None,
         });
         grid
+    }
+
+    /// The table this tab reads, with its applied WHERE and ORDER BY.
+    pub fn source(&self) -> Option<(&Table, &str, &str)> {
+        let live = self.live.as_ref()?;
+        Some((&live.table, &live.where_, &live.order_by))
+    }
+
+    /// Sets the WHERE and ORDER BY the next `load` reads with, as a restored tab had them.
+    pub fn set_filter(&mut self, where_: String, order_by: String) {
+        if let Some(live) = &mut self.live {
+            (live.where_, live.order_by) = (where_, order_by);
+        }
+    }
+
+    /// Waits for a Connect click instead of reading, as a restored production tab does.
+    pub fn set_disconnected(&mut self) {
+        if let Some(live) = &mut self.live {
+            live.state = LiveState::Disconnected;
+        }
+    }
+
+    /// Connect on a disconnected tab: connects its connection in the tree and reads the page.
+    fn connect(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = &self.live {
+            let id = live.table.connection;
+            _ = live
+                .table
+                .explorer
+                .update(cx, |e, cx| e.connect_connection(id, cx));
+        }
+        self.load(cx);
     }
 
     /// Reads the current page again (F5, Refresh, Retry), connecting and reading the key first if needed.
@@ -495,6 +529,19 @@ impl Grid {
         };
         match &self.live.as_ref()?.state {
             LiveState::Ready => None,
+            LiveState::Disconnected => Some(
+                overlay()
+                    .child("Disconnected")
+                    .child(
+                        div().debug_selector(|| "table-connect".into()).child(
+                            Button::new("table-connect")
+                                .small()
+                                .label("Connect")
+                                .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
+                        ),
+                    )
+                    .into_any_element(),
+            ),
             LiveState::Loading => Some(
                 overlay()
                     .debug_selector(|| "table-loading".into())

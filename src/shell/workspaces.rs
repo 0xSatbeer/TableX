@@ -152,10 +152,23 @@ impl Shell {
     }
 
     /// Closes the shown workspace's tabs and shows workspace `id` instead, disconnected.
-    pub(super) fn switch_workspace(&mut self, id: u32, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn switch_workspace(
+        &mut self,
+        id: u32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if id == self.workspace.read(cx).id {
             return;
         }
+        if !self
+            .workspaces_file
+            .as_ref()
+            .is_some_and(|f| f.all.list.iter().any(|w| w.id == id))
+        {
+            return;
+        }
+        self.save_session(cx);
         let Some(file) = self.workspaces_file.as_mut() else {
             return;
         };
@@ -184,6 +197,7 @@ impl Shell {
             cx.notify();
         });
         self.update_move_targets(cx);
+        self.restore_session(window, cx);
     }
 
     /// Deletes the shown workspace, its connections and their saved passwords, then shows the
@@ -207,6 +221,9 @@ impl Shell {
             }
         }
         self.switch_workspace(next, window, cx);
+        if let Some(root) = &self.sessions_root {
+            _ = std::fs::remove_file(crate::persist::session_path(root, id));
+        }
         true
     }
 

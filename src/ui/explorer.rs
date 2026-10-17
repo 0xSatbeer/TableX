@@ -198,7 +198,7 @@ impl Explorer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // ponytail: starts collapsed; QX-020 restores the last session's expanded nodes
+        // Collapsed until the Shell restores the session's expanded nodes (`set_expanded_paths`).
         let expanded = HashSet::new();
         let nodes = flatten(workspace.read(cx), &expanded, &HashMap::new(), false);
         // Edits made elsewhere (rename, recolor, connect, new params, delete) rebuild the rows.
@@ -250,6 +250,80 @@ impl Explorer {
             cx.notify();
         }
     }
+}
+
+impl Explorer {
+    /// The expanded nodes as the session file names them: by name, a group by its label ("Tables").
+    pub fn expanded_paths(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .expanded
+            .iter()
+            .map(|key| {
+                with_group(key, |s| {
+                    ObjectKind::ALL
+                        .into_iter()
+                        .find(|k| k.as_str() == s)
+                        .map(group_label)
+                })
+            })
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    /// Expands the nodes `expanded_paths` gave; each opens as its parent's children load.
+    pub fn set_expanded_paths(&mut self, paths: &[String], cx: &mut Context<Self>) {
+        self.expanded = paths
+            .iter()
+            .map(|path| {
+                with_group(path, |s| {
+                    ObjectKind::ALL
+                        .into_iter()
+                        .find(|k| group_label(*k) == s)
+                        .map(ObjectKind::as_str)
+                })
+            })
+            .collect();
+        self.refresh(cx);
+    }
+
+    /// Connects connection `id` without opening its row, as restoring a session's tabs does.
+    pub fn connect_collapsed(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        let key = id.0.to_string();
+        let open = self.expanded.contains(&key);
+        self.connect_connection(id, cx);
+        if !open {
+            self.expanded.remove(&key);
+            self.refresh(cx);
+        }
+    }
+}
+
+/// `key` with its group segment (the 4th) replaced by what `map` gives for it, if anything.
+fn with_group(key: &str, map: impl Fn(&str) -> Option<&'static str>) -> String {
+    let mut parts = segments(key);
+    if let Some(group) = parts.get_mut(3).and_then(|s| Some((map(s)?, s))) {
+        *group.1 = group.0.to_string();
+    }
+    parts.iter().map(|p| seg(p)).collect::<Vec<_>>().join("/")
+}
+
+/// The tree key of object `name` of `kind` in `database`.`schema` on connection `id`.
+pub(crate) fn object_key(
+    id: ConnectionId,
+    database: &str,
+    schema: &str,
+    kind: ObjectKind,
+    name: &str,
+) -> String {
+    format!(
+        "{}/{}/{}/{}/{}",
+        id.0,
+        seg(database),
+        seg(schema),
+        kind.as_str(),
+        seg(name)
+    )
 }
 
 impl Focusable for Explorer {

@@ -229,10 +229,17 @@ impl Grid {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if self.filter.is_none() {
-            self.filter = Some((
+            let (where_input, order_input) = (
                 filter_input("WHERE", window, cx),
                 filter_input("ORDER BY", window, cx),
-            ));
+            );
+            // A restored tab shows the filter it reads with.
+            if let Some((_, where_, order_by)) = self.source() {
+                let (where_, order_by) = (where_.to_string(), order_by.to_string());
+                where_input.update(cx, |i, cx| i.set_value(where_, window, cx));
+                order_input.update(cx, |i, cx| i.set_value(order_by, window, cx));
+            }
+            self.filter = Some((where_input, order_input));
         }
         let (where_input, order_input) = self.filter.clone().expect("made above");
         let theme = cx.theme();
