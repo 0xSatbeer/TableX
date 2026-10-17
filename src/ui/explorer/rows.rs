@@ -79,6 +79,8 @@ impl Explorer {
                 ) && ws.connections[node.conn].kind() == DbKind::Postgres
             })
             .collect();
+        let explorer = cx.entity().downgrade();
+        let targets = self.move_targets.clone();
         let consoles: Vec<bool> = range
             .clone()
             .map(|ix| matches!(self.nodes[ix].kind, NodeKind::Database | NodeKind::Schema))
@@ -241,7 +243,9 @@ impl Explorer {
             })
             .zip(menus.into_iter().zip(news).zip(consoles))
             .map(|(row, ((menu, new), console))| match menu {
-                Some(kind) => row
+                Some(kind) => {
+                    let (explorer, targets) = (explorer.clone(), targets.clone());
+                    row
                     .context_menu(move |menu, window, cx| {
                         let menu = if new {
                             menu.submenu("+ New", window, cx, |menu, _, _| {
@@ -259,17 +263,57 @@ impl Explorer {
                             menu
                         };
                         let menu = match kind {
-                            Menu::Connection => menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…")).menu_element(Box::new(crate::DeleteConnection), |_, cx| {
-                                div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
-                            }),
+                            Menu::Connection => {
+                                let menu = menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…"));
+                                let menu = if targets.is_empty() { menu } else { move_to_menu(menu, &explorer, &targets, window, cx) };
+                                menu.menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                                    div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
+                                })
+                            }
                             Menu::Modify => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
                             Menu::Refresh => menu,
                         };
                         menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
                     })
-                    .into_any_element(),
+                    .into_any_element()
+                }
                 None => row.into_any_element(),
             })
             .collect()
+    }
+}
+
+/// "Move to ▸" with one item per other workspace; each moves the selected connection there.
+fn move_to_menu(
+    menu: PopupMenu,
+    explorer: &WeakEntity<Explorer>,
+    targets: &[(u32, SharedString)],
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let (explorer, targets) = (explorer.clone(), targets.to_vec());
+    menu.submenu("Move to", window, cx, move |mut menu, _, _| {
+        for (to, name) in targets.iter().cloned() {
+            let explorer = explorer.clone();
+            menu = menu.item(PopupMenuItem::new(name).on_click(move |_, _, cx| {
+                _ = explorer.update(cx, |e, cx| e.move_selected(to, cx));
+            }));
+        }
+        menu
+    })
+}
+
+impl Explorer {
+    /// Asks the Shell to move the selected connection row to workspace `to`.
+    fn move_selected(&mut self, to: u32, cx: &mut Context<Self>) {
+        let Some(node) = self
+            .nodes
+            .get(self.selected)
+            .filter(|n| matches!(n.kind, NodeKind::Connection(_)))
+        else {
+            return;
+        };
+        let id = self.workspace.read(cx).connections[node.conn].id;
+        cx.emit(MoveConnection { id, to });
     }
 }

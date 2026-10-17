@@ -62,18 +62,20 @@ impl Shell {
             );
             this.status_bar
                 .update(cx, |bar, cx| bar.set_origin(origin, has_tab, cx));
+            this.update_move_targets(cx);
             cx.notify();
         })
         .detach();
         cx.subscribe(
             &explorer,
-            |this, _, ev: &explorer::ConnectionDeleted, cx| {
-                for tab in this.tabs.drop_connection(ev.id) {
-                    if let TabContent::Console(console) = tab.content {
-                        console.update(cx, |console, cx| console.close_session(cx));
-                    }
-                }
-                this.tab_changed(cx);
+            |this, _, ev: &explorer::ConnectionDeleted, cx| this.close_connection_tabs(ev.id, cx),
+        )
+        .detach();
+        cx.subscribe_in(
+            &explorer,
+            window,
+            |this, _, ev: &explorer::MoveConnection, window, cx| {
+                this.move_connection(ev.id, ev.to, window, cx)
             },
         )
         .detach();

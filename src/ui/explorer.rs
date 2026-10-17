@@ -10,7 +10,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
-    menu::ContextMenuExt as _,
+    menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
     spinner::Spinner,
     tooltip::Tooltip,
     v_flex,
@@ -152,6 +152,14 @@ pub struct ConnectionDeleted {
 
 impl EventEmitter<ConnectionDeleted> for Explorer {}
 
+/// "Move to ▸ <workspace>" on connection `id`: the Shell moves it to workspace `to`.
+pub struct MoveConnection {
+    pub id: ConnectionId,
+    pub to: u32,
+}
+
+impl EventEmitter<MoveConnection> for Explorer {}
+
 pub struct Explorer {
     workspace: Entity<Workspace>,
     driver: Arc<dyn Driver>,
@@ -179,6 +187,8 @@ pub struct Explorer {
     rename: Option<Rename>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    /// The other workspaces, by id and name, for a connection's Move to submenu.
+    move_targets: Vec<(u32, SharedString)>,
 }
 
 impl Explorer {
@@ -229,6 +239,15 @@ impl Explorer {
             rename: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
+            move_targets: Vec::new(),
+        }
+    }
+
+    /// The workspaces a connection's Move to submenu lists, by id and name.
+    pub fn set_move_targets(&mut self, targets: Vec<(u32, SharedString)>, cx: &mut Context<Self>) {
+        if self.move_targets != targets {
+            self.move_targets = targets;
+            cx.notify();
         }
     }
 }

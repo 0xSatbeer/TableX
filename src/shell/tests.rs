@@ -20,6 +20,7 @@ mod startup;
 mod support;
 mod table_data;
 mod themes;
+mod workspaces;
 
 /// A driver whose calls wait until the test answers them, so no test reaches a real database.
 fn fake() -> std::sync::Arc<dyn crate::db::Driver> {

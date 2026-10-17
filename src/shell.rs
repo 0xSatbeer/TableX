@@ -12,6 +12,7 @@ mod render;
 mod start;
 mod tab;
 mod tab_bar;
+mod workspaces;
 
 use layout::LayoutState;
 
@@ -45,10 +46,6 @@ impl Mode {
 
 pub(crate) struct Shell {
     /// The one copy of the workspace's connections; explorer, panel and tabs follow it.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "tests reach the workspace through the Shell")
-    )]
     workspace: Entity<model::Workspace>,
     /// What new consoles run on.
     driver: std::sync::Arc<dyn db::Driver>,

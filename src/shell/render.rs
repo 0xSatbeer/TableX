@@ -115,7 +115,12 @@ impl Render for Shell {
                                         .bg(theme.primary),
                                 ),
                         )
-                        .child(self.settings_menu(cx)),
+                        .child(
+                            h_flex()
+                                .gap(theme::space_4())
+                                .child(self.workspace_menu(cx))
+                                .child(self.settings_menu(cx)),
+                        ),
                 ),
             )
             .child(div().flex_1().min_h_0().map(|main| {
