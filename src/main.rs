@@ -1,6 +1,7 @@
 mod assets;
 mod db;
 mod ddl;
+mod keymap;
 mod mock;
 mod model;
 mod persist;
@@ -57,24 +58,7 @@ fn main() {
             let mode = Mode::from_args(std::env::args().skip(1));
             shell::apply_mock_latency(mode, std::env::var("QUERYX_MOCK_LATENCY_MS").ok());
             theme::init(cx);
-            shell::bind_overflow_keys(cx);
-            shell::bind_panel_keys(cx);
-            shell::bind_zoom_keys(cx);
-            ui::console::bind_keys(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
-            cx.bind_keys([
-                KeyBinding::new("ctrl-q", Quit, None),
-                KeyBinding::new("ctrl-b", ToggleExplorer, None),
-                KeyBinding::new("ctrl-j", ToggleBottomPanel, None),
-                KeyBinding::new("ctrl-shift-f", MaximizeEditor, None),
-                KeyBinding::new("ctrl-alt-shift-d", ToggleGallery, None),
-                KeyBinding::new("ctrl-alt-f", FocusExplorer, None),
-                KeyBinding::new("ctrl-w", CloseTab, None),
-                KeyBinding::new("ctrl-shift-t", ReopenTab, None),
-                KeyBinding::new("ctrl-tab", NextTab, None),
-                KeyBinding::new("ctrl-shift-tab", PrevTab, None),
-                KeyBinding::new("ctrl-k ctrl-t", CycleTheme, None),
-            ]);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),
                 window_min_size: Some(size(px(900.), px(600.))),
@@ -83,9 +67,26 @@ fn main() {
             cx.set_global(persist::Keys::new(std::sync::Arc::new(persist::OsKeychain)));
             // No home or config dir: built-in themes only, nothing saved.
             let config = persist::ConfigDir::resolve(|k| std::env::var_os(k));
+            let (overrides, mut notice) = match &config {
+                Some(c) => keymap::load(&c.root),
+                None => Default::default(),
+            };
+            let skipped = keymap::bind(cx, &overrides);
+            if !skipped.is_empty() {
+                notice = Some(format!(
+                    "keymap.toml entries skipped: {}",
+                    skipped.join(", ")
+                ));
+            }
             let themes = config.as_ref().map(|c| c.root.join("themes"));
-            shell::open_shell(mode, options, themes, config.map(|c| c.root), cx)
+            let (window, _) = shell::open_shell(mode, options, themes, config.map(|c| c.root), cx)
                 .expect("open window");
+            if let Some(notice) = notice {
+                use gpui_kit::component::{WindowExt as _, notification::Notification};
+                let _ = window.update(cx, |_, window, cx| {
+                    window.push_notification(Notification::error(notice), cx)
+                });
+            }
             cx.activate(true);
         });
 }

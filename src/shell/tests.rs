@@ -10,6 +10,7 @@ mod delete_selection;
 mod edit_form;
 mod edit_sessions;
 mod focus;
+mod keymap;
 mod layout;
 mod maximize;
 mod open_console;

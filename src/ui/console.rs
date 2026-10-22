@@ -28,7 +28,7 @@ use crate::{ddl, sql, theme};
 
 actions!(console, [RunStatement, RunScript, Rerun, Cancel]);
 
-const CONTEXT: &str = "Console";
+pub(crate) const CONTEXT: &str = "Console";
 /// How long after the last edit the text is saved.
 pub const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// Rows a result page shows and each fetch reads.
@@ -39,15 +39,9 @@ const CAP: usize = 100_000;
 #[cfg(test)]
 const CAP: usize = 3 * PAGE;
 
+#[cfg(test)]
 pub fn bind_keys(cx: &mut App) {
-    // Matched at the editor's own depth, or its ctrl-enter (Enter { secondary }) wins.
-    let editor = Some("Console > Input");
-    cx.bind_keys([
-        KeyBinding::new("ctrl-enter", RunStatement, editor),
-        KeyBinding::new("ctrl-shift-enter", RunScript, editor),
-        KeyBinding::new("escape", Cancel, editor),
-        KeyBinding::new("f5", Rerun, Some(CONTEXT)),
-    ]);
+    crate::keymap::bind_defaults(cx, |action, _| action.starts_with("console::"));
 }
 
 /// Where a console runs: the connection (looked up in `workspace` at connect), its database

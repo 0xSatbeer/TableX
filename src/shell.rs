@@ -2,7 +2,7 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 
 use crate::ui::{console, explorer, grid, panel, statusbar, tabs};
-use crate::{RestorePanel, db, mock, model, theme};
+use crate::{db, mock, model, theme};
 use std::rc::Rc;
 
 mod actions;
@@ -88,32 +88,24 @@ pub(crate) struct Shell {
 }
 
 /// Key context of the shell while the bottom panel is maximized, so Esc restores it.
-const PANEL_MAXIMIZED_CONTEXT: &str = "PanelMaximized";
+pub(crate) const PANEL_MAXIMIZED_CONTEXT: &str = "PanelMaximized";
 
 /// Key context of the overflow list's content.
-const OVERFLOW_CONTEXT: &str = "OverflowSearch";
+pub(crate) const OVERFLOW_CONTEXT: &str = "OverflowSearch";
 
-/// `Popover` binds space to Confirm (closing it), which would swallow spaces typed in the search
-/// field; a no-op binding in the content's own, deeper context lets the field type them.
+#[cfg(test)]
 pub(crate) fn bind_overflow_keys(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("space", NoAction, Some(OVERFLOW_CONTEXT))]);
+    crate::keymap::bind_defaults(cx, |_, context| context == Some(OVERFLOW_CONTEXT));
 }
 
-/// Zoom the focused grid's or editor's mono font; with neither focused nothing handles them.
+#[cfg(test)]
 pub(crate) fn bind_zoom_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("ctrl-=", theme::ZoomIn, None),
-        KeyBinding::new("ctrl--", theme::ZoomOut, None),
-        KeyBinding::new("ctrl-0", theme::ZoomReset, None),
-    ]);
+    crate::keymap::bind_defaults(cx, |action, _| action.starts_with("theme::"));
 }
 
+#[cfg(test)]
 pub(crate) fn bind_panel_keys(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new(
-        "escape",
-        RestorePanel,
-        Some(PANEL_MAXIMIZED_CONTEXT),
-    )]);
+    crate::keymap::bind_defaults(cx, |_, context| context == Some(PANEL_MAXIMIZED_CONTEXT));
 }
 
 /// Opens the main window and starts watching `user_themes` (the user theme dir), if any. Normal
