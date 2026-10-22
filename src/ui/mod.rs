@@ -10,6 +10,7 @@ pub mod object_dialog;
 pub mod palette;
 pub mod panel;
 pub mod password_prompt;
+pub mod quick_open;
 pub mod split;
 pub mod statusbar;
 pub mod structure;

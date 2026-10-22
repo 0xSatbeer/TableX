@@ -238,6 +238,7 @@ impl Shell {
             console_mono: theme::MONO,
             palette: None,
             cheat_sheet: None,
+            quick_open: None,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| {
                 this.theme.apply(&this.user_themes, window, cx)
             }),

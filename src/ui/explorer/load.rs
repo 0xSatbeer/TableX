@@ -128,6 +128,9 @@ impl Explorer {
                                 this.load(child, all, cx);
                             }
                         }
+                        if this.load_all && segments.len() == 2 {
+                            this.load_all_objects(cx);
+                        }
                     }
                     Err(reason) => {
                         // A session the server closed is dropped, so Retry opens a new one.
@@ -203,6 +206,49 @@ impl Explorer {
             self.select(ix, cx);
         }
         window.focus(&self.focus, cx);
+    }
+
+    /// Quick open: loads every database and schema not loaded yet on the connected connections,
+    /// without expanding them; a database's schemas follow once it arrives.
+    pub fn load_all_objects(&mut self, cx: &mut Context<Self>) {
+        self.load_all = true;
+        let ws = self.workspace.read(cx);
+        let unloaded: Vec<String> = flatten(ws, &HashSet::new(), &HashMap::new(), true)
+            .into_iter()
+            .filter(|n| {
+                n.unloaded
+                    && matches!(n.kind, NodeKind::Database | NodeKind::Schema)
+                    && ws.connections[n.conn].status == ConnectionStatus::Connected
+            })
+            .map(|n| n.key)
+            .collect();
+        for key in unloaded {
+            self.load(key, false, cx);
+        }
+    }
+
+    /// Quick open closed: databases loaded from now on bring only their schema list again.
+    pub fn stop_loading_all(&mut self) {
+        self.load_all = false;
+    }
+
+    /// Databases and schemas whose children are loading.
+    pub fn schemas_pending(&self) -> usize {
+        self.loads
+            .iter()
+            .filter(|(key, load)| {
+                matches!(load, Load::Loading | Load::Refreshing)
+                    && matches!(segments(key).len(), 2 | 3)
+            })
+            .count()
+    }
+
+    /// Quick open's Enter: reveals object `key` and opens it as a double-click would.
+    pub fn open_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.reveal(key, window, cx);
+        if self.nodes.get(self.selected).is_some_and(|n| n.key == key) {
+            self.open(self.selected, false, cx);
+        }
     }
 
     /// `*`: opens the node and everything under it, loading the databases and schemas not loaded

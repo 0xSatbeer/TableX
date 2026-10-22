@@ -46,12 +46,14 @@ pub const DEFAULTS: &[(&str, &str, Option<&str>)] = &[
     ("queryx::CycleTheme", "ctrl-k ctrl-t", None),
     ("queryx::CommandPalette", "ctrl-shift-p", None),
     ("queryx::CheatSheet", "ctrl-k ctrl-s", None),
+    ("queryx::QuickOpen", "ctrl-p", None),
 ];
 
 /// (action name, human name, area) for every action the palette lists.
 pub const NAMES: &[(&str, &str, &str)] = &[
     ("queryx::CommandPalette", "Command palette", "General"),
     ("queryx::CheatSheet", "Keyboard shortcuts", "General"),
+    ("queryx::QuickOpen", "Go to object", "General"),
     ("queryx::Quit", "Quit", "General"),
     ("queryx::CycleTheme", "Cycle theme", "Appearance"),
     ("theme::ZoomIn", "Zoom in", "Appearance"),

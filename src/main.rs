@@ -49,7 +49,8 @@ actions!(
         NewUser,
         OpenConsole,
         CommandPalette,
-        CheatSheet
+        CheatSheet,
+        QuickOpen
     ]
 );
 

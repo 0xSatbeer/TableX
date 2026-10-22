@@ -17,6 +17,7 @@ mod maximize;
 mod open_console;
 mod overflow;
 mod palette;
+mod quick_open;
 mod races;
 mod rename;
 mod session_restore;

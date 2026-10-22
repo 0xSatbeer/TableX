@@ -4,6 +4,9 @@
 const MATCH: i32 = 1;
 const WORD_START: i32 = 8;
 const CONSECUTIVE: i32 = 5;
+/// Per character skipped between two matches: tighter matches win, and a far word start only wins
+/// when its bonus outweighs the skip (without it "usr" ranks `user_settings_archive` over `users`).
+const GAP: i32 = 1;
 
 /// The best-scoring way `query` is a case-insensitive subsequence of `candidate`, and the byte
 /// offsets of the matched characters for highlighting; `None` when it isn't one.
@@ -20,16 +23,35 @@ pub fn score(query: &str, candidate: &str) -> Option<(i32, Vec<usize>)> {
     // best[i][j]: the best score with query[..=i] matched and query[i] at chars[j], and where
     // query[i - 1] went.
     let mut best: Vec<Vec<Option<(i32, usize)>>> = vec![vec![None; chars.len()]; query.len()];
+    let lower: Vec<Option<char>> = chars.iter().map(|&(_, c)| single_lower(c)).collect();
+    let starts: Vec<bool> = (0..chars.len()).map(|j| word_start(&chars, j)).collect();
     for (i, q) in query.iter().enumerate() {
-        for (j, &(_, c)) in chars.iter().enumerate() {
-            if !c.to_lowercase().eq(std::iter::once(*q)) {
+        // The best `score + GAP * k` over k <= j - 2, so a gapped jump costs O(1) per `j`.
+        let mut far: Option<(i32, usize)> = None;
+        for j in 0..chars.len() {
+            if i > 0
+                && j >= 2
+                && let Some((score, _)) = best[i - 1][j - 2]
+            {
+                let k = j - 2;
+                let lifted = score + GAP * k as i32;
+                // `>=`: ties go to the nearest.
+                if far.is_none_or(|(f, _)| lifted >= f) {
+                    far = Some((lifted, k));
+                }
+            }
+            if lower[j] != Some(*q) {
                 continue;
             }
-            let own = MATCH + if word_start(&chars, j) { WORD_START } else { 0 };
+            let own = MATCH + if starts[j] { WORD_START } else { 0 };
             best[i][j] = if i == 0 {
                 Some((own, 0))
             } else {
-                best_before(&best[i - 1], j).map(|(prev, k)| (prev + own, k))
+                let next_to = j
+                    .checked_sub(1)
+                    .and_then(|k| best[i - 1][k].map(|(score, _)| (score + CONSECUTIVE, k)));
+                let gapped = far.map(|(f, k)| (f - GAP * (j as i32 - 1), k));
+                next_to.max(gapped).map(|(prev, k)| (prev + own, k))
             };
         }
     }
@@ -55,17 +77,10 @@ fn word_start(chars: &[(usize, char)], j: usize) -> bool {
     !prev.is_alphanumeric() || (prev.is_lowercase() && c.is_uppercase())
 }
 
-/// The best place left of `j` for the previous query character, with the consecutive bonus
-/// when it is right next to `j`; ties go to the nearest.
-fn best_before(row: &[Option<(i32, usize)>], j: usize) -> Option<(i32, usize)> {
-    row[..j]
-        .iter()
-        .enumerate()
-        .filter_map(|(k, s)| {
-            let joined = if k + 1 == j { CONSECUTIVE } else { 0 };
-            s.map(|(score, _)| (score + joined, k))
-        })
-        .max()
+/// `c` lowercased when that is a single character, the only way it can match a query character.
+fn single_lower(c: char) -> Option<char> {
+    let mut lower = c.to_lowercase();
+    lower.next().filter(|_| lower.next().is_none())
 }
 
 #[cfg(test)]
@@ -85,6 +100,7 @@ mod tests {
             ("nt", "Next tab", "Paint"),
             ("cls", "Close", "Columns"),
             ("rt", "Reopen tab", "Restart"),
+            ("ab", "axb", "axxxxb"),
         ] {
             assert!(
                 s(query, better) > s(query, worse),

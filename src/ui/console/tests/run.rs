@@ -23,6 +23,8 @@ pub(super) fn console(
     cx.update(|cx| {
         gpui_kit::init(cx);
         super::super::bind_keys(cx);
+        // A dialog lands in place at once; mid-slide under load, a click misses its button.
+        cx.set_reduce_motion(true);
     });
     let fake = Arc::new(Fake::default());
     let driver: Arc<dyn crate::db::Driver> = fake.clone();

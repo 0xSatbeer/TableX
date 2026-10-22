@@ -220,6 +220,12 @@ impl Render for Shell {
                 });
                 d.child(crate::ui::cheat_sheet::overlay(&open.list, dismiss, cx))
             })
+            .when_some(self.quick_open.as_ref(), |d, open| {
+                let dismiss = cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    this.close_quick_open(None, window, cx)
+                });
+                d.child(crate::ui::quick_open::overlay(&open.list, dismiss, cx))
+            })
             // While a splitter is dragged, one layer over everything takes the pointer, so the
             // panels underneath neither react nor swap the cursor.
             .when_some(self.layout.dragging.as_ref().map(|d| d.edge), |d, edge| {

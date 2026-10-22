@@ -88,6 +88,8 @@ pub(crate) struct Shell {
     palette: Option<crate::ui::palette::Open>,
     /// The keyboard cheat sheet, while open.
     cheat_sheet: Option<crate::ui::cheat_sheet::Open>,
+    /// Quick open (Ctrl+P), while open.
+    quick_open: Option<crate::ui::quick_open::Open>,
     _appearance: Subscription,
 }
 

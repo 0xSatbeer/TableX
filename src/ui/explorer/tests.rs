@@ -22,6 +22,7 @@ mod new_database;
 mod new_role;
 mod new_table;
 mod password_prompt;
+mod quick_open;
 mod refresh;
 mod refresh_errors;
 mod refresh_menu;

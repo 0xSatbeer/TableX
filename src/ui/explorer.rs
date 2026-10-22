@@ -189,6 +189,8 @@ pub struct Explorer {
     focus: FocusHandle,
     /// The other workspaces, by id and name, for a connection's Move to submenu.
     move_targets: Vec<(u32, SharedString)>,
+    /// Set by quick open: a database that finishes loading loads its schemas' objects too.
+    load_all: bool,
 }
 
 impl Explorer {
@@ -240,6 +242,7 @@ impl Explorer {
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
             move_targets: Vec::new(),
+            load_all: false,
         }
     }
 
