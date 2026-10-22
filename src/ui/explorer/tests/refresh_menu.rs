@@ -49,7 +49,7 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
         (true, "Columns", false, false, false, false, false),
         (true, "id", false, false, false, false, false),
         (true, "v", false, false, true, false, false),
-        (true, "f()", false, false, false, false, false),
+        (true, "f()", false, false, true, false, false),
         (false, "pg", true, true, true, false, false),
         (false, "app", false, false, true, false, false),
         (false, "public", false, false, true, false, false),
@@ -97,6 +97,29 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
             cx.debug_bounds("menu-open-console").is_some(),
             matches!(row, "app" | "public"),
             "{row} (postgres {postgres}): Open console"
+        );
+        let object = matches!(row, "t" | "v" | "f()");
+        let opens = matches!(row, "t" | "v");
+        let shown = [
+            "menu-new-console",
+            "menu-open",
+            "menu-copy-name",
+            "menu-copy-qualified",
+            "menu-show-ddl",
+            "menu-drop",
+        ]
+        .map(|item| cx.debug_bounds(item).is_some());
+        assert_eq!(
+            shown,
+            [
+                matches!(row, "app" | "public") || object,
+                opens,
+                object,
+                object,
+                opens,
+                object
+            ],
+            "{row} (postgres {postgres}): New console, Open, Copy name, Copy qualified name, Show DDL, Drop…"
         );
         // + New sits at the top: selecting it opens its submenu.
         cx.simulate_keystrokes("down");
@@ -154,5 +177,31 @@ fn refresh_never_fetches_table_rows(cx: &mut gpui_kit::TestAppContext) {
             0,
             "{row}: no table opened, so no rows fetched"
         );
+    }
+}
+
+#[gpui_kit::test]
+fn copy_qualified_name_puts_the_schema_and_name_quoted_on_the_clipboard_and_sqlite_only_the_name(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    for (postgres, want) in [(true, r#""public"."users""#), (false, r#""users""#)] {
+        let base = if postgres {
+            pg(1, "pg", "app")
+        } else {
+            sqlite(1, "pg", "/x/app.db")
+        };
+        let conn = loaded(base, "app", "public", vec![table("users")]);
+        let (mut cx, explorer, _, _) = open_explorer(cx, vec![conn]);
+        for step in ["pg", "app", "public", "Tables"] {
+            expand(&explorer, &mut cx, step);
+        }
+        right_click(&explorer, &mut cx, "users");
+        click(&mut cx, "menu-copy-qualified");
+        let copied = cx.read_from_clipboard().and_then(|c| c.text());
+        assert_eq!(copied.as_deref(), Some(want), "postgres {postgres}");
+        right_click(&explorer, &mut cx, "users");
+        click(&mut cx, "menu-copy-name");
+        let copied = cx.read_from_clipboard().and_then(|c| c.text());
+        assert_eq!(copied.as_deref(), Some("users"), "postgres {postgres}");
     }
 }

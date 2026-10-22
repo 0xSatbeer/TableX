@@ -47,6 +47,7 @@ pub const DEFAULTS: &[(&str, &str, Option<&str>)] = &[
     ("queryx::CommandPalette", "ctrl-shift-p", None),
     ("queryx::CheatSheet", "ctrl-k ctrl-s", None),
     ("queryx::QuickOpen", "ctrl-p", None),
+    ("queryx::NewConsole", "ctrl-shift-n", None),
 ];
 
 /// (action name, human name, area) for every action the palette lists.
@@ -98,6 +99,16 @@ pub const NAMES: &[(&str, &str, &str)] = &[
     ("queryx::NewRole", "New role", "Explorer"),
     ("queryx::NewUser", "New user", "Explorer"),
     ("queryx::OpenConsole", "Open console", "Explorer"),
+    ("queryx::NewConsole", "New console here", "Explorer"),
+    ("queryx::OpenSelected", "Open object", "Explorer"),
+    ("queryx::CopyName", "Copy name", "Explorer"),
+    (
+        "queryx::CopyQualifiedName",
+        "Copy qualified name",
+        "Explorer",
+    ),
+    ("queryx::ShowDdl", "Show DDL", "Explorer"),
+    ("queryx::DropObject", "Drop object", "Explorer"),
     ("console::RunStatement", "Run statement", "Console"),
     ("console::RunScript", "Run script", "Console"),
     ("console::Rerun", "Rerun last query", "Console"),

@@ -172,6 +172,10 @@ impl Shell {
                 if let TabContent::Console(c) = &tab.content {
                     c.update(cx, |c, cx| c.set_manual(!autocommit, window, cx));
                 }
+                // Consoles from New console share a place: each keeps its own key and file.
+                if self.console_ids.contains_key(&tab.key) {
+                    tab.key = format!("{}#{console}", tab.key).into();
+                }
                 self.console_ids.insert(tab.key.clone(), *console);
                 self.next_console = self.next_console.max(*console);
                 tab.pinned = *pinned;

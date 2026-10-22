@@ -448,3 +448,44 @@ fn table_ddl_joins_statements_and_appends_triggers() {
          CREATE TRIGGER t_audit AFTER INSERT ON s.t FOR EACH ROW EXECUTE FUNCTION audit();\n"
     );
 }
+
+#[test]
+fn drop_names_the_object_qualified_and_a_function_by_its_signature() {
+    use crate::model::ObjectKind;
+    let cases = [
+        (
+            ObjectKind::Table,
+            Some("public"),
+            "users",
+            Some(r#"DROP TABLE "public"."users""#),
+        ),
+        (ObjectKind::View, None, "v", Some(r#"DROP VIEW "v""#)),
+        (
+            ObjectKind::MaterializedView,
+            Some("s"),
+            "m",
+            Some(r#"DROP MATERIALIZED VIEW "s"."m""#),
+        ),
+        (
+            ObjectKind::Sequence,
+            Some("s"),
+            "q",
+            Some(r#"DROP SEQUENCE "s"."q""#),
+        ),
+        (
+            ObjectKind::Function,
+            Some("s"),
+            "f(integer, text)",
+            Some(r#"DROP FUNCTION "s"."f"(integer, text)"#),
+        ),
+        (ObjectKind::Function, Some("s"), "f", None),
+        (ObjectKind::Type, Some("s"), "t", None),
+    ];
+    for (kind, schema, name, want) in cases {
+        assert_eq!(
+            drop_object(kind, schema, name).as_deref(),
+            want,
+            "{kind:?} {name}"
+        );
+    }
+}

@@ -141,6 +141,24 @@ impl Shell {
             },
         )
         .detach();
+        cx.subscribe_in(
+            &explorer,
+            window,
+            |this, _, ev: &explorer::ShowDdl, window, cx| {
+                let tab = this.tabs.tabs.iter().find(|t| t.key == ev.key);
+                if let Some(TabContent::Grid(_, Some(s))) = tab.map(|t| &t.content) {
+                    s.update(cx, |s, cx| s.show(structure::Sub::Ddl, window, cx));
+                }
+            },
+        )
+        .detach();
+        cx.subscribe(&explorer, |this, _, ev: &explorer::ObjectDropped, cx| {
+            if let Some(ix) = this.tabs.tabs.iter().position(|t| t.key == ev.key) {
+                this.tabs.close(ix);
+                this.tab_changed(cx);
+            }
+        })
+        .detach();
         let status_bar =
             cx.new(|cx| statusbar::StatusBar::new(workspace.clone(), demo, window, cx));
         cx.subscribe(&status_bar, |this, _, statusbar::Connect(id), cx| {
@@ -318,6 +336,49 @@ impl Shell {
             schema,
         };
         console_tab(key, title, Some(origin), target, text, window, cx)
+    }
+}
+
+impl Shell {
+    /// New console (Ctrl+Shift+N): always a new console tab, on the picked explorer row's
+    /// connection, database and schema, else the active tab's; nothing without either.
+    pub(super) fn new_console(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let place = self.explorer.read(cx).console_place(cx);
+        let Some((id, database, schema)) = place.or_else(|| self.active_place(cx)) else {
+            return;
+        };
+        let workspace = self.workspace.read(cx);
+        let Some(conn) = workspace.connections.iter().find(|c| c.id == id).cloned() else {
+            return;
+        };
+        let mut tab = self.connection_console(&conn, database, schema, "", window, cx);
+        self.next_console += 1;
+        tab.key = format!("{}#{}", tab.key, self.next_console).into();
+        self.console_ids.insert(tab.key.clone(), self.next_console);
+        self.tabs.open(tab);
+        self.tab_changed(cx);
+    }
+
+    /// The active tab's connection, database and schema, if it is on one.
+    fn active_place(&self, cx: &App) -> Option<(model::ConnectionId, String, Option<String>)> {
+        match &self.tabs.active()?.content {
+            TabContent::Console(console) => {
+                let target = console.read(cx).target();
+                Some((
+                    target.connection?,
+                    target.database.clone(),
+                    target.schema.clone(),
+                ))
+            }
+            TabContent::Grid(grid, _) => {
+                let (table, ..) = grid.read(cx).source()?;
+                Some((
+                    table.connection,
+                    table.database.clone(),
+                    Some(table.schema.clone()),
+                ))
+            }
+        }
     }
 }
 

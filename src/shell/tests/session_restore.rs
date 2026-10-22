@@ -21,7 +21,20 @@ fn open_restored(
     tempfile::TempDir,
     std::sync::Arc<Fake>,
 ) {
-    let dir = tempfile::tempdir().unwrap();
+    open_restored_in(cx, session, tempfile::tempdir().unwrap())
+}
+
+/// `open_restored` with config dir `dir`.
+fn open_restored_in(
+    cx: &mut TestAppContext,
+    session: &SessionFile,
+    dir: tempfile::TempDir,
+) -> (
+    VisualTestContext,
+    Entity<Shell>,
+    tempfile::TempDir,
+    std::sync::Arc<Fake>,
+) {
     let all = Workspaces {
         active: 1,
         list: crate::mock::workspaces(),
@@ -331,4 +344,50 @@ fn switching_workspace_saves_one_session_and_restores_the_other(cx: &mut TestApp
     cx.run_until_parked();
     assert!(!crate::persist::session_path(dir.path(), 1).exists());
     assert_eq!(titles(&shell, &cx), ["notes"]);
+}
+
+#[gpui_kit::test]
+fn two_consoles_on_the_same_schema_restore_as_two_tabs_each_with_its_own_text(
+    cx: &mut TestAppContext,
+) {
+    let console = |id| SessionTab::Console {
+        connection: 2,
+        database: "app_db".into(),
+        schema: "public".into(),
+        console: id,
+        autocommit: true,
+        pinned: false,
+    };
+    let saved = SessionFile {
+        active_tab: Some(0),
+        tabs: vec![console(7), console(8)],
+        ..SessionFile::default()
+    };
+    // The consoles' files are written before the shell starts, as a previous run left them.
+    let dir = tempfile::tempdir().unwrap();
+    let consoles = dir.path().join("consoles");
+    std::fs::create_dir_all(&consoles).unwrap();
+    std::fs::write(consoles.join("7.sql"), "select 7").unwrap();
+    std::fs::write(consoles.join("8.sql"), "select 8").unwrap();
+    let (mut cx, shell, root, _fake) = open_restored_in(cx, &saved, dir);
+
+    let tabs = shell.read_with(&cx, |this, cx| {
+        this.tabs
+            .tabs
+            .iter()
+            .map(|t| match &t.content {
+                TabContent::Console(c) => (t.key.to_string(), c.read(cx).text(cx)),
+                _ => panic!("a console tab"),
+            })
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(tabs.len(), 2);
+    assert_ne!(tabs[0].0, tabs[1].0, "each keeps its own key");
+    assert_eq!([&*tabs[0].1, &*tabs[1].1], ["select 7", "select 8"]);
+    shell.update(&mut cx, |this, cx| this.save_session(cx));
+    assert_eq!(
+        load_session(root.path(), 1).0,
+        saved,
+        "each keeps its own file"
+    );
 }

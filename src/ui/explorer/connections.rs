@@ -369,8 +369,10 @@ impl Explorer {
                     on,
                     atomic,
                     Some(refresh),
-                    move |reason, cx| {
-                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    move |result, cx| {
+                        if let Err(reason) = result {
+                            dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                        }
                     },
                     statements.clone(),
                     window,
@@ -416,8 +418,10 @@ impl Explorer {
                     &db,
                     true,
                     Some(schema_key.clone()),
-                    move |reason, cx| {
-                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    move |result, cx| {
+                        if let Err(reason) = result {
+                            dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                        }
                     },
                     statements.clone(),
                     window,
@@ -458,8 +462,10 @@ impl Explorer {
                     &db,
                     true,
                     Some(schema_key.clone()),
-                    move |reason, cx| {
-                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    move |result, cx| {
+                        if let Err(reason) = result {
+                            dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                        }
                     },
                     statements.clone(),
                     window,
@@ -509,8 +515,10 @@ impl Explorer {
                     &db,
                     false,
                     Some(conn.id.0.to_string()),
-                    move |reason, cx| {
-                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    move |result, cx| {
+                        if let Err(reason) = result {
+                            dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                        }
                     },
                     statements.clone(),
                     window,
@@ -560,8 +568,10 @@ impl Explorer {
                     &db,
                     true,
                     None,
-                    move |reason, cx| {
-                        dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                    move |result, cx| {
+                        if let Err(reason) = result {
+                            dialog.update(cx, |d, cx| d.failed(reason, cx)).ok();
+                        }
                     },
                     statements.clone(),
                     window,
@@ -573,15 +583,15 @@ impl Explorer {
     }
 
     /// Runs a Modify dialog's `statements` on connection `id`'s database `on`. Success closes the
-    /// dialog and re-reads the node keyed `refresh`, if any; a failure goes to `failed`.
+    /// dialog and re-reads the node keyed `refresh`, if any; either way `done` gets the result.
     #[allow(clippy::too_many_arguments)]
-    fn apply(
+    pub(super) fn apply(
         &mut self,
         id: ConnectionId,
         on: &str,
         atomic: bool,
         refresh: Option<String>,
-        failed: impl FnOnce(String, &mut App) + 'static,
+        done: impl FnOnce(Result<(), String>, &mut Context<Self>) + 'static,
         statements: Vec<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -618,8 +628,9 @@ impl Explorer {
                     {
                         this.load(refresh, false, cx);
                     }
+                    done(Ok(()), cx);
                 }
-                Err(reason) => failed(reason, cx),
+                Err(reason) => done(Err(reason), cx),
             })
             .ok();
         })

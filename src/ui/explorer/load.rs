@@ -184,7 +184,12 @@ impl Explorer {
         {
             return self.connect(node.conn, false, cx);
         }
-        self.load(node.key.clone(), false, cx);
+        // Functions, sequences and the like have no children: their schema re-reads.
+        let key = match node.kind {
+            NodeKind::Object(kind) if !opens_tab(NodeKind::Object(kind)) => ancestors(&node.key)[2],
+            _ => &node.key,
+        };
+        self.load(key.to_string(), false, cx);
     }
 
     /// Whether a Refresh is re-reading anything under the connection keyed `conn`.

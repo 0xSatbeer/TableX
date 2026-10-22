@@ -289,3 +289,44 @@ fn closing_a_console_with_text_asks_and_discard_deletes_its_file(
     assert_eq!(console_count(&shell, &cx), before - 1);
     assert!(!file.exists());
 }
+
+#[gpui_kit::test]
+fn ctrl_shift_n_opens_another_console_on_the_same_schema_each_time(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (window, shell) = open_plain(cx);
+    cx.update(|cx| crate::keymap::bind_defaults(cx, |action, _| action == "queryx::NewConsole"));
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    open_console(&mut cx, &shell, "1/app_db/public");
+    let before = console_count(&shell, &cx);
+    let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+    for _ in 0..2 {
+        explorer.update_in(&mut cx, |e, window, cx| {
+            e.reveal("1/app_db/public", window, cx)
+        });
+        cx.simulate_keystrokes("ctrl-shift-n");
+        cx.run_until_parked();
+    }
+    let consoles = shell.read_with(&cx, |this, cx| {
+        this.tabs
+            .tabs
+            .iter()
+            .filter_map(|t| match &t.content {
+                crate::shell::TabContent::Console(c) => {
+                    let target = c.read(cx).target();
+                    Some((
+                        t.key.clone(),
+                        target.database.clone(),
+                        target.schema.clone(),
+                    ))
+                }
+                _ => None,
+            })
+            .filter(|(_, db, schema)| db == "app_db" && schema.as_deref() == Some("public"))
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(console_count(&shell, &cx), before + 2, "two new consoles");
+    assert_eq!(consoles.len(), 3, "all on app_db › public");
+    let keys: std::collections::HashSet<_> = consoles.iter().map(|c| c.0.clone()).collect();
+    assert_eq!(keys.len(), 3, "each with its own key");
+}

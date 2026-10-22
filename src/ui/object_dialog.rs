@@ -2,9 +2,11 @@
 //! the production confirmation, the Cancel/Apply footer and the error line. The explorer runs
 //! the statements a dialog's `Apply` carries and reports a failure back with `failed`.
 
+mod drop;
 mod name_owner;
 mod role;
 
+pub use drop::*;
 pub use name_owner::*;
 pub use role::*;
 

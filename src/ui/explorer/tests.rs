@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 mod connect;
 mod drive;
+mod drop;
 mod filter;
 mod load;
 mod modify_database;

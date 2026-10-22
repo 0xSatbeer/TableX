@@ -23,6 +23,15 @@ impl Render for Explorer {
                 this.refresh_row(this.selected, cx)
             }))
             .on_action(cx.listener(|this, _: &crate::OpenConsole, _, cx| this.open_console(cx)))
+            .on_action(cx.listener(|this, _: &crate::OpenSelected, _, cx| this.open_selected(cx)))
+            .on_action(cx.listener(|this, _: &crate::ShowDdl, _, cx| this.show_ddl(cx)))
+            .on_action(cx.listener(|this, _: &crate::CopyName, _, cx| this.copy_name(cx)))
+            .on_action(cx.listener(|this, _: &crate::CopyQualifiedName, _, cx| {
+                this.copy_qualified_name(cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::DropObject, window, cx| {
+                this.drop_object(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &crate::ModifyObject, window, cx| {
                 this.modify_object(window, cx)
             }))

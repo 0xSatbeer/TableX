@@ -63,8 +63,7 @@ impl Explorer {
                 {
                     Some(Menu::Modify)
                 }
-                NodeKind::Database | NodeKind::Schema => Some(Menu::Refresh),
-                kind if opens_tab(kind) => Some(Menu::Refresh),
+                NodeKind::Database | NodeKind::Schema | NodeKind::Object(_) => Some(Menu::Refresh),
                 _ => None,
             })
             .collect();
@@ -84,6 +83,17 @@ impl Explorer {
         let consoles: Vec<bool> = range
             .clone()
             .map(|ix| matches!(self.nodes[ix].kind, NodeKind::Database | NodeKind::Schema))
+            .collect();
+        // Object rows: whether they open in a tab, and whether Drop… can name them.
+        let objects: Vec<Option<(bool, bool)>> = range
+            .clone()
+            .map(|ix| match self.nodes[ix].kind {
+                NodeKind::Object(kind) => Some((
+                    opens_tab(NodeKind::Object(kind)),
+                    crate::ddl::drop_object(kind, None, &self.nodes[ix].label).is_some(),
+                )),
+                _ => None,
+            })
             .collect();
         range
             .map(|ix| {
@@ -241,8 +251,8 @@ impl Explorer {
                         d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
-            .zip(menus.into_iter().zip(news).zip(consoles))
-            .map(|(row, ((menu, new), console))| match menu {
+            .zip(menus.into_iter().zip(news).zip(consoles).zip(objects))
+            .map(|(row, (((menu, new), console), object))| match menu {
                 Some(kind) => {
                     let (explorer, targets) = (explorer.clone(), targets.clone());
                     row
@@ -259,8 +269,18 @@ impl Explorer {
                         };
                         let menu = if console {
                             menu.menu_element(Box::new(crate::OpenConsole), |_, _| div().debug_selector(|| "menu-open-console".into()).child("Open console"))
+                                .menu_element(Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console"))
                         } else {
                             menu
+                        };
+                        let menu = match object {
+                            Some((opens, _)) => menu
+                                .when(opens, |m| m.menu_element(Box::new(crate::OpenSelected), |_, _| div().debug_selector(|| "menu-open".into()).child("Open")))
+                                .menu_element(Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console here"))
+                                .menu_element(Box::new(crate::CopyName), |_, _| div().debug_selector(|| "menu-copy-name".into()).child("Copy name"))
+                                .menu_element(Box::new(crate::CopyQualifiedName), |_, _| div().debug_selector(|| "menu-copy-qualified".into()).child("Copy qualified name"))
+                                .when(opens, |m| m.menu_element(Box::new(crate::ShowDdl), |_, _| div().debug_selector(|| "menu-show-ddl".into()).child("Show DDL"))),
+                            None => menu,
                         };
                         let menu = match kind {
                             Menu::Connection => {
@@ -274,6 +294,11 @@ impl Explorer {
                             Menu::Refresh => menu,
                         };
                         menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
+                            .when(object.is_some_and(|(_, drop)| drop), |m| {
+                                m.menu_element(Box::new(crate::DropObject), |_, cx| {
+                                    div().debug_selector(|| "menu-drop".into()).text_color(cx.theme().danger).child("Drop…")
+                                })
+                            })
                     })
                     .into_any_element()
                 }

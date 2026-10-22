@@ -88,7 +88,7 @@ impl Structure {
         }
     }
 
-    fn show(&mut self, sub: Sub, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn show(&mut self, sub: Sub, window: &mut Window, cx: &mut Context<Self>) {
         self.sub = sub;
         if sub != Sub::Data && matches!(self.load, Load::NotLoaded) {
             self.reload(window, cx);

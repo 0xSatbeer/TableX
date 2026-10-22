@@ -9,8 +9,8 @@ use crate::ui::{cheat_sheet, palette, quick_open};
 use crate::{
     AddConnection, CheatSheet, CloseAllTabs, CloseOtherTabs, CloseTab, CloseTabsToRight,
     CommandPalette, CopyTabName, CycleTheme, DeleteConnection, EditConnection, FocusExplorer,
-    MaximizeEditor, MaximizePanel, NextTab, PrevTab, QuickOpen, ReopenTab, RestorePanel, RevealTab,
-    ToggleBottomPanel, ToggleExplorer, ToggleGallery, TogglePinTab,
+    MaximizeEditor, MaximizePanel, NewConsole, NextTab, PrevTab, QuickOpen, ReopenTab,
+    RestorePanel, RevealTab, ToggleBottomPanel, ToggleExplorer, ToggleGallery, TogglePinTab,
 };
 
 use super::Shell;
@@ -141,6 +141,9 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &CheatSheet, window, cx| {
         this.open_cheat_sheet(window, cx);
+    }))
+    .on_action(cx.listener(|this, _: &NewConsole, window, cx| {
+        this.new_console(window, cx);
     }))
     .on_action(cx.listener(|this, _: &QuickOpen, window, cx| {
         this.open_quick_open(window, cx);

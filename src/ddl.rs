@@ -2,7 +2,7 @@
 //! Type and default text is SQL the user typed, so it passes through raw.
 #![allow(dead_code, reason = "the object dialogs call these")]
 
-use crate::model::{Column, ForeignKey, Index, TableDef, Trigger};
+use crate::model::{Column, ForeignKey, Index, ObjectKind, TableDef, Trigger};
 
 /// A table as edited: `origins[i]` is the original name of `def.columns[i]`, `None` if new.
 #[derive(Clone, Debug, PartialEq)]
@@ -13,6 +13,30 @@ pub struct TableEdit {
 
 pub fn ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// Object `name` as SQL names it: `"schema"."name"`, or `"name"` without a schema (SQLite);
+/// a function's argument types (`f(integer)`) stay outside the quotes.
+pub fn object_ref(kind: ObjectKind, schema: Option<&str>, name: &str) -> String {
+    let (base, args) = match name.split_once('(') {
+        Some((base, args)) if kind == ObjectKind::Function => (base, format!("({args}")),
+        _ => (name, String::new()),
+    };
+    let named = schema.map_or_else(|| ident(base), |schema| qualified(schema, base));
+    named + &args
+}
+
+/// `DROP <kind> <object>`; `None` for other kinds and for a function without its signature.
+pub fn drop_object(kind: ObjectKind, schema: Option<&str>, name: &str) -> Option<String> {
+    let what = match kind {
+        ObjectKind::Table => "TABLE",
+        ObjectKind::View => "VIEW",
+        ObjectKind::MaterializedView => "MATERIALIZED VIEW",
+        ObjectKind::Sequence => "SEQUENCE",
+        ObjectKind::Function if name.contains('(') => "FUNCTION",
+        _ => return None,
+    };
+    Some(format!("DROP {what} {}", object_ref(kind, schema, name)))
 }
 
 pub fn literal(text: &str) -> String {

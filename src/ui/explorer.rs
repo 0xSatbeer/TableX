@@ -38,6 +38,7 @@ mod flatten;
 mod input;
 mod keys;
 mod load;
+mod objects;
 mod rename;
 mod render;
 mod rows;
@@ -144,6 +145,20 @@ pub struct OpenConsole {
 }
 
 impl EventEmitter<OpenConsole> for Explorer {}
+
+/// Show DDL on object `key`, just opened: the Shell shows its tab's DDL (Definition) sub-tab.
+pub struct ShowDdl {
+    pub key: SharedString,
+}
+
+impl EventEmitter<ShowDdl> for Explorer {}
+
+/// Emitted after object `key` was dropped, so the Shell can close its tab.
+pub struct ObjectDropped {
+    pub key: String,
+}
+
+impl EventEmitter<ObjectDropped> for Explorer {}
 
 /// Emitted after connection `id` was deleted, so the Shell can close its tabs.
 pub struct ConnectionDeleted {

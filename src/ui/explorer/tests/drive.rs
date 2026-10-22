@@ -189,3 +189,30 @@ pub(super) fn answer_all(
     }
     calls
 }
+
+pub(super) fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+    let bounds = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} drawn"));
+    cx.simulate_click(bounds.center(), Default::default());
+    cx.run_until_parked();
+}
+
+/// Right-clicks the row labelled `label`, opening its menu.
+pub(super) fn right_click(
+    explorer: &gpui_kit::Entity<super::Explorer>,
+    cx: &mut gpui_kit::VisualTestContext,
+    label: &str,
+) {
+    let ix = labels(explorer, cx)
+        .iter()
+        .position(|l| l == label)
+        .unwrap_or_else(|| panic!("{label} row"));
+    let at = cx
+        .debug_bounds(format!("tree-label-{ix}").leak())
+        .unwrap_or_else(|| panic!("{label} row drawn"))
+        .center();
+    cx.simulate_mouse_down(at, gpui_kit::MouseButton::Right, Default::default());
+    cx.simulate_mouse_up(at, gpui_kit::MouseButton::Right, Default::default());
+    cx.run_until_parked();
+}

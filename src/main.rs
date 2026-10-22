@@ -48,6 +48,12 @@ actions!(
         NewRole,
         NewUser,
         OpenConsole,
+        NewConsole,
+        OpenSelected,
+        CopyName,
+        CopyQualifiedName,
+        ShowDdl,
+        DropObject,
         CommandPalette,
         CheatSheet,
         QuickOpen
