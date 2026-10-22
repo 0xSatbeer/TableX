@@ -1,5 +1,6 @@
 mod add_form;
 mod add_save;
+mod cheat_sheet;
 mod close_transaction;
 mod connect;
 mod connection_test;

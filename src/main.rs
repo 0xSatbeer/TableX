@@ -48,7 +48,8 @@ actions!(
         NewRole,
         NewUser,
         OpenConsole,
-        CommandPalette
+        CommandPalette,
+        CheatSheet
     ]
 );
 

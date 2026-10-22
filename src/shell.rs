@@ -86,6 +86,8 @@ pub(crate) struct Shell {
     console_mono: Pixels,
     /// The command palette, while open.
     palette: Option<crate::ui::palette::Open>,
+    /// The keyboard cheat sheet, while open.
+    cheat_sheet: Option<crate::ui::cheat_sheet::Open>,
     _appearance: Subscription,
 }
 

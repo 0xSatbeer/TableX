@@ -4,13 +4,13 @@ use gpui_kit::component::IndexPath;
 use gpui_kit::component::list::{ListEvent, ListState};
 use gpui_kit::*;
 
-use crate::ui::palette;
+use crate::ui::{cheat_sheet, palette};
 
 use crate::{
-    AddConnection, CloseAllTabs, CloseOtherTabs, CloseTab, CloseTabsToRight, CommandPalette,
-    CopyTabName, CycleTheme, DeleteConnection, EditConnection, FocusExplorer, MaximizeEditor,
-    MaximizePanel, NextTab, PrevTab, ReopenTab, RestorePanel, RevealTab, ToggleBottomPanel,
-    ToggleExplorer, ToggleGallery, TogglePinTab,
+    AddConnection, CheatSheet, CloseAllTabs, CloseOtherTabs, CloseTab, CloseTabsToRight,
+    CommandPalette, CopyTabName, CycleTheme, DeleteConnection, EditConnection, FocusExplorer,
+    MaximizeEditor, MaximizePanel, NextTab, PrevTab, ReopenTab, RestorePanel, RevealTab,
+    ToggleBottomPanel, ToggleExplorer, ToggleGallery, TogglePinTab,
 };
 
 use super::Shell;
@@ -139,6 +139,9 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
     .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
         this.open_palette(window, cx);
     }))
+    .on_action(cx.listener(|this, _: &CheatSheet, window, cx| {
+        this.open_cheat_sheet(window, cx);
+    }))
 }
 
 impl Shell {
@@ -194,5 +197,37 @@ impl Shell {
         if let Ok(action) = cx.build_action(action, None) {
             window.dispatch_action(action, cx);
         }
+    }
+
+    fn open_cheat_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.cheat_sheet.is_some() {
+            return;
+        }
+        let previous = window.focused(cx);
+        let list = cx
+            .new(|cx| ListState::new(cheat_sheet::Sheet::current(cx), window, cx).searchable(true));
+        let events = cx.subscribe_in(&list, window, |this, _, event: &ListEvent, window, cx| {
+            if let ListEvent::Cancel = event {
+                this.close_cheat_sheet(window, cx);
+            }
+        });
+        list.update(cx, |list, cx| list.focus(window, cx));
+        self.cheat_sheet = Some(cheat_sheet::Open {
+            list,
+            previous,
+            _events: events,
+        });
+        cx.notify();
+    }
+
+    /// Closes the cheat sheet and refocuses what it covered.
+    pub(super) fn close_cheat_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(open) = self.cheat_sheet.take() else {
+            return;
+        };
+        if let Some(previous) = open.previous {
+            window.focus(&previous, cx);
+        }
+        cx.notify();
     }
 }
