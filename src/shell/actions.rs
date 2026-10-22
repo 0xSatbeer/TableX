@@ -1,12 +1,16 @@
 //! The shell's window-wide action handlers: layout toggles, tab commands, connections, theme.
 
+use gpui_kit::component::IndexPath;
+use gpui_kit::component::list::{ListEvent, ListState};
 use gpui_kit::*;
 
+use crate::ui::palette;
+
 use crate::{
-    AddConnection, CloseAllTabs, CloseOtherTabs, CloseTab, CloseTabsToRight, CopyTabName,
-    CycleTheme, DeleteConnection, EditConnection, FocusExplorer, MaximizeEditor, MaximizePanel,
-    NextTab, PrevTab, ReopenTab, RestorePanel, RevealTab, ToggleBottomPanel, ToggleExplorer,
-    ToggleGallery, TogglePinTab,
+    AddConnection, CloseAllTabs, CloseOtherTabs, CloseTab, CloseTabsToRight, CommandPalette,
+    CopyTabName, CycleTheme, DeleteConnection, EditConnection, FocusExplorer, MaximizeEditor,
+    MaximizePanel, NextTab, PrevTab, ReopenTab, RestorePanel, RevealTab, ToggleBottomPanel,
+    ToggleExplorer, ToggleGallery, TogglePinTab,
 };
 
 use super::Shell;
@@ -132,4 +136,63 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
         this.gallery_visible = !this.gallery_visible;
         cx.notify();
     }))
+    .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
+        this.open_palette(window, cx);
+    }))
+}
+
+impl Shell {
+    fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.palette.is_some() {
+            return;
+        }
+        let previous = window.focused(cx);
+        let list =
+            cx.new(|cx| ListState::new(palette::Commands::new(cx), window, cx).searchable(true));
+        let events = cx.subscribe_in(
+            &list,
+            window,
+            |this, list, event: &ListEvent, window, cx| {
+                let action = match event {
+                    ListEvent::Confirm(ix) => list.read(cx).delegate().action(ix.row),
+                    ListEvent::Cancel => None,
+                    _ => return,
+                };
+                this.close_palette(action, window, cx);
+            },
+        );
+        list.update(cx, |list, cx| {
+            list.set_selected_index(Some(IndexPath::default()), window, cx);
+            list.focus(window, cx);
+        });
+        self.palette = Some(palette::Open {
+            list,
+            previous,
+            _events: events,
+        });
+        cx.notify();
+    }
+
+    /// Closes the palette, refocuses what it covered and runs `action` there.
+    pub(super) fn close_palette(
+        &mut self,
+        action: Option<&'static str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open) = self.palette.take() else {
+            return;
+        };
+        if let Some(previous) = open.previous {
+            window.focus(&previous, cx);
+        }
+        cx.notify();
+        let Some(action) = action else {
+            return;
+        };
+        palette::remember(action, cx);
+        if let Ok(action) = cx.build_action(action, None) {
+            window.dispatch_action(action, cx);
+        }
+    }
 }

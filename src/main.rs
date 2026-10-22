@@ -1,6 +1,7 @@
 mod assets;
 mod db;
 mod ddl;
+mod fuzzy;
 mod keymap;
 mod mock;
 mod model;
@@ -46,7 +47,8 @@ actions!(
         NewDatabase,
         NewRole,
         NewUser,
-        OpenConsole
+        OpenConsole,
+        CommandPalette
     ]
 );
 

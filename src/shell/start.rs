@@ -236,6 +236,7 @@ impl Shell {
             console_ids: std::collections::HashMap::new(),
             next_console: 0,
             console_mono: theme::MONO,
+            palette: None,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| {
                 this.theme.apply(&this.user_themes, window, cx)
             }),

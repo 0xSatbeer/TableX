@@ -44,6 +44,69 @@ pub const DEFAULTS: &[(&str, &str, Option<&str>)] = &[
     ("queryx::NextTab", "ctrl-tab", None),
     ("queryx::PrevTab", "ctrl-shift-tab", None),
     ("queryx::CycleTheme", "ctrl-k ctrl-t", None),
+    ("queryx::CommandPalette", "ctrl-shift-p", None),
+];
+
+/// (action name, human name, area) for every action the palette lists.
+pub const NAMES: &[(&str, &str, &str)] = &[
+    ("queryx::CommandPalette", "Command palette", "General"),
+    ("queryx::Quit", "Quit", "General"),
+    ("queryx::CycleTheme", "Cycle theme", "Appearance"),
+    ("theme::ZoomIn", "Zoom in", "Appearance"),
+    ("theme::ZoomOut", "Zoom out", "Appearance"),
+    ("theme::ZoomReset", "Reset zoom", "Appearance"),
+    (
+        "queryx::ToggleGallery",
+        "Toggle component gallery",
+        "Appearance",
+    ),
+    ("queryx::ToggleExplorer", "Toggle explorer", "Layout"),
+    ("queryx::ToggleBottomPanel", "Toggle bottom panel", "Layout"),
+    ("queryx::MaximizeEditor", "Maximize editor", "Layout"),
+    ("queryx::MaximizePanel", "Maximize bottom panel", "Layout"),
+    ("queryx::RestorePanel", "Restore bottom panel", "Layout"),
+    ("queryx::FocusExplorer", "Focus explorer", "Layout"),
+    ("queryx::CloseTab", "Close tab", "Tabs"),
+    ("queryx::ReopenTab", "Reopen closed tab", "Tabs"),
+    ("queryx::NextTab", "Next tab", "Tabs"),
+    ("queryx::PrevTab", "Previous tab", "Tabs"),
+    ("queryx::CloseOtherTabs", "Close other tabs", "Tabs"),
+    (
+        "queryx::CloseTabsToRight",
+        "Close tabs to the right",
+        "Tabs",
+    ),
+    ("queryx::CloseAllTabs", "Close all tabs", "Tabs"),
+    ("queryx::TogglePinTab", "Pin or unpin tab", "Tabs"),
+    ("queryx::CopyTabName", "Copy tab name", "Tabs"),
+    ("queryx::RevealTab", "Reveal tab in explorer", "Tabs"),
+    ("queryx::AddConnection", "Add connection", "Connections"),
+    ("queryx::EditConnection", "Edit connection", "Connections"),
+    (
+        "queryx::DeleteConnection",
+        "Delete connection",
+        "Connections",
+    ),
+    ("queryx::RefreshNode", "Refresh", "Explorer"),
+    ("queryx::ModifyObject", "Modify object", "Explorer"),
+    ("queryx::NewTable", "New table", "Explorer"),
+    ("queryx::NewDatabase", "New database", "Explorer"),
+    ("queryx::NewRole", "New role", "Explorer"),
+    ("queryx::NewUser", "New user", "Explorer"),
+    ("queryx::OpenConsole", "Open console", "Explorer"),
+    ("console::RunStatement", "Run statement", "Console"),
+    ("console::RunScript", "Run script", "Console"),
+    ("console::Rerun", "Rerun last query", "Console"),
+    ("console::Cancel", "Cancel query", "Console"),
+    ("grid::CopyCsv", "Copy as CSV", "Grid"),
+    ("grid::CopyJson", "Copy as JSON", "Grid"),
+    ("grid::CopyMarkdown", "Copy as Markdown", "Grid"),
+    ("grid::CopySqlInsert", "Copy as SQL INSERT", "Grid"),
+    ("grid::CopySqlInList", "Copy as SQL IN list", "Grid"),
+    ("grid::HideColumn", "Hide column", "Grid"),
+    ("grid::ShowAllColumns", "Show all columns", "Grid"),
+    ("grid::Paste", "Paste", "Grid"),
+    ("grid::SetValue", "Set value", "Grid"),
 ];
 
 /// `keymap.toml`'s `[bindings]`: action name → keystrokes; `""` unbinds.
@@ -57,7 +120,6 @@ pub struct Binding {
 }
 
 /// The bindings in effect (action name → keystrokes), for the palette and cheat sheet.
-#[allow(dead_code)] // read by the palette and cheat sheet
 pub struct Bindings(pub Vec<Binding>);
 
 impl Global for Bindings {}

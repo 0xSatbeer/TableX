@@ -84,6 +84,8 @@ pub(crate) struct Shell {
     overflow_search: Entity<InputState>,
     /// The console editor's mono font size, before UI scale (Ctrl+= / Ctrl+- / Ctrl+0).
     console_mono: Pixels,
+    /// The command palette, while open.
+    palette: Option<crate::ui::palette::Open>,
     _appearance: Subscription,
 }
 

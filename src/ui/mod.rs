@@ -6,6 +6,7 @@ pub mod explorer;
 pub mod gallery;
 pub mod grid;
 pub mod object_dialog;
+pub mod palette;
 pub mod panel;
 pub mod password_prompt;
 pub mod split;
