@@ -1,5 +1,6 @@
 mod autosave;
 mod cancel;
+mod completion;
 mod context;
 mod errors;
 mod paging;

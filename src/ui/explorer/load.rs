@@ -189,6 +189,7 @@ impl Explorer {
             NodeKind::Object(kind) if !opens_tab(NodeKind::Object(kind)) => ancestors(&node.key)[2],
             _ => &node.key,
         };
+        crate::ui::console::completion::invalidate(&segments(key), cx);
         self.load(key.to_string(), false, cx);
     }
 

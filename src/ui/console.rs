@@ -26,7 +26,12 @@ use crate::model::{
 use crate::ui::{explorer, grid, tabs};
 use crate::{ddl, sql, theme};
 
-actions!(console, [RunStatement, RunScript, Rerun, Cancel]);
+actions!(
+    console,
+    [RunStatement, RunScript, Rerun, Cancel, AcceptCompletion]
+);
+
+pub mod completion;
 
 pub(crate) const CONTEXT: &str = "Console";
 /// How long after the last edit the text is saved.
@@ -46,6 +51,7 @@ pub fn bind_keys(cx: &mut App) {
 
 /// Where a console runs: the connection (looked up in `workspace` at connect), its database
 /// and, when picked, the schema its `search_path` is set to.
+#[derive(Clone)]
 pub struct Target {
     pub workspace: Entity<Workspace>,
     pub driver: Arc<dyn Driver>,
@@ -216,6 +222,10 @@ impl Console {
                 .language("sql")
                 .default_value(text)
         });
+        let provider = Rc::new(completion::Provider {
+            console: cx.weak_entity(),
+        });
+        editor.update(cx, |e, _| e.lsp_mut().completion_provider = Some(provider));
         cx.subscribe(&editor, |this, _, ev: &InputEvent, cx| {
             if let InputEvent::Change = ev {
                 this.text_changed(cx);
@@ -427,6 +437,24 @@ impl Console {
             .detach();
     }
 
+    /// Tab with the completion menu open accepts its item, as Enter does; else Tab indents.
+    fn accept_completion(
+        &mut self,
+        _: &AcceptCompletion,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.editor.read(cx).completion_menu_state().open {
+            cx.propagate();
+            return;
+        }
+        let enter = gpui_kit::base::input::Enter {
+            secondary: false,
+            shift: false,
+        };
+        window.dispatch_action(Box::new(enter), cx);
+    }
+
     /// Runs `statements`, first asking when any of them writes to a production connection.
     fn run(
         &mut self,
@@ -609,6 +637,12 @@ impl Console {
         let Some(connection_id) = self.target.connection else {
             return false;
         };
+        if completion::is_ddl(&step.sql) {
+            let schema = self.target.schema.clone();
+            let path = [connection_id.0.to_string(), self.target.database.clone()];
+            let path: Vec<String> = path.into_iter().chain(schema).collect();
+            completion::invalidate(&path, cx);
+        }
         // Each `open` closes the session's previous result.
         for result in &mut self.results {
             result.open = false;
@@ -1099,6 +1133,7 @@ impl Render for Console {
             .on_action(cx.listener(Self::run_script))
             .on_action(cx.listener(Self::rerun))
             .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::accept_completion))
             .child(toolbar)
             .child(
                 div().flex_1().min_h_0().child(

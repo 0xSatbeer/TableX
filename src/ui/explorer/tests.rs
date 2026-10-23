@@ -11,6 +11,7 @@ use crate::{
 };
 use std::sync::Arc;
 
+mod completion;
 mod connect;
 mod drive;
 mod drop;

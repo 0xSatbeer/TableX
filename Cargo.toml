@@ -17,6 +17,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tokio-postgres = "0.7"
 rusqlite = { version = "0.37", features = ["bundled", "column_decltype"] }
 futures = "0.3"
+# Console completion items (src/ui/console/completion.rs); the editor's own version, already in the tree.
+lsp-types = "=0.97.0"
 # Raw cell bytes sent back for the server's text form; already in the tree through tokio-postgres.
 bytes = "1"
 # TLS for Postgres on ring only; default features would pull in aws-lc-rs.

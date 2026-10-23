@@ -5376,6 +5376,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "keyring",
+ "lsp-types",
  "rusqlite",
  "rustls",
  "serde",

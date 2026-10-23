@@ -230,6 +230,7 @@ impl Explorer {
             .iter()
             .map(|c| (c.id, c.params.clone()))
             .collect();
+        crate::ui::console::completion::set_explorer(cx.weak_entity(), cx);
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("Filter objects…"));
         cx.subscribe(&field, |this, field, ev: &InputEvent, cx| {
             if let InputEvent::Change = ev {
@@ -303,6 +304,12 @@ impl Explorer {
             })
             .collect();
         self.refresh(cx);
+    }
+
+    /// The open session on `database` of connection `id`, for console completion's reads.
+    pub fn open_session(&self, id: ConnectionId, database: &str) -> Option<Session> {
+        let session = self.sessions.get(&(id, database.to_string()))?;
+        (!session.is_closed()).then(|| session.clone())
     }
 
     /// Connects connection `id` without opening its row, as restoring a session's tabs does.
