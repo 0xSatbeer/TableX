@@ -1,4 +1,5 @@
 mod assets;
+mod complete;
 mod db;
 mod ddl;
 mod fuzzy;

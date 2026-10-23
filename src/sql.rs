@@ -54,7 +54,7 @@ pub fn line_col(sql: &str, byte_offset: usize) -> (usize, usize) {
 
 /// Same byte length as `sql`; quoted text becomes `_` and comments become spaces,
 /// so `;`, `=` and keywords found in it are real code.
-fn mask(sql: &str) -> String {
+pub(crate) fn mask(sql: &str) -> String {
     let b = sql.as_bytes();
     let mut out = b.to_vec();
     let mut i = 0;
