@@ -553,7 +553,7 @@ impl Grid {
         )
     }
 
-    /// The loading spinner, or the error with Retry, over a table tab's rows.
+    /// The loading spinner, the error with Retry, or the empty-table copy over a table tab's rows.
     pub(super) fn render_live_state(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = cx.theme();
         let overlay = || {
@@ -567,8 +567,24 @@ impl Grid {
                 .text_size(theme::ui_sm())
                 .text_color(theme.muted_foreground)
         };
-        match &self.live.as_ref()?.state {
-            LiveState::Ready => None,
+        let live = self.live.as_ref()?;
+        match &live.state {
+            LiveState::Ready if self.all.row_count() > 0 => None,
+            LiveState::Ready => {
+                let text = match live.where_.is_empty() {
+                    true => "No rows",
+                    false => "No rows match this filter",
+                };
+                Some(
+                    overlay()
+                        .child(
+                            div()
+                                .debug_selector(move || format!("table-empty:{text}"))
+                                .child(text),
+                        )
+                        .into_any_element(),
+                )
+            }
             LiveState::Disconnected => Some(
                 overlay()
                     .child("Disconnected")

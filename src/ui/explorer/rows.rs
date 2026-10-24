@@ -120,7 +120,7 @@ impl Explorer {
                         },
                         theme.muted_foreground,
                     ),
-                    NodeKind::Loading => (Icon::empty(), theme.muted_foreground),
+                    NodeKind::Loading | NodeKind::Empty => (Icon::empty(), theme.muted_foreground),
                     NodeKind::ConnError | NodeKind::LoadError => (Icon::new(Lucide::CircleAlert), theme.danger),
                 };
                 let conn = &ws.connections[node.conn];
@@ -215,7 +215,7 @@ impl Explorer {
                         let text = StyledText::new(node.label.clone()).with_highlights(ranges.collect::<Vec<_>>());
                         theme::truncating(("tree-label", ix), text, node.label.clone()).into_any_element()
                         }
-                    }).when(matches!(node.kind, NodeKind::Loading | NodeKind::ConnError | NodeKind::LoadError), |d| d.text_size(theme::ui_sm()).text_color(theme.muted_foreground)))
+                    }).when(matches!(node.kind, NodeKind::Loading | NodeKind::Empty | NodeKind::ConnError | NodeKind::LoadError), |d| d.text_size(theme::ui_sm()).text_color(theme.muted_foreground)))
                     .when(node.kind == NodeKind::ConnError, |d| {
                         let help: SharedString = format!(
                             "{}\nCheck that {} is reachable (VPN, firewall), then retry. Ctrl+C copies this message.",

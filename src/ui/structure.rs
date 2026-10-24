@@ -212,17 +212,28 @@ impl Structure {
     fn body(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let note = |text: String| {
-            div()
+            v_flex()
+                .debug_selector(|| format!("structure-state:{text}"))
+                .items_start()
+                .gap(theme::space_8())
                 .p(theme::space_12())
                 .text_size(theme::ui_sm())
                 .text_color(theme::text_secondary(theme))
                 .child(text)
-                .into_any_element()
         };
         match (&self.load, self.sub) {
             (_, Sub::Data) => self.grid.clone().into_any_element(),
-            (Load::NotLoaded | Load::Loading, _) => note("Loading…".into()),
-            (Load::Failed(reason), _) => note(format!("{reason} · F5 to retry")),
+            (Load::NotLoaded | Load::Loading, _) => note("Loading…".into()).into_any_element(),
+            (Load::Failed(reason), _) => note(format!("Couldn't read the definition: {reason}"))
+                .child(
+                    div().debug_selector(|| "structure-retry".into()).child(
+                        Button::new("structure-retry")
+                            .small()
+                            .label("Retry")
+                            .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
+                    ),
+                )
+                .into_any_element(),
             (Load::Table(def, triggers), Sub::Structure) => self.sections(def, triggers, cx),
             _ => self.editor_view(cx),
         }

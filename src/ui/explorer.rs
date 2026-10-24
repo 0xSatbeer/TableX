@@ -73,6 +73,8 @@ enum NodeKind {
     ConnError,
     /// A failed load's message, in place of the children it was loading.
     LoadError,
+    /// "No objects" under a schema that loaded empty.
+    Empty,
 }
 
 /// Where the load of a node's children stands.

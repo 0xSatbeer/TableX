@@ -32,3 +32,18 @@ fn typing_cls_tab_then_enter_closes_the_tab(cx: &mut gpui_kit::TestAppContext) {
         "most recent is listed first"
     );
 }
+
+#[gpui_kit::test]
+fn a_query_matching_no_command_says_so(cx: &mut gpui_kit::TestAppContext) {
+    let (window, _) = open_with_connection_tabs(cx);
+    cx.update(|cx| crate::keymap::bind(cx, &Default::default()));
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    cx.simulate_keystrokes("ctrl-shift-p");
+    cx.run_until_parked();
+    cx.simulate_input("zzqq");
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("palette-state:No commands match 'zzqq'")
+            .is_some()
+    );
+}

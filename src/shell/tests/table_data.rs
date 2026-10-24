@@ -315,6 +315,27 @@ fn enter_applies_where_and_order_by_from_page_one(cx: &mut gpui_kit::TestAppCont
 }
 
 #[gpui_kit::test]
+fn an_empty_table_says_no_rows_and_an_empty_filter_says_so(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(rows(0)), &mut cx);
+    assert!(cx.debug_bounds("table-empty:No rows").is_some());
+    apply_filter(&shell, "id > 5", "id DESC", &mut cx);
+    answer(&fake, Ok(rows(0)), &mut cx);
+    assert!(
+        cx.debug_bounds("table-empty:No rows match this filter")
+            .is_some()
+    );
+    cx.simulate_keystrokes("f5");
+    cx.run_until_parked();
+    answer(&fake, Ok(rows(1)), &mut cx);
+    assert!(
+        cx.debug_bounds("table-empty:No rows match this filter")
+            .is_none()
+    );
+}
+
+#[gpui_kit::test]
 fn a_failing_filter_shows_the_error_and_keeps_the_rows(cx: &mut gpui_kit::TestAppContext) {
     let (fake, window, shell) = open_users(cx);
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);

@@ -199,3 +199,28 @@ fn a_view_shows_its_definition(cx: &mut gpui_kit::TestAppContext) {
     );
     assert!(cx.debug_bounds("structure-copy").is_some());
 }
+
+#[gpui_kit::test]
+fn ddl_says_loading_then_the_error_and_retry_reads_it_again(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, mut cx, _, _explorer) = open(false, cx);
+    click(&mut cx, "subtab-DDL");
+    assert!(cx.debug_bounds("structure-state:Loading…").is_some());
+    fake.resolve("connect app_db", Ok(fake::session("app_db")));
+    cx.run_until_parked();
+    fake.resolve::<TableDef>(
+        "table_def app_db/public/users",
+        Err("permission denied".into()),
+    );
+    fake.resolve("triggers app_db/public/users", Ok(Vec::<Trigger>::new()));
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("structure-state:Couldn't read the definition: permission denied")
+            .is_some()
+    );
+    click(&mut cx, "structure-retry");
+    assert!(cx.debug_bounds("structure-state:Loading…").is_some());
+    fake.resolve("table_def app_db/public/users", Ok(users()));
+    fake.resolve("triggers app_db/public/users", Ok(vec![audit()]));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("structure-retry").is_none());
+}

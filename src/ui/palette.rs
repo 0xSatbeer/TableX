@@ -177,12 +177,14 @@ impl ListDelegate for Commands {
         _: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
+        let text = format!("No commands match '{}'", self.query);
         h_flex()
+            .debug_selector(|| format!("palette-state:{text}"))
             .size_full()
             .justify_center()
             .p(theme::space_8())
             .text_color(cx.theme().muted_foreground)
-            .child(format!("No commands match '{}'", self.query))
+            .child(text)
     }
 }
 

@@ -330,3 +330,59 @@ fn ctrl_shift_n_opens_another_console_on_the_same_schema_each_time(
     let keys: std::collections::HashSet<_> = consoles.iter().map(|c| c.0.clone()).collect();
     assert_eq!(keys.len(), 3, "each with its own key");
 }
+
+#[gpui_kit::test]
+fn the_results_tab_says_running_no_rows_and_the_error_with_run_again(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use crate::db::Opened;
+    use crate::model::{ColumnMeta, QueryError, QueryErrorKind};
+    let (fake, window, shell) = open_with_fake(cx);
+    cx.update(crate::ui::console::bind_keys);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    let show_results = |cx: &mut gpui_kit::VisualTestContext| {
+        let panel = shell.read_with(cx, |this, _| this.bottom_panel.clone());
+        panel.update(cx, |p, cx| p.show_run(true, cx));
+        cx.run_until_parked();
+    };
+    open_console(&mut cx, &shell, "1/app_db");
+    cx.simulate_input("select 1");
+    cx.simulate_keystrokes("ctrl-enter");
+    cx.run_until_parked();
+    show_results(&mut cx);
+    assert!(cx.debug_bounds("results-running").is_some());
+
+    fake.resolve("connect app_db", Ok(crate::db::fake::session("app_db")));
+    cx.run_until_parked();
+    let columns = vec![ColumnMeta {
+        name: "a".into(),
+        ..Default::default()
+    }];
+    fake.resolve_query("open app_db", Ok(Opened::Rows(columns)));
+    cx.run_until_parked();
+    fake.resolve_query("fetch app_db", Ok(Vec::<crate::model::Row>::new()));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("results-running").is_none());
+    assert!(
+        cx.debug_bounds("results-empty:Query returned no rows")
+            .is_some()
+    );
+
+    cx.simulate_keystrokes("ctrl-enter");
+    cx.run_until_parked();
+    let error = QueryError {
+        kind: QueryErrorKind::Server,
+        message: "relation \"x\" does not exist".into(),
+        position: None,
+        statement: 0,
+    };
+    fake.resolve_query::<Opened>("open app_db", Err(error));
+    cx.run_until_parked();
+    show_results(&mut cx);
+    let copy = "results-error:relation \"x\" does not exist · Fix the statement and Run again";
+    assert!(cx.debug_bounds(copy).is_some());
+    assert!(
+        cx.debug_bounds("results-empty:Query returned no rows")
+            .is_none()
+    );
+}

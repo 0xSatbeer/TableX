@@ -42,7 +42,7 @@ pub fn latency() -> Duration {
     Duration::from_millis(LATENCY_MS.get() as u64)
 }
 
-/// shortcut: mocked, replace with Driver::test (QX-023)
+/// The Mock driver's Test: a host ending in `.invalid` fails to resolve.
 /// The caller waits `latency()` first, like `Explorer::connect`.
 pub fn test_connection(host: &str) -> Result<(), String> {
     if host.to_ascii_lowercase().ends_with(".invalid") {

@@ -203,19 +203,24 @@ pub(super) fn flatten(
             }
             for schema in db.schemas.iter().flatten() {
                 let key = format!("{key}/{}", seg(&schema.name));
-                let (expandable, unloaded) = (
-                    schema.objects.as_ref().is_none_or(|o| !o.is_empty()),
-                    schema.objects.is_none(),
-                );
                 if !push(FlatNode {
-                    expandable,
-                    unloaded,
+                    expandable: true,
+                    unloaded: schema.objects.is_none(),
                     ..node(key.clone(), NodeKind::Schema, &schema.name, 2)
                 }) {
                     continue;
                 }
                 if let Some((key, kind, label)) = load_row(loads, &key) {
                     push(node(key, kind, &label, 3));
+                    continue;
+                }
+                if schema.objects.as_ref().is_some_and(Vec::is_empty) {
+                    push(node(
+                        format!("{key}/{EMPTY}"),
+                        NodeKind::Empty,
+                        "No objects",
+                        3,
+                    ));
                     continue;
                 }
                 let mut groups: BTreeMap<ObjectKind, Vec<&DbObject>> = BTreeMap::new();

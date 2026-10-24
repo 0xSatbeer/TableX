@@ -80,11 +80,12 @@ fn each_level_loads_only_when_expanded_and_shows_a_loading_row_meanwhile(
             fake.resolve::<Vec<crate::model::DbObject>>(call, Ok(vec![]));
         }
         cx.run_until_parked();
-        assert_eq!(
-            under(&explorer, &cx, row),
-            Vec::<String>::new(),
-            "{row}: no children"
-        );
+        // An empty schema says so; an empty database just has nothing under it.
+        let (children, expandable): (&[&str], bool) = match row {
+            "empty" => (&["No objects"], true),
+            _ => (&[], false),
+        };
+        assert_eq!(under(&explorer, &cx, row), children, "{row}: children");
         let chevron = explorer.read_with(&cx, |e, _| {
             e.nodes
                 .iter()
@@ -92,7 +93,7 @@ fn each_level_loads_only_when_expanded_and_shows_a_loading_row_meanwhile(
                 .unwrap()
                 .expandable
         });
-        assert!(!chevron, "{row}: nothing to expand once loaded empty");
+        assert_eq!(chevron, expandable, "{row}: chevron once loaded empty");
     }
 }
 

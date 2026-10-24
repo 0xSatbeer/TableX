@@ -66,3 +66,4 @@ pub(super) fn of_connection(key: &str, id: ConnectionId) -> bool {
 /// these never clash with a database or schema named "loading" or "error".
 pub(super) const LOADING: &str = r"\loading";
 pub(super) const ERROR: &str = r"\error";
+pub(super) const EMPTY: &str = r"\empty";

@@ -91,7 +91,7 @@ impl Explorer {
         let conn = &self.workspace.read(cx).connections[node.conn];
         let mut parts = segments(&node.key).into_iter().skip(1);
         match node.kind {
-            NodeKind::Loading | NodeKind::ConnError | NodeKind::LoadError => None,
+            NodeKind::Loading | NodeKind::Empty | NodeKind::ConnError | NodeKind::LoadError => None,
             NodeKind::Connection(_) => Some((conn.id, conn.params.database(), None)),
             _ => Some((conn.id, parts.next()?, parts.next())),
         }

@@ -82,6 +82,8 @@ pub struct Console {
     pub results: Vec<Paged>,
     pub active_result: usize,
     pub messages: Vec<String>,
+    /// Why the last run failed, for the Results tab when it left no results.
+    pub error: Option<String>,
     /// Set by the shell: the editor's zoomed mono size.
     pub text_size: Pixels,
     running: bool,
@@ -159,6 +161,10 @@ impl Paged {
                 self.dropped + 1
             )
         })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.total() == 0
     }
 
     pub fn can_prev(&self) -> bool {
@@ -253,6 +259,7 @@ impl Console {
             messages: Vec::new(),
             text_size: theme::scaled(theme::MONO),
             running: false,
+            error: None,
             manual: false,
             in_transaction: false,
             databases: Vec::new(),
@@ -558,11 +565,14 @@ impl Console {
         }
         self.last = statements.clone();
         (self.results, self.active_result, self.messages) = (Vec::new(), 0, Vec::new());
+        self.error = None;
         self.mark_error(None, "", cx);
         self._fetch = None;
         cx.notify();
         let Some(params) = self.params(cx) else {
-            self.messages.push("This console has no connection".into());
+            let message = "This console has no connection".to_string();
+            self.error = Some(message.clone());
+            self.messages.push(message);
             return;
         };
         self.running = true;
@@ -581,8 +591,12 @@ impl Console {
                 None => match connect(&*driver, &params, schema).await {
                     Ok(session) => session,
                     Err(reason) => {
-                        this.update(cx, |this, cx| this.finish(Some(reason), cx))
-                            .ok();
+                        this.update(cx, |this, cx| {
+                            this.error =
+                                Some(format!("{reason} · Check the connection and Run again"));
+                            this.finish(Some(reason), cx)
+                        })
+                        .ok();
                         return;
                     }
                 },
@@ -718,13 +732,15 @@ impl Console {
             }
             QueryErrorKind::Disconnected => {
                 self.lost(cx);
-                self.messages
-                    .push("Connection lost · Run again to reconnect".into());
+                let message = "Connection lost · Run again to reconnect".to_string();
+                self.error = Some(message.clone());
+                self.messages.push(message);
                 cx.emit(ConsoleEvent::Lost);
             }
             QueryErrorKind::Server => {
                 let at = error.position.map(|p| offset + p);
                 let message = self.mark_error(at, &error.message, cx);
+                self.error = Some(format!("{message} · Fix the statement and Run again"));
                 self.messages.push(message);
             }
         }
@@ -816,7 +832,11 @@ impl Console {
         cx.notify();
     }
 
-    /// Re-runs the last run, as the dropped-rows notice offers.
+    pub fn running(&self) -> bool {
+        self.running
+    }
+
+    /// Re-runs the last run, as the dropped-rows notice and the Results tab's error offer.
     pub fn run_again(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.run(self.last.clone(), window, cx);
     }

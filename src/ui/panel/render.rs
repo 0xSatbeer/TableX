@@ -3,6 +3,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::Input,
+    spinner::Spinner,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -150,13 +151,37 @@ impl Render for BottomPanel {
                     .w_full(),
                 )
                 .into_any_element(),
-            RESULTS => match self
-                .console
-                .as_ref()
-                .filter(|c| !c.read(cx).results.is_empty())
-            {
-                Some(console) => results(console, cx).into_any_element(),
-                None => empty("Console results will show here").into_any_element(),
+            RESULTS => match &self.console {
+                Some(console) if !console.read(cx).results.is_empty() => {
+                    results(console, cx).into_any_element()
+                }
+                Some(console) if console.read(cx).running() => v_flex()
+                    .debug_selector(|| "results-running".into())
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap(theme::space_8())
+                    .text_size(theme::ui_sm())
+                    .text_color(theme.muted_foreground)
+                    .child(Spinner::new().color(theme.muted_foreground))
+                    .child("Running…")
+                    .into_any_element(),
+                Some(console) if let Some(error) = console.read(cx).error.clone() => v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap(theme::space_8())
+                    .px(theme::space_16())
+                    .text_size(theme::ui_sm())
+                    .child(
+                        div()
+                            .debug_selector(|| format!("results-error:{error}"))
+                            .text_color(theme.danger)
+                            .child(error),
+                    )
+                    .child(run_again(console))
+                    .into_any_element(),
+                _ => empty("Console results will show here").into_any_element(),
             },
             _ => match self
                 .console
@@ -246,29 +271,39 @@ fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
             .disabled(!active.can_next()),
         );
     let body = match active.notice() {
-        Some(notice) => {
-            let console = console.clone();
-            v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap(theme::space_8())
-                .text_color(theme.muted_foreground)
-                .child(notice)
-                .child(
-                    Button::new("result-run-again")
-                        .small()
-                        .label("Run again")
-                        .on_click(move |_, window, cx| {
-                            console.update(cx, |console, cx| console.run_again(window, cx))
-                        }),
-                )
-                .into_any_element()
-        }
+        Some(notice) => v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap(theme::space_8())
+            .text_color(theme.muted_foreground)
+            .child(notice)
+            .child(run_again(console))
+            .into_any_element(),
+        None if active.is_empty() => div()
+            .debug_selector(|| "results-empty:Query returned no rows".into())
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(theme::ui_sm())
+            .text_color(theme.muted_foreground)
+            .child("Query returned no rows")
+            .into_any_element(),
         None => active.grid.clone().into_any_element(),
     };
     v_flex()
         .size_full()
         .child(strip)
         .child(div().flex_1().min_h_0().child(body))
+}
+
+fn run_again(console: &Entity<Console>) -> Button {
+    let console = console.clone();
+    Button::new("result-run-again")
+        .small()
+        .label("Run again")
+        .on_click(move |_, window, cx| {
+            console.update(cx, |console, cx| console.run_again(window, cx))
+        })
 }

@@ -124,12 +124,14 @@ impl Objects {
 
     fn loading(&self, cx: &App) -> Option<impl IntoElement + use<>> {
         (self.pending > 0).then(|| {
+            let text = format!("Loading {} schemas…", self.pending);
             div()
+                .debug_selector(|| format!("quick-open-state:{text}"))
                 .px(theme::space_8())
                 .py(theme::space_6())
                 .text_size(theme::ui_sm())
                 .text_color(cx.theme().muted_foreground)
-                .child(format!("Loading {} schemas…", self.pending))
+                .child(text.clone())
         })
     }
 }
@@ -238,6 +240,7 @@ impl ListDelegate for Objects {
         };
         let loading = self.loading(cx);
         gpui_kit::component::v_flex()
+            .debug_selector(|| format!("quick-open-state:{text}"))
             .size_full()
             .items_center()
             .justify_center()
