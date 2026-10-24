@@ -43,15 +43,13 @@ impl Shell {
         if let Some(notice) = notice {
             // Deferred: this runs while the window is being built, and notifications need its Root.
             cx.defer_in(window, move |_, window, cx| {
-                use gpui_kit::component::{WindowExt as _, notification::Notification};
-                window.push_notification(Notification::error(notice), cx);
+                crate::ui::toast::error(notice, window, cx);
             });
         }
     }
 
     /// Writes `config.toml` with the current theme, UI scale and console font size.
     pub(super) fn save_config(&self, window: &mut Window, cx: &mut App) {
-        use gpui_kit::component::{WindowExt as _, notification::Notification};
         let Some(root) = &self.config_root else {
             return;
         };
@@ -62,7 +60,7 @@ impl Shell {
         };
         if let Err(e) = persist::save_config(root, &config) {
             let message = format!("Couldn't save {}: {e}", root.join("config.toml").display());
-            window.push_notification(Notification::error(message), cx);
+            crate::ui::toast::error(message, window, cx);
         }
     }
 
@@ -110,14 +108,13 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use gpui_kit::component::{WindowExt as _, notification::Notification};
         let (themes, errors) = theme::load_user_themes(dir);
         // Only new problems: an unrelated edit shouldn't repeat every notification.
         for error in errors
             .iter()
             .filter(|e| !self.user_theme_errors.contains(e))
         {
-            window.push_notification(Notification::error(error.clone()), cx);
+            crate::ui::toast::error(error.clone(), window, cx);
         }
         self.user_theme_errors = errors;
         self.user_themes = themes;

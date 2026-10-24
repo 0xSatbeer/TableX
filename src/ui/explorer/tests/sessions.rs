@@ -177,7 +177,7 @@ fn a_session_an_old_load_opens_after_an_edit_is_never_reused(cx: &mut gpui_kit::
 }
 
 #[gpui_kit::test]
-fn a_load_that_finds_its_session_closed_drops_it_and_retry_reconnects(
+fn a_load_that_finds_its_session_closed_loses_the_connection_else_retry_reloads(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     use crate::db::fake::{close, session};
@@ -219,6 +219,19 @@ fn a_load_that_finds_its_session_closed_drops_it_and_retry_reconnects(
             Err("server closed the connection unexpectedly"),
         );
         cx.run_until_parked();
+        if closed {
+            assert_eq!(
+                status_of(&workspace, &cx),
+                ConnectionStatus::Disconnected,
+                "{label}: the connection is lost"
+            );
+            explorer.update(&mut cx, |e, cx| {
+                e.connect_connection(crate::model::ConnectionId(1), cx)
+            });
+            cx.run_until_parked();
+            assert_eq!(fake.pending(), retry[..1], "{label}: Connect");
+            continue;
+        }
         let error = "Could not load: server closed the connection unexpectedly";
         assert_eq!(under(&explorer, &cx, row), [error], "{label}: error row");
         assert_eq!(

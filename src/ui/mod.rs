@@ -16,4 +16,5 @@ pub mod statusbar;
 pub mod structure;
 pub mod table_editor;
 pub mod tabs;
+pub mod toast;
 pub mod workspace_dialog;

@@ -8,6 +8,7 @@ mod connection_test_outcome;
 mod delete_cleanup;
 mod delete_dialog;
 mod delete_selection;
+mod disconnect;
 mod edit_form;
 mod edit_sessions;
 mod focus;

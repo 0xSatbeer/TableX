@@ -3,9 +3,10 @@ use crate::db::fake::{self, Fake};
 use crate::model::{Column, ColumnMeta, QueryError, QueryErrorKind, QuerySource, ResultSet, Value};
 use std::sync::Arc;
 
-const PAGE_1: &str = r#"SELECT * FROM "public"."users" ORDER BY "id" LIMIT 500 OFFSET 0"#;
+pub(super) const PAGE_1: &str =
+    r#"SELECT * FROM "public"."users" ORDER BY "id" LIMIT 500 OFFSET 0"#;
 
-fn column(name: &str, is_pk: bool) -> Column {
+pub(super) fn column(name: &str, is_pk: bool) -> Column {
     Column {
         name: name.into(),
         data_type: "int4".into(),
@@ -17,7 +18,7 @@ fn column(name: &str, is_pk: bool) -> Column {
     }
 }
 
-fn rows(n: usize) -> ResultSet {
+pub(super) fn rows(n: usize) -> ResultSet {
     ResultSet {
         columns: vec![ColumnMeta {
             name: "id".into(),
@@ -30,7 +31,7 @@ fn rows(n: usize) -> ResultSet {
 
 /// A Normal-mode shell on the sample workspace, with `users` opened from the tree and its
 /// connect and columns calls answered, so the page-1 query is pending.
-fn open_users(
+pub(super) fn open_users(
     cx: &mut gpui_kit::TestAppContext,
 ) -> (
     Arc<Fake>,
@@ -86,7 +87,7 @@ fn open_users_with(
     (fake, window, shell)
 }
 
-fn grid_rows(
+pub(super) fn grid_rows(
     shell: &gpui_kit::Entity<crate::shell::Shell>,
     cx: &gpui_kit::VisualTestContext,
 ) -> usize {
@@ -98,7 +99,7 @@ fn grid_rows(
     })
 }
 
-fn answer(
+pub(super) fn answer(
     fake: &Fake,
     result: Result<ResultSet, QueryError>,
     cx: &mut gpui_kit::VisualTestContext,

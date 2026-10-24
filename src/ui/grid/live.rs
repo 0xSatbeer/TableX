@@ -56,6 +56,8 @@ pub(super) struct Live {
 enum LiveState {
     /// A restored production tab: nothing is read until Connect is clicked.
     Disconnected,
+    /// The connection was lost: nothing is read until Reconnect is clicked.
+    Lost,
     Loading,
     Failed(String),
     Ready,
@@ -174,6 +176,25 @@ impl Grid {
     pub fn set_disconnected(&mut self) {
         if let Some(live) = &mut self.live {
             live.state = LiveState::Disconnected;
+        }
+    }
+
+    /// Shows Disconnected · Reconnect over the rows, as every tab on a lost connection does.
+    pub fn set_lost(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = &mut self.live {
+            live.state = LiveState::Lost;
+            cx.notify();
+        }
+    }
+
+    /// Reads the page again if the tab shows its connection lost, now that it is back.
+    pub fn restored(&mut self, cx: &mut Context<Self>) {
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|l| matches!(l.state, LiveState::Lost))
+        {
+            self.load(cx);
         }
     }
 
@@ -296,6 +317,13 @@ impl Grid {
             live.before.is_some() || !live.where_.is_empty() || !live.order_by.is_empty();
         if let Some(before) = live.before.take() {
             (live.where_, live.order_by, live.offset, live.total) = before;
+        }
+        if error.kind == QueryErrorKind::Disconnected {
+            let id = live.table.connection;
+            let explorer = live.table.explorer.clone();
+            self.set_lost(cx);
+            _ = explorer.update(cx, |e, cx| e.lost(id, cx));
+            return;
         }
         if !filtered || error.kind != QueryErrorKind::Server {
             return self.failed(error.message, cx);
@@ -549,6 +577,19 @@ impl Grid {
                             Button::new("table-connect")
                                 .small()
                                 .label("Connect")
+                                .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
+                        ),
+                    )
+                    .into_any_element(),
+            ),
+            LiveState::Lost => Some(
+                overlay()
+                    .child("Disconnected")
+                    .child(
+                        div().debug_selector(|| "table-reconnect".into()).child(
+                            Button::new("table-reconnect")
+                                .small()
+                                .label("Reconnect")
                                 .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
                         ),
                     )

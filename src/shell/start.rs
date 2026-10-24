@@ -71,6 +71,18 @@ impl Shell {
             |this, _, ev: &explorer::ConnectionDeleted, cx| this.close_connection_tabs(ev.id, cx),
         )
         .detach();
+        cx.subscribe(&explorer, |this, _, ev: &explorer::ConnectionLost, cx| {
+            this.connection_lost(ev.id, cx)
+        })
+        .detach();
+        cx.subscribe_in(
+            &explorer,
+            window,
+            |this, _, ev: &explorer::ConnectionRestored, window, cx| {
+                this.connection_restored(ev.id, window, cx)
+            },
+        )
+        .detach();
         cx.subscribe_in(
             &explorer,
             window,
@@ -461,6 +473,16 @@ pub(super) fn console_tab(
                 .bottom_panel
                 .update(cx, |panel, cx| panel.show_run(!shown, cx)),
             console::ConsoleEvent::Moved => this.console_moved(&console, cx),
+            console::ConsoleEvent::Lost => {
+                let tab = this
+                    .tabs
+                    .tabs
+                    .iter()
+                    .find(|t| matches!(&t.content, TabContent::Console(c) if *c == console));
+                if let Some(id) = tab.and_then(|t| t.origin.as_ref()).map(|o| o.connection) {
+                    this.explorer.update(cx, |e, cx| e.lost(id, cx));
+                }
+            }
         }
     })
     .detach();

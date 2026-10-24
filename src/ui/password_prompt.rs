@@ -5,7 +5,6 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
-    notification::Notification,
     v_flex,
 };
 use gpui_kit::{
@@ -112,7 +111,7 @@ pub fn keychain_failed(error: &str, cx: &mut App) {
     cx.defer(move |cx| {
         if let Some(window) = cx.active_window() {
             let _ = window.update(cx, |_, window, cx| {
-                window.push_notification(Notification::error(notice), cx)
+                crate::ui::toast::error(notice, window, cx)
             });
         }
     });

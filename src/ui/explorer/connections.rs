@@ -46,6 +46,7 @@ impl Explorer {
                     Ok(session) => {
                         this.sessions.insert((id, params.database()), session);
                         this.set_status(id, ConnectionStatus::Connected, cx);
+                        cx.emit(ConnectionRestored { id });
                         this.load(key, all, cx);
                     }
                     Err(reason) => this.set_status(id, ConnectionStatus::Error(reason), cx),
@@ -213,6 +214,30 @@ impl Explorer {
         {
             self.connect(ci, all, cx);
         }
+    }
+
+    /// Connection `id`'s session is gone: marks it Disconnected, drops its sessions and loads, tells
+    /// the Shell (`ConnectionLost`) and shows one toast. Does nothing while it isn't connected.
+    pub fn lost(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        let workspace = self.workspace.read(cx);
+        let Some(conn) = workspace.connections.iter().find(|c| c.id == id) else {
+            return;
+        };
+        if conn.status != ConnectionStatus::Connected {
+            return;
+        }
+        let notice = format!("Lost connection to {}", conn.name);
+        self.next_gen(id);
+        self.sessions.retain(|(conn, _), _| *conn != id);
+        self.loads.retain(|k, _| !of_connection(k, id));
+        self.set_status(id, ConnectionStatus::Disconnected, cx);
+        self.refresh(cx);
+        cx.emit(ConnectionLost { id });
+        let window = self.window;
+        // Deferred: callers run inside entity or window updates.
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| toast::error(notice, window, cx));
+        });
     }
 
     /// Closes the sessions of every connection whose params changed or that was deleted, drops

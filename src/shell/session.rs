@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
 
 use crate::model::{DbKind, ObjectKind};
@@ -46,7 +45,7 @@ impl Shell {
         if let Some(notice) = notice {
             // Deferred: at startup this runs while the window is being built, and notifications need its Root.
             cx.defer_in(window, move |_, window, cx| {
-                window.push_notification(Notification::error(notice), cx);
+                crate::ui::toast::error(notice, window, cx);
             });
         }
         let layout = &mut self.layout;

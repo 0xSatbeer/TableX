@@ -23,6 +23,8 @@ pub enum Sub {
     Ddl,
 }
 
+const LOST: &str = "Disconnected";
+
 enum Load {
     NotLoaded,
     Loading,
@@ -95,6 +97,25 @@ impl Structure {
         }
         window.focus(&self.content_focus(cx), cx);
         cx.notify();
+    }
+
+    /// The connection was lost: what was read is dropped, and F5 reads it again.
+    pub fn lost(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.load, Load::NotLoaded) {
+            self.load = Load::Failed(LOST.into());
+            cx.notify();
+        }
+    }
+
+    /// Reads again what `lost` dropped, now that the connection is back.
+    pub fn restored(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(&self.load, Load::Failed(r) if r == LOST) {
+            self.load = Load::NotLoaded;
+            if self.sub != Sub::Data {
+                self.reload(window, cx);
+            }
+            cx.notify();
+        }
     }
 
     fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {

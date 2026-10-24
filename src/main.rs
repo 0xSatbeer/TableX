@@ -94,10 +94,7 @@ fn main() {
             let (window, _) = shell::open_shell(mode, options, themes, config.map(|c| c.root), cx)
                 .expect("open window");
             if let Some(notice) = notice {
-                use gpui_kit::component::{WindowExt as _, notification::Notification};
-                let _ = window.update(cx, |_, window, cx| {
-                    window.push_notification(Notification::error(notice), cx)
-                });
+                let _ = window.update(cx, |_, window, cx| ui::toast::error(notice, window, cx));
             }
             cx.activate(true);
         });

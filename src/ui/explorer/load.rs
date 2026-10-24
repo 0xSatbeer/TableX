@@ -133,10 +133,16 @@ impl Explorer {
                         }
                     }
                     Err(reason) => {
-                        // A session the server closed is dropped, so Retry opens a new one.
+                        // A session the server closed is dropped, so Retry opens a new one,
+                        // and its connection is lost unless it was already.
                         let at = (id, db);
                         if this.sessions.get(&at).is_some_and(Session::is_closed) {
                             this.sessions.remove(&at);
+                            // `lost` bumps the generation whenever it acts.
+                            this.lost(id, cx);
+                            if this.gens.get(&id) != Some(&generation) {
+                                return;
+                            }
                         }
                         // A connection whose databases can no longer be listed has failed as a whole.
                         if refreshing && segments.len() == 1 {

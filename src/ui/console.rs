@@ -67,6 +67,8 @@ pub enum ConsoleEvent {
     Finished,
     /// The database or schema changed, so the tab's origin and title follow `Console::tail`.
     Moved,
+    /// A statement found the session gone, so the connection is marked lost.
+    Lost,
 }
 
 pub struct Console {
@@ -694,6 +696,12 @@ impl Console {
         ok
     }
 
+    /// Drops the session, whose connection was lost; the next Run connects again.
+    pub fn lost(&mut self, cx: &mut Context<Self>) {
+        (self.session, self.in_transaction) = (None, false);
+        cx.notify();
+    }
+
     /// Reports a failed statement starting at `offset` in the editor text; the log status.
     fn failed(
         &mut self,
@@ -709,9 +717,10 @@ impl Console {
                 return QueryStatus::Cancelled;
             }
             QueryErrorKind::Disconnected => {
-                (self.session, self.in_transaction) = (None, false);
+                self.lost(cx);
                 self.messages
                     .push("Connection lost · Run again to reconnect".into());
+                cx.emit(ConsoleEvent::Lost);
             }
             QueryErrorKind::Server => {
                 let at = error.position.map(|p| offset + p);

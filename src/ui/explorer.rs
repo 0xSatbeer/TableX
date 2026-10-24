@@ -29,6 +29,7 @@ use crate::ui::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, S
 use crate::ui::object_dialog::{Apply, NameOwnerDialog, Owned, RoleDialog};
 use crate::ui::table_editor::TableEditor;
 use crate::ui::tabs::Origin;
+use crate::ui::toast;
 use crate::{assets, theme};
 
 mod connections;
@@ -166,6 +167,20 @@ pub struct ConnectionDeleted {
 }
 
 impl EventEmitter<ConnectionDeleted> for Explorer {}
+
+/// Emitted when connection `id`'s session was found gone, so the Shell can mark its tabs.
+pub struct ConnectionLost {
+    pub id: ConnectionId,
+}
+
+impl EventEmitter<ConnectionLost> for Explorer {}
+
+/// Emitted when connection `id` connected, so the Shell can re-read its lost tabs.
+pub struct ConnectionRestored {
+    pub id: ConnectionId,
+}
+
+impl EventEmitter<ConnectionRestored> for Explorer {}
 
 /// "Move to ▸ <workspace>" on connection `id`: the Shell moves it to workspace `to`.
 pub struct MoveConnection {

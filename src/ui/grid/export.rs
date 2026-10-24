@@ -371,5 +371,5 @@ fn toast(done: Result<(usize, PathBuf), String>, window: &mut Window, cx: &mut A
         Err(reason) if reason == "Cancelled" => return,
         Err(reason) => Notification::error(format!("Export failed: {reason}")),
     };
-    window.push_notification(note, cx);
+    crate::ui::toast::show(note, window, cx);
 }
