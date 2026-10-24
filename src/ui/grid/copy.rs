@@ -2,29 +2,22 @@
 
 use super::*;
 
-/// Spreadsheet-pasteable TSV. NULL copies as an empty field; fields with tabs, newlines or
-/// quotes are quoted with doubled quotes, which Sheets/Excel/LibreOffice all read back.
-pub(super) fn tsv(_: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
-    let mut out = String::new();
-    for row in rows {
-        let fields: Vec<String> = row
-            .iter()
-            .map(|v| match v {
-                Value::Null => String::new(),
-                v => {
-                    let s = v.to_string();
-                    if s.contains(['\t', '\n', '\r', '"']) {
-                        format!("\"{}\"", s.replace('"', "\"\""))
-                    } else {
-                        s
-                    }
-                }
-            })
-            .collect();
-        out.push_str(&fields.join("\t"));
-        out.push('\n');
+pub(super) use crate::export::sql_literal;
+use crate::export::{Format, Writer};
+
+/// `rows` as `format`, with its header unless `header` is false (TSV copies paste as bare cells).
+fn text(format: Format, header: bool, cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
+    let mut out = Writer::new(format, Vec::new(), cols.to_vec(), "table_name");
+    if header {
+        out.header().expect("writing to memory");
     }
-    out
+    out.rows(rows).expect("writing to memory");
+    String::from_utf8(out.finish().expect("writing to memory")).expect("values are UTF-8")
+}
+
+/// Spreadsheet-pasteable TSV without a header. NULL copies as an empty field.
+pub(super) fn tsv(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
+    text(Format::Tsv, false, cols, rows)
 }
 
 /// Source columns a copy of display positions `display` emits, in display order, hidden ones skipped.
@@ -105,107 +98,21 @@ pub(super) fn copy_in_list<R: AsRef<[Value]>>(
 }
 
 pub(super) fn csv(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
-    let field = |s: String| {
-        if s.contains([',', '\n', '\r', '"']) {
-            format!("\"{}\"", s.replace('"', "\"\""))
-        } else {
-            s
-        }
-    };
-    let header = cols.iter().map(|c| field(c.name.to_string()));
-    let mut out = header.collect::<Vec<_>>().join(",") + "\n";
-    for row in rows {
-        let line: Vec<String> = row
-            .iter()
-            .map(|v| {
-                if *v == Value::Null {
-                    String::new()
-                } else {
-                    field(v.to_string())
-                }
-            })
-            .collect();
-        out += &(line.join(",") + "\n");
-    }
-    out
-}
-
-pub(super) fn json_string(s: &str) -> String {
-    let mut out = String::from('"');
-    for c in s.chars() {
-        match c {
-            '"' => out += "\\\"",
-            '\\' => out += "\\\\",
-            '\n' => out += "\\n",
-            '\r' => out += "\\r",
-            '\t' => out += "\\t",
-            c if c.is_control() => out += &format!("\\u{:04x}", c as u32),
-            c => out.push(c),
-        }
-    }
-    out + "\""
-}
-
-pub(super) fn json_value(v: &Value) -> String {
-    match v {
-        Value::Null => "null".into(),
-        Value::Bool(_) | Value::Int(_) => v.to_string(),
-        Value::Float(x) if x.is_finite() => v.to_string(),
-        Value::Json(s) => s.to_string(),
-        v => json_string(&v.to_string()),
-    }
+    text(Format::Csv, true, cols, rows)
 }
 
 /// Array of objects keyed by column name.
 pub(super) fn json(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
-    let objects: Vec<String> = rows
-        .iter()
-        .map(|row| {
-            let fields: Vec<String> = cols
-                .iter()
-                .zip(row)
-                .map(|(c, v)| format!("{}: {}", json_string(&c.name), json_value(v)))
-                .collect();
-            format!("  {{{}}}", fields.join(", "))
-        })
-        .collect();
-    format!("[\n{}\n]\n", objects.join(",\n"))
+    text(Format::Json, true, cols, rows)
 }
 
 pub(super) fn markdown(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
-    let cell = |s: String| s.replace('|', "\\|").replace('\n', " ");
-    let line = |cells: Vec<String>| format!("| {} |\n", cells.join(" | "));
-    let mut out = line(cols.iter().map(|c| cell(c.name.to_string())).collect());
-    out += &line(cols.iter().map(|_| "---".to_string()).collect());
-    for row in rows {
-        out += &line(row.iter().map(|v| cell(v.to_string())).collect());
-    }
-    out
-}
-
-pub(super) fn sql_literal(v: &Value) -> String {
-    match v {
-        Value::Null => "NULL".into(),
-        Value::Bool(b) => (if *b { "TRUE" } else { "FALSE" }).into(),
-        Value::Int(_) => v.to_string(),
-        Value::Float(x) if x.is_finite() => v.to_string(),
-        v => format!("'{}'", v.to_string().replace('\'', "''")),
-    }
+    text(Format::Markdown, true, cols, rows)
 }
 
 // ponytail: the grid does not know its table name yet; QX-011 passes the real one
 pub(super) fn sql_insert(cols: &[ColumnMeta], rows: &[Vec<Value>]) -> String {
-    let names: Vec<&str> = cols.iter().map(|c| c.name.as_ref()).collect();
-    rows.iter()
-        .map(|row| {
-            let values: Vec<String> = row.iter().map(sql_literal).collect();
-            format!(
-                "INSERT INTO table_name ({}) VALUES ({});\n",
-                names.join(", "),
-                values.join(", ")
-            )
-        })
-        .collect()
+    text(Format::SqlInsert, true, cols, rows)
 }
 
 /// Values of the first selected column as `(a, b, c)`.

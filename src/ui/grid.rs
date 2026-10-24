@@ -29,6 +29,7 @@ use crate::{mock, theme};
 
 mod copy;
 mod edit;
+mod export;
 mod format;
 mod header;
 mod layout;
@@ -43,6 +44,7 @@ mod source;
 mod submit;
 mod toolbar;
 
+pub use self::export::Rerun;
 pub use self::live::{GridEvent, Table};
 pub use self::source::{BigEvents, GridSource};
 use self::{copy::*, format::*, layout::*, parse::*, selection::*, source::*};
@@ -119,6 +121,12 @@ pub struct Grid {
     drag_selecting: bool,
     /// A table tab's database reads; `None` for a result already in memory.
     live: Option<live::Live>,
+    /// A console result's statement, for Export's All rows.
+    pub rerun: Option<Rerun>,
+    /// The Export dialog's last picks, and the All rows export underway.
+    export_format: crate::export::Format,
+    export_all: bool,
+    exporting: Option<export::Exporting>,
 }
 
 /// An open cell editor: the display cell it sits on and every cell its value goes to.
@@ -187,6 +195,10 @@ impl Grid {
             before_click: None,
             drag_selecting: false,
             live: None,
+            rerun: None,
+            export_format: crate::export::Format::Csv,
+            export_all: false,
+            exporting: None,
         };
         // Open fitted to the first rows, so timestamps and UUIDs don't arrive clipped.
         for c in 0..n {

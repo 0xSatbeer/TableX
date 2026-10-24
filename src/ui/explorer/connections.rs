@@ -160,18 +160,11 @@ impl Explorer {
         if let Some(session) = self.sessions.get(&at).filter(|s| !s.is_closed()) {
             return Box::pin(futures::future::ready(Ok(session.clone())));
         }
-        let Some(conn) = self
-            .workspace
-            .read(cx)
-            .connections
-            .iter()
-            .find(|c| c.id == id)
-        else {
-            return Box::pin(futures::future::ready(Err(
-                "The connection was deleted".into()
-            )));
+        let params = match self.params_on(id, db, cx) {
+            Ok(params) => params,
+            Err(reason) => return Box::pin(futures::future::ready(Err(reason))),
         };
-        let reply = self.driver.connect(&on_database(&conn.params, db)).shared();
+        let reply = self.driver.connect(&params).shared();
         let generation = *self.gens.entry(id).or_default();
         let keep = reply.clone();
         cx.spawn(async move |this, cx| {
@@ -188,6 +181,21 @@ impl Explorer {
         })
         .detach();
         reply.boxed()
+    }
+
+    /// A new session on connection `id`'s database `db`, kept by nobody: the caller owns it.
+    pub fn fresh_session(&self, id: ConnectionId, db: &str, cx: &App) -> Reply<Session> {
+        match self.params_on(id, db, cx) {
+            Ok(params) => self.driver.connect(&params),
+            Err(reason) => Box::pin(futures::future::ready(Err(reason))),
+        }
+    }
+
+    fn params_on(&self, id: ConnectionId, db: &str, cx: &App) -> Result<ConnectionParams, String> {
+        let workspace = self.workspace.read(cx);
+        let conn = workspace.connections.iter().find(|c| c.id == id);
+        let conn = conn.ok_or("The connection was deleted")?;
+        Ok(on_database(&conn.params, db))
     }
 
     /// Connects connection `id` as Retry on its error row does (Connect or Retry in the status bar).

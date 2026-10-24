@@ -13,6 +13,7 @@ mod cell_edit;
 mod columns;
 mod copy;
 mod editor;
+mod export;
 mod format;
 mod header;
 mod live_pages;

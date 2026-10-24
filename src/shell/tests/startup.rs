@@ -108,6 +108,8 @@ fn a_normal_start_reads_connections_through_the_real_driver_not_the_samples(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     use crate::model::ConnectionStatus;
+    // The real driver wakes the test's tasks from its own threads.
+    cx.executor().allow_parking();
     let (window, shell) = open_started(cx, crate::shell::Mode::Normal);
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
     let (workspace, explorer) = shell.read_with(&cx, |this, _| {

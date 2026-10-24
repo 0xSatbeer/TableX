@@ -72,8 +72,20 @@ pub(crate) fn page_sql(
     name: &str,
     key: &[String],
     rowid: bool,
-    (where_, order_by): (&str, &str),
+    filter: (&str, &str),
     offset: usize,
+) -> String {
+    let select = select_sql(schema, name, key, rowid, filter);
+    format!("{select} LIMIT {TABLE_PAGE} OFFSET {offset}")
+}
+
+/// Every row of the table through the filter, ordered as its pages are.
+pub(crate) fn select_sql(
+    schema: &str,
+    name: &str,
+    key: &[String],
+    rowid: bool,
+    (where_, order_by): (&str, &str),
 ) -> String {
     let select = if rowid { "rowid, *" } else { "*" };
     let order = if !order_by.is_empty() {
@@ -85,7 +97,7 @@ pub(crate) fn page_sql(
         format!(" ORDER BY {}", cols.join(", "))
     };
     format!(
-        "SELECT {select} FROM {}.{}{}{order} LIMIT {TABLE_PAGE} OFFSET {offset}",
+        "SELECT {select} FROM {}.{}{}{order}",
         ident(schema),
         ident(name),
         where_clause(where_)

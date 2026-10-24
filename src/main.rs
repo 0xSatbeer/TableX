@@ -2,6 +2,7 @@ mod assets;
 mod complete;
 mod db;
 mod ddl;
+mod export;
 mod fuzzy;
 mod keymap;
 mod mock;

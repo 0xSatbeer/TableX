@@ -18,7 +18,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::db::{Driver, Opened, Session};
+use crate::db::{Driver, Opened, Reply, Session};
 use crate::model::{
     ColumnMeta, ConnectionId, ConnectionParams, QueryError, QueryErrorKind, QueryLogEntry,
     QuerySource, QueryStatus, ResultSet, Row, Workspace,
@@ -111,13 +111,15 @@ pub struct Paged {
     /// Every row has been read.
     done: bool,
     fetching: bool,
+    /// The statement, for the grid's Export All rows.
+    rerun: Option<grid::Rerun>,
 }
 
 impl Paged {
-    fn new(rs: ResultSet, cx: &mut App) -> Self {
+    fn new(rs: ResultSet, rerun: Option<grid::Rerun>, cx: &mut App) -> Self {
         let done = rs.rows.len() < PAGE;
         Self {
-            grid: cx.new(|cx| grid::Grid::new(Rc::new(rs.clone()), cx)),
+            grid: grid(rs.clone(), rerun.clone(), cx),
             columns: rs.columns,
             rows: rs.rows,
             dropped: 0,
@@ -125,6 +127,7 @@ impl Paged {
             open: !done,
             done,
             fetching: false,
+            rerun,
         }
     }
 
@@ -179,7 +182,7 @@ impl Paged {
             columns: self.columns.clone(),
             rows: self.rows[start..end].to_vec(),
         };
-        self.grid = cx.new(|cx| grid::Grid::new(Rc::new(rs), cx));
+        self.grid = grid(rs, self.rerun.clone(), cx);
     }
 
     /// Appends a fetch's rows, moving to them, and drops whole pages from the front past `CAP`.
@@ -613,6 +616,22 @@ impl Console {
         }));
     }
 
+    /// Runs `sql` again on a new session set up like this console's, for Export All rows.
+    fn export_source(&self, sql: String, cx: &App) -> Option<grid::Rerun> {
+        let params = self.params(cx)?;
+        let (driver, schema) = (self.target.driver.clone(), self.target.schema.clone());
+        let on = driver.clone();
+        let connect = move || -> Reply<Session> {
+            let (driver, params, schema) = (on.clone(), params.clone(), schema.clone());
+            Box::pin(async move { connect(&*driver, &params, schema).await })
+        };
+        Some(grid::Rerun {
+            driver,
+            sql,
+            connect: Rc::new(connect),
+        })
+    }
+
     fn params(&self, cx: &App) -> Option<ConnectionParams> {
         let id = self.target.connection?;
         let workspace = self.target.workspace.read(cx);
@@ -650,7 +669,8 @@ impl Console {
         let (rows, status) = match step.result {
             Ok(Ran::Rows(rs)) => {
                 let n = rs.rows.len() as u64;
-                self.results.push(Paged::new(rs, cx));
+                let rerun = self.export_source(step.sql.clone(), cx);
+                self.results.push(Paged::new(rs, rerun, cx));
                 (Some(n), QueryStatus::Ok)
             }
             Ok(Ran::Affected(n)) => {
@@ -814,6 +834,14 @@ impl Console {
         })
         .detach();
     }
+}
+
+fn grid(rs: ResultSet, rerun: Option<grid::Rerun>, cx: &mut App) -> Entity<grid::Grid> {
+    cx.new(|cx| {
+        let mut grid = grid::Grid::new(Rc::new(rs), cx);
+        grid.rerun = rerun;
+        grid
+    })
 }
 
 /// A session on `params`, its `search_path` set to `schema` when there is one.

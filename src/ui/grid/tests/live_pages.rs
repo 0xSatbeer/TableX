@@ -1,6 +1,6 @@
 //! The SQL a table tab reads its pages and count with.
 
-use super::super::live::{count_sql, page_sql};
+use super::super::live::{count_sql, page_sql, select_sql};
 
 #[test]
 fn pages_order_by_the_primary_key_and_quote_names() {
@@ -58,4 +58,25 @@ fn a_filter_is_inserted_raw_and_its_order_replaces_the_key() {
         count_sql("public", "users", "a = 1"),
         r#"SELECT COUNT(*) FROM "public"."users" WHERE (a = 1)"#
     );
+}
+
+#[test]
+fn all_rows_reads_the_filtered_ordered_table_without_a_limit() {
+    // (key, filter, sql)
+    let cases = [
+        (
+            vec!["id".to_string()],
+            ("a = 1", ""),
+            r#"SELECT * FROM "public"."users" WHERE (a = 1) ORDER BY "id""#,
+        ),
+        (
+            vec!["id".to_string()],
+            ("a = 1", "email DESC"),
+            r#"SELECT * FROM "public"."users" WHERE (a = 1) ORDER BY email DESC"#,
+        ),
+        (vec![], ("", ""), r#"SELECT * FROM "public"."users""#),
+    ];
+    for (key, filter, want) in cases {
+        assert_eq!(select_sql("public", "users", &key, false, filter), want);
+    }
 }

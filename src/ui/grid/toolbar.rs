@@ -186,6 +186,7 @@ impl Grid {
                     .child(note)
             }))
             .child(div().flex_1())
+            .child(self.render_export(cx))
             .child(
                 Button::new("grid-copy-format")
                     .ghost()
