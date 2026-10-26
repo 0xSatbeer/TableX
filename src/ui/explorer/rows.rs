@@ -257,8 +257,10 @@ impl Explorer {
                     let (explorer, targets) = (explorer.clone(), targets.clone());
                     row
                     .context_menu(move |menu, window, cx| {
+                        // Groups: create, open, copy, change, refresh, then destructive last; separator() skips empty groups.
+                        let menu = menu.min_w(theme::menu());
                         let menu = if new {
-                            menu.submenu("+ New", window, cx, |menu, _, _| {
+                            menu.submenu("New", window, cx, |menu, _, _| {
                                 menu.menu_element(Box::new(crate::NewTable), |_, _| div().debug_selector(|| "menu-new-table".into()).child("Table"))
                                     .menu_element(Box::new(crate::NewDatabase), |_, _| div().debug_selector(|| "menu-new-database".into()).child("Database"))
                                     .menu_element(Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
@@ -267,6 +269,7 @@ impl Explorer {
                         } else {
                             menu
                         };
+                        let menu = menu.separator();
                         let menu = if console {
                             menu.menu_element(Box::new(crate::OpenConsole), |_, _| div().debug_selector(|| "menu-open-console".into()).child("Open console"))
                                 .menu_element(Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console"))
@@ -277,25 +280,29 @@ impl Explorer {
                             Some((opens, _)) => menu
                                 .when(opens, |m| m.menu_element(Box::new(crate::OpenSelected), |_, _| div().debug_selector(|| "menu-open".into()).child("Open")))
                                 .menu_element(Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console here"))
+                                .when(opens, |m| m.menu_element(Box::new(crate::ShowDdl), |_, _| div().debug_selector(|| "menu-show-ddl".into()).child("Show DDL")))
+                                .separator()
                                 .menu_element(Box::new(crate::CopyName), |_, _| div().debug_selector(|| "menu-copy-name".into()).child("Copy name"))
-                                .menu_element(Box::new(crate::CopyQualifiedName), |_, _| div().debug_selector(|| "menu-copy-qualified".into()).child("Copy qualified name"))
-                                .when(opens, |m| m.menu_element(Box::new(crate::ShowDdl), |_, _| div().debug_selector(|| "menu-show-ddl".into()).child("Show DDL"))),
+                                .menu_element(Box::new(crate::CopyQualifiedName), |_, _| div().debug_selector(|| "menu-copy-qualified".into()).child("Copy qualified name")),
                             None => menu,
                         };
+                        let menu = menu.separator();
                         let menu = match kind {
                             Menu::Connection => {
                                 let menu = menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…"));
-                                let menu = if targets.is_empty() { menu } else { move_to_menu(menu, &explorer, &targets, window, cx) };
-                                menu.menu_element(Box::new(crate::DeleteConnection), |_, cx| {
-                                    div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete")
-                                })
+                                if targets.is_empty() { menu } else { move_to_menu(menu, &explorer, &targets, window, cx) }
                             }
                             Menu::Modify => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
                             Menu::Refresh => menu,
                         };
                         menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
+                            .when(matches!(kind, Menu::Connection), |m| {
+                                m.separator().menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                                    div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete…")
+                                })
+                            })
                             .when(object.is_some_and(|(_, drop)| drop), |m| {
-                                m.menu_element(Box::new(crate::DropObject), |_, cx| {
+                                m.separator().menu_element(Box::new(crate::DropObject), |_, cx| {
                                     div().debug_selector(|| "menu-drop".into()).text_color(cx.theme().danger).child("Drop…")
                                 })
                             })

@@ -102,7 +102,10 @@ impl Grid {
             } else {
                 pending("grid-refresh", IconName::RefreshCw, "Refresh")
             })
-            .child(pending("grid-stop", IconName::Square, "Stop query"))
+            // A live grid has no stop yet; showing a dead button there would claim it needs a connection.
+            .when(!self.is_live(), |d| {
+                d.child(pending("grid-stop", IconName::Square, "Stop query"))
+            })
             .child(divider())
             .children(if self.is_live() {
                 let read_only = self.read_only().is_some();

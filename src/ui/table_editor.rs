@@ -379,7 +379,7 @@ impl TableEditor {
     fn remove_index(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(form) = &mut self.form else { return };
         match ix.checked_sub(form.indexes.len()) {
-            Some(n) => _ = form.unique_keys.remove(form.listed_uniques()[n]),
+            Some(n) => _ = form.unique_keys.remove(n),
             None => {
                 form.indexes.remove(ix);
                 self.indexes.remove(ix);
@@ -471,7 +471,7 @@ impl TableEditor {
     }
 
     fn len(&self, list: usize) -> usize {
-        let constraints = self.form.as_ref().map_or(0, |f| f.listed_uniques().len());
+        let constraints = self.form.as_ref().map_or(0, |f| f.unique_keys.len());
         [
             self.rows.len(),
             self.indexes.len() + constraints,
@@ -800,12 +800,9 @@ impl TableEditor {
         let Some(form) = &self.form else {
             return div().into_any_element();
         };
-        let uniques = form.unique_indexes();
-        let constraints: Vec<_> = form
-            .listed_uniques()
-            .into_iter()
-            .map(|n| &uniques[n])
-            .collect();
+        // Every UNIQUE constraint, single-column ones too, so the list matches the Structure view.
+        let constraints = form.unique_indexes();
+        let constraints: Vec<_> = constraints.iter().collect();
         let pad = lines::pad(
             form.indexes
                 .iter()
@@ -909,7 +906,7 @@ impl TableEditor {
                 "tab-indexes",
                 format!(
                     "Indexes{}",
-                    count(form.map(|f| f.indexes.len() + f.listed_uniques().len()))
+                    count(form.map(|f| f.indexes.len() + f.unique_keys.len()))
                 ),
             ),
             (

@@ -307,8 +307,23 @@ impl Render for Grid {
                         .children(self.render_live_state(cx))
                         .context_menu({
                             let focus = self.focus.clone();
+                            let grid = cx.entity().downgrade();
                             move |menu, _, _| {
+                                let grid = grid.clone();
                                 menu.action_context(focus.clone())
+                                    .min_w(theme::menu())
+                                    // The everyday copy first, in the format Ctrl+C uses.
+                                    .item(PopupMenuItem::new("Copy (Ctrl+C)").on_click(
+                                        move |_, _, cx| {
+                                            _ = grid.update(cx, |this, cx| {
+                                                this.copy_as(
+                                                    if this.copy_csv { csv } else { tsv },
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ))
+                                    .separator()
                                     .label("Copy as")
                                     .menu("CSV", Box::new(CopyCsv))
                                     .menu("JSON", Box::new(CopyJson))

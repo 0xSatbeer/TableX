@@ -433,6 +433,24 @@ fn a_multi_column_unique_constraint_is_listed_after_the_indexes_and_removable(
 }
 
 #[gpui_kit::test]
+fn a_single_column_unique_constraint_is_listed_too_as_the_structure_view_lists_it(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (mut cx, editor, _) = open_editor_with(cx, |def| {
+        def.unique_keys.push(unique_key("t_b_key", &["b"]));
+    });
+    click(&mut cx, "tab-indexes");
+    assert!(cx.debug_bounds("index-1").is_some(), "listed after t_a_idx");
+    let unique = |cx: &mut gpui_kit::VisualTestContext| {
+        editor.read_with(cx, |e, _| e.form.as_ref().expect("loaded").is_unique(2))
+    };
+    assert!(unique(&mut cx), "b starts unique");
+    click(&mut cx, "index-1");
+    click(&mut cx, "index-remove");
+    assert!(!unique(&mut cx), "the column's Unique box follows");
+}
+
+#[gpui_kit::test]
 fn renaming_a_column_through_another_ones_name_leaves_that_ones_key_alone(
     cx: &mut gpui_kit::TestAppContext,
 ) {

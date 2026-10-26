@@ -511,18 +511,22 @@ impl Grid {
                 ))
                 .child(div().px(theme::space_4()).child(range))
                 .when(len > 0, |d| {
+                    let known = live.total.is_some();
                     d.child(
                         div()
                             .debug_selector(|| format!("grid-count:{count}"))
-                            .child(
-                                Button::new("grid-count")
-                                    .ghost()
-                                    .small()
-                                    .label(count.clone())
-                                    .tooltip("Count rows")
-                                    .disabled(live.total.is_some())
-                                    .on_click(cx.listener(|this, _, _, cx| this.count(cx))),
-                            ),
+                            // A known total is plain text: a disabled button reads as broken.
+                            .when(known, |d| d.child(count.clone()))
+                            .when(!known, |d| {
+                                d.child(
+                                    Button::new("grid-count")
+                                        .ghost()
+                                        .small()
+                                        .label(count.clone())
+                                        .tooltip("Count rows")
+                                        .on_click(cx.listener(|this, _, _, cx| this.count(cx))),
+                                )
+                            }),
                     )
                 })
                 .child(div().debug_selector(|| "grid-next".into()).child(button(

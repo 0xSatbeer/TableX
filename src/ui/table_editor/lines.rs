@@ -92,7 +92,7 @@ pub fn index_line(i: &Index, pad: usize) -> (String, Spans) {
         .done()
 }
 
-/// `t_ab_key  unique (a, b) -- constraint`: a multi-column UNIQUE constraint.
+/// `t_ab_key  unique (a, b) -- constraint`: a UNIQUE constraint.
 pub fn constraint_line(u: &Index, pad: usize) -> (String, Spans) {
     let (mut text, mut spans) = index_line(u, pad);
     let start = text.len();

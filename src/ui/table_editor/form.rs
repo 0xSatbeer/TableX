@@ -187,13 +187,6 @@ impl TableForm {
             .collect()
     }
 
-    /// The positions in `unique_keys` of the multi-column constraints, listed on the Indexes tab.
-    pub fn listed_uniques(&self) -> Vec<usize> {
-        (0..self.unique_keys.len())
-            .filter(|&i| self.unique_keys[i].1.len() > 1)
-            .collect()
-    }
-
     /// Why Apply has nothing to run yet: a required field is blank.
     pub fn blocker(&self) -> Option<&'static str> {
         if self.name.is_empty() {

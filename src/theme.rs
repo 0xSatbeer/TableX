@@ -55,6 +55,9 @@ const TAB: Pixels = px(34.);
 const STRIPE: Pixels = px(2.);
 const TITLEBAR: Pixels = px(38.);
 const STATUS_BAR: Pixels = px(24.);
+/// Context menu min widths: about 1.2x their widest label plus shortcut, so items don't crowd.
+const MENU: Pixels = px(272.);
+const MENU_SM: Pixels = px(192.);
 
 // Every token is read through its function, which applies the UI scale.
 macro_rules! scaled_tokens {
@@ -70,6 +73,7 @@ scaled_tokens! {
     RADIUS_SM => radius_sm, RADIUS_MD => radius_md, RADIUS_LG => radius_lg,
     TREE_ROW => tree_row, LIST_ROW => list_row, BADGE_LINE => badge_line, GRID_ROW => grid_row,
     TAB => tab, STRIPE => stripe, TITLEBAR => titlebar, STATUS_BAR => status_bar,
+    MENU => menu, MENU_SM => menu_sm,
 }
 
 /// The settings menu's UI scale choices, in percent.

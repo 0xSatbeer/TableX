@@ -1,4 +1,4 @@
-use super::{Structure, Table};
+use super::{Structure, Sub, Table};
 use crate::db::fake::{self, Fake};
 use crate::model::{Column, ForeignKey, Index, TableDef, Trigger};
 use gpui_kit::Entity;
@@ -52,6 +52,12 @@ fn open(
     let vcx = VisualTestContext::from_window(window, cx);
     vcx.run_until_parked();
     (fake, vcx, structure.clone(), kept.expect("explorer"))
+}
+
+/// What picking `sub` in the tab's context menu does.
+fn show(cx: &mut VisualTestContext, structure: &Entity<Structure>, sub: Sub) {
+    cx.update(|window, cx| structure.update(cx, |s, cx| s.show(sub, window, cx)));
+    cx.run_until_parked();
 }
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
@@ -108,12 +114,12 @@ fn audit() -> Trigger {
 
 #[gpui_kit::test]
 fn structure_loads_on_first_show_and_lists_everything(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, _, _explorer) = open(false, cx);
+    let (fake, mut cx, structure, _explorer) = open(false, cx);
     assert!(
         fake.pending().is_empty(),
         "nothing read before the sub-tab is shown"
     );
-    click(&mut cx, "subtab-Structure");
+    show(&mut cx, &structure, Sub::Structure);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();
     fake.resolve("table_def app_db/public/users", Ok(users()));
@@ -134,7 +140,7 @@ fn structure_loads_on_first_show_and_lists_everything(cx: &mut gpui_kit::TestApp
 #[gpui_kit::test]
 fn empty_sections_say_so_and_ddl_reuses_the_load(cx: &mut gpui_kit::TestAppContext) {
     let (fake, mut cx, structure, _explorer) = open(false, cx);
-    click(&mut cx, "subtab-Structure");
+    show(&mut cx, &structure, Sub::Structure);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();
     let bare = TableDef {
@@ -152,7 +158,7 @@ fn empty_sections_say_so_and_ddl_reuses_the_load(cx: &mut gpui_kit::TestAppConte
     ] {
         assert!(cx.debug_bounds(selector).is_some(), "{selector} drawn");
     }
-    click(&mut cx, "subtab-DDL");
+    show(&mut cx, &structure, Sub::Ddl);
     assert!(
         fake.pending().is_empty(),
         "the DDL reuses the loaded definition"
@@ -163,8 +169,8 @@ fn empty_sections_say_so_and_ddl_reuses_the_load(cx: &mut gpui_kit::TestAppConte
 
 #[gpui_kit::test]
 fn f5_on_the_sub_tab_reads_again(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, _, _explorer) = open(false, cx);
-    click(&mut cx, "subtab-DDL");
+    let (fake, mut cx, structure, _explorer) = open(false, cx);
+    show(&mut cx, &structure, Sub::Ddl);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();
     fake.resolve("table_def app_db/public/users", Ok(users()));
@@ -181,11 +187,11 @@ fn f5_on_the_sub_tab_reads_again(cx: &mut gpui_kit::TestAppContext) {
 #[gpui_kit::test]
 fn a_view_shows_its_definition(cx: &mut gpui_kit::TestAppContext) {
     let (fake, mut cx, structure, _explorer) = open(true, cx);
-    assert!(
-        cx.debug_bounds("subtab-Structure").is_none(),
-        "views have no Structure"
-    );
-    click(&mut cx, "subtab-Definition");
+    let names = structure.read_with(&cx, |s, _| {
+        s.subs().iter().map(|&(_, n)| n).collect::<Vec<_>>()
+    });
+    assert_eq!(names, ["Data", "Definition"], "views have no Structure");
+    show(&mut cx, &structure, Sub::Ddl);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();
     fake.resolve(
@@ -202,8 +208,8 @@ fn a_view_shows_its_definition(cx: &mut gpui_kit::TestAppContext) {
 
 #[gpui_kit::test]
 fn ddl_says_loading_then_the_error_and_retry_reads_it_again(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, _, _explorer) = open(false, cx);
-    click(&mut cx, "subtab-DDL");
+    let (fake, mut cx, structure, _explorer) = open(false, cx);
+    show(&mut cx, &structure, Sub::Ddl);
     assert!(cx.debug_bounds("structure-state:Loading…").is_some());
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();

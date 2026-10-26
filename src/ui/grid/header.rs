@@ -222,6 +222,7 @@ impl Grid {
                                         let focus = self.focus.clone();
                                         move |menu, _, _| {
                                             menu.action_context(focus.clone())
+                                                .min_w(theme::menu_sm())
                                                 .menu("Hide column", Box::new(HideColumn))
                                                 .menu("Show all columns", Box::new(ShowAllColumns))
                                         }

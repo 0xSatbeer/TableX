@@ -1,5 +1,5 @@
-//! A table tab's Data | Structure | DDL sub-tabs (Data | Definition on a view). Structure and
-//! DDL read the table's definition the first time either is shown; F5 on them reads it again.
+//! A table tab's Data | Structure | DDL sub-tabs (Data | Definition on a view), switched from the
+//! tab's context menu. Structure and DDL read the table's definition the first time either is shown; F5 on them reads it again.
 
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
@@ -78,7 +78,8 @@ impl Structure {
             .map_or(String::new(), |e| e.read(cx).value().to_string())
     }
 
-    fn subs(&self) -> &'static [(Sub, &'static str)] {
+    /// The sub-tabs and their names, which the tab's context menu offers.
+    pub fn subs(&self) -> &'static [(Sub, &'static str)] {
         if self.table.view {
             &[(Sub::Data, "Data"), (Sub::Ddl, "Definition")]
         } else {
@@ -164,49 +165,6 @@ impl Structure {
         })
         .detach();
         cx.notify();
-    }
-
-    fn strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        h_flex()
-            .flex_none()
-            .h(theme::tab())
-            .px(theme::space_8())
-            .gap(theme::space_12())
-            .border_b_1()
-            .border_color(theme.border)
-            .text_size(theme::ui_sm())
-            .children(self.subs().iter().map(|&(sub, label)| {
-                let active = sub == self.sub;
-                div()
-                    .id(label)
-                    .debug_selector(move || format!("subtab-{label}"))
-                    .relative()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .px(theme::space_4())
-                    .cursor_pointer()
-                    .text_color(if active {
-                        theme.foreground
-                    } else {
-                        theme::text_secondary(theme)
-                    })
-                    .hover(|d| d.text_color(theme.foreground))
-                    .child(label)
-                    .when(active, |d| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .bottom_0()
-                                .left_0()
-                                .right_0()
-                                .h(theme::stripe())
-                                .bg(theme.primary),
-                        )
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| this.show(sub, window, cx)))
-            }))
     }
 
     fn body(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -400,7 +358,6 @@ impl Render for Structure {
                     cx.stop_propagation();
                 }
             }))
-            .child(self.strip(cx))
             .child(div().flex_1().min_h_0().child(self.body(cx)))
     }
 }

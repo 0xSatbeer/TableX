@@ -1,5 +1,6 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, menu::ContextMenuExt as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _, h_flex,
+    menu::{ContextMenuExt as _, PopupMenuItem},
     tooltip::Tooltip,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -29,6 +30,10 @@ impl Shell {
         let group: SharedString = format!("tab-{ix}").into();
         let pinned = t.pinned;
         let production = t.origin.as_ref().is_some_and(|o| o.production);
+        let structure = match &t.content {
+            TabContent::Grid(_, Some(s)) => Some(s.clone()),
+            _ => None,
+        };
         h_flex()
             .id(("tab", ix))
             .group(group.clone())
@@ -115,8 +120,28 @@ impl Shell {
                     this.tab_changed(cx);
                 }),
             )
-            .context_menu(move |menu, _, _| {
-                menu.menu("Close", Box::new(CloseTab))
+            .context_menu(move |menu, _, cx| {
+                // A table tab switches between its sub-tabs here.
+                let menu = match &structure {
+                    Some(s) => {
+                        let shown = s.read(cx).sub;
+                        s.read(cx)
+                            .subs()
+                            .iter()
+                            .fold(menu.label("Show"), |menu, &(sub, name)| {
+                                let s = s.clone();
+                                menu.item(PopupMenuItem::new(name).checked(sub == shown).on_click(
+                                    move |_, window, cx| {
+                                        s.update(cx, |s, cx| s.show(sub, window, cx))
+                                    },
+                                ))
+                            })
+                            .separator()
+                    }
+                    None => menu,
+                };
+                menu.min_w(theme::menu_sm())
+                    .menu("Close", Box::new(CloseTab))
                     .menu("Close others", Box::new(CloseOtherTabs))
                     .menu("Close to the right", Box::new(CloseTabsToRight))
                     .menu("Close all", Box::new(CloseAllTabs))
