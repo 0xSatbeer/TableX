@@ -12,6 +12,7 @@ mod disconnect;
 mod edit_form;
 mod edit_sessions;
 mod focus;
+mod gallery;
 mod keymap;
 mod layout;
 mod maximize;

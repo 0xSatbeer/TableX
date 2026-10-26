@@ -5,7 +5,7 @@ use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, h_flex};
 use gpui_kit::*;
 
-use crate::keymap::{Binding, Bindings, NAMES};
+use crate::keymap::{self, Binding, Bindings};
 use crate::theme;
 
 /// Section order on the sheet.
@@ -29,10 +29,9 @@ pub struct Row {
     keys: String,
 }
 
-/// One row per named action, with its keystrokes from `bound`.
-pub fn rows(bound: &[Binding]) -> Vec<Row> {
-    NAMES
-        .iter()
+/// One row per named action (demo-only ones only when `demo`), with its keystrokes from `bound`.
+pub fn rows(bound: &[Binding], demo: bool) -> Vec<Row> {
+    keymap::names(demo)
         .map(|&(action, name, area)| {
             let keys: Vec<_> = bound
                 .iter()
@@ -81,7 +80,7 @@ impl Sheet {
     }
 
     /// The bindings in effect, and `keymap.toml` under the resolved config dir.
-    pub fn current(cx: &App) -> Self {
+    pub fn current(demo: bool, cx: &App) -> Self {
         let bound = cx
             .try_global::<Bindings>()
             .map(|b| b.0.as_slice())
@@ -90,7 +89,7 @@ impl Sheet {
             || "~/.config/queryx/keymap.toml".into(),
             |c| c.root.join("keymap.toml").display().to_string(),
         );
-        Self::new(rows(bound), path)
+        Self::new(rows(bound, demo), path)
     }
 
     fn filter(&mut self, query: &str) {

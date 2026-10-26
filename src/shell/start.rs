@@ -234,6 +234,7 @@ impl Shell {
             Vec::new()
         };
         let mut this = Self {
+            mode,
             overflow_open: false,
             overflow_search,
             workspace: workspace.clone(),

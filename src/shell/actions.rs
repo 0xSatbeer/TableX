@@ -13,7 +13,7 @@ use crate::{
     RestorePanel, RevealTab, ToggleBottomPanel, ToggleExplorer, ToggleGallery, TogglePinTab,
 };
 
-use super::Shell;
+use super::{Mode, Shell};
 
 /// Registers every shell action on the window's root element.
 pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
@@ -133,6 +133,9 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &ToggleGallery, _, cx| {
+        if this.mode != Mode::Demo {
+            return;
+        }
         this.gallery_visible = !this.gallery_visible;
         cx.notify();
     }))
@@ -156,8 +159,14 @@ impl Shell {
             return;
         }
         let previous = window.focused(cx);
-        let list =
-            cx.new(|cx| ListState::new(palette::Commands::new(cx), window, cx).searchable(true));
+        let list = cx.new(|cx| {
+            ListState::new(
+                palette::Commands::new(self.mode == Mode::Demo, cx),
+                window,
+                cx,
+            )
+            .searchable(true)
+        });
         let events = cx.subscribe_in(
             &list,
             window,
@@ -210,8 +219,14 @@ impl Shell {
             return;
         }
         let previous = window.focused(cx);
-        let list = cx
-            .new(|cx| ListState::new(cheat_sheet::Sheet::current(cx), window, cx).searchable(true));
+        let list = cx.new(|cx| {
+            ListState::new(
+                cheat_sheet::Sheet::current(self.mode == Mode::Demo, cx),
+                window,
+                cx,
+            )
+            .searchable(true)
+        });
         let events = cx.subscribe_in(&list, window, |this, _, event: &ListEvent, window, cx| {
             if let ListEvent::Cancel = event {
                 this.close_cheat_sheet(window, cx);

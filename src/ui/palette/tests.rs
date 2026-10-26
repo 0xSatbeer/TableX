@@ -49,6 +49,20 @@ fn every_app_action_has_a_palette_name(cx: &mut gpui_kit::TestAppContext) {
     assert!(missing.is_empty(), "{missing:?}");
 }
 
+#[gpui_kit::test]
+fn the_gallery_is_listed_only_in_demo_mode(cx: &mut gpui_kit::TestAppContext) {
+    let cases = [(false, false), (true, true)];
+    for (demo, listed) in cases {
+        let commands = cx.update(|cx| super::Commands::new(demo, cx));
+        let shown = (0..commands.shown.len()).filter_map(|row| commands.action(row));
+        assert_eq!(
+            shown.into_iter().any(|a| a == "queryx::ToggleGallery"),
+            listed,
+            "demo: {demo}"
+        );
+    }
+}
+
 #[test]
 fn an_empty_filter_lists_recent_first_then_by_name() {
     let all = commands();

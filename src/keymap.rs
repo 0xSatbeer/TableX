@@ -51,6 +51,15 @@ pub const DEFAULTS: &[(&str, &str, Option<&str>)] = &[
     ("queryx::NewConsole", "ctrl-shift-n", None),
 ];
 
+/// `NAMES` as listed in this mode: the component gallery only under `--demo`.
+pub fn names(
+    demo: bool,
+) -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
+    NAMES
+        .iter()
+        .filter(move |(action, ..)| demo || *action != "queryx::ToggleGallery")
+}
+
 /// (action name, human name, area) for every action the palette lists.
 pub const NAMES: &[(&str, &str, &str)] = &[
     ("queryx::CommandPalette", "Command palette", "General"),

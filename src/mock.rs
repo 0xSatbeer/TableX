@@ -1,5 +1,4 @@
-//! Deterministic fake data for the UI phase. Phase 5 deletes this file; nothing outside
-//! `main.rs` wiring may depend on it.
+//! Deterministic fake data behind `--demo` (`Mode::Demo`) and the tests.
 
 use std::cell::Cell;
 use std::path::PathBuf;

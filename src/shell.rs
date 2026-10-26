@@ -46,6 +46,8 @@ impl Mode {
 }
 
 pub(crate) struct Shell {
+    /// Demo mode alone offers the component gallery.
+    mode: Mode,
     /// The one copy of the workspace's connections; explorer, panel and tabs follow it.
     workspace: Entity<model::Workspace>,
     /// What new consoles run on.

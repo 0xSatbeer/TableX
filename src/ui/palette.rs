@@ -8,7 +8,7 @@ use gpui_kit::component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, h_flex, kbd::Kbd};
 use gpui_kit::*;
 
-use crate::keymap::{Bindings, NAMES};
+use crate::keymap::{self, Bindings};
 use crate::theme;
 
 pub struct Command {
@@ -41,13 +41,13 @@ pub struct Commands {
 }
 
 impl Commands {
-    pub fn new(cx: &App) -> Self {
+    /// `demo` lists the demo-only actions too.
+    pub fn new(demo: bool, cx: &App) -> Self {
         let bound = cx
             .try_global::<Bindings>()
             .map(|b| b.0.as_slice())
             .unwrap_or_default();
-        let all: Vec<Command> = NAMES
-            .iter()
+        let all: Vec<Command> = keymap::names(demo)
             .map(|&(action, name, area)| Command {
                 action,
                 name,
