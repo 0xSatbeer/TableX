@@ -6,11 +6,22 @@ use crate::{db, mock, model, theme};
 use std::rc::Rc;
 
 use super::{Mode, Shell, TabContent, layout::LayoutState};
+use crate::bench::Scenario;
 
 impl Shell {
     pub(super) fn new(mode: Mode, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (workspace, driver): (_, std::sync::Arc<dyn db::Driver>) = match mode {
-            Mode::Normal => (
+            Mode::Bench(Scenario::BigResult) => {
+                let env = |k| std::env::var(k).ok();
+                match crate::bench::workspace(env("QUERYX_BENCH_PG"), env("QUERYX_BENCH_SQLITE")) {
+                    Ok(workspace) => (workspace, std::sync::Arc::new(db::Live::default())),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Mode::Normal | Mode::Bench(_) => (
                 model::Workspace {
                     id: 1,
                     name: "Workspace".into(),
@@ -220,7 +231,7 @@ impl Shell {
             cx,
         );
         let tabs = match mode {
-            Mode::Normal => vec![console],
+            Mode::Normal | Mode::Bench(_) => vec![console],
             Mode::Demo => vec![
                 grid_tab("big_events", Rc::new(grid::BigEvents::new()), cx),
                 grid_tab("wide_table", Rc::new(mock::wide_table(2_000)), cx),
@@ -274,8 +285,67 @@ impl Shell {
                 this.theme.apply(&this.user_themes, window, cx)
             }),
         };
+        if mode == Mode::Bench(Scenario::BigResult) {
+            this.open_bench_tabs(window, cx);
+        }
         this.tab_changed(cx);
         this
+    }
+}
+
+impl Shell {
+    /// `big_result`'s tabs on its Postgres and SQLite connections, beside the empty console: a
+    /// console reading every row of `bench_rows`, a table tab on it on each, and a small query.
+    fn open_bench_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let conns = self.workspace.read(cx).connections.clone();
+        let [pg, lite] = &conns[..] else { return };
+        for (conn, sql) in [
+            (pg, "select * from bench_rows"),
+            (lite, "select count(*) from bench_rows"),
+        ] {
+            let tab = self.connection_console(conn, conn.params.database(), None, sql, window, cx);
+            if let TabContent::Console(c) = &tab.content {
+                c.update(cx, |c, cx| c.run_all_pages(cx));
+            }
+            self.tabs.open(tab);
+        }
+        for (conn, schema) in [(pg, "public"), (lite, "main")] {
+            let database = conn.params.database();
+            let table = grid::Table {
+                driver: self.driver.clone(),
+                connection: conn.id,
+                database: database.clone(),
+                explorer: self.explorer.downgrade(),
+                schema: schema.into(),
+                name: "bench_rows".into(),
+                sqlite_table: conn.kind() == model::DbKind::Sqlite,
+                view: false,
+            };
+            let grid = cx.new(|cx| grid::Grid::table(table.clone(), cx));
+            grid.update(cx, |grid, cx| grid.load(cx));
+            let key = explorer::object_key(
+                conn.id,
+                &database,
+                schema,
+                model::ObjectKind::Table,
+                "bench_rows",
+            );
+            self.tabs.open(table_tab(key.into(), grid, table, cx));
+        }
+    }
+
+    /// Rows the first console holds once no tab is running or loading; `None` before.
+    pub(crate) fn bench_rows(&self, cx: &App) -> Option<usize> {
+        let mut rows = None;
+        for tab in &self.tabs.tabs {
+            match &tab.content {
+                TabContent::Console(c) if !c.read(cx).settled() => return None,
+                TabContent::Console(c) => rows = rows.or(c.read(cx).rows_held()),
+                TabContent::Grid(g, _) if g.read(cx).loading() => return None,
+                TabContent::Grid(..) => {}
+            }
+        }
+        Some(rows.unwrap_or(0))
     }
 }
 

@@ -18,7 +18,33 @@ fn demo_mode_needs_the_exact_demo_flag_and_ignores_every_other_argument() {
     for (args, want) in cases {
         assert_eq!(
             Mode::from_args(args.iter().map(|a| a.to_string())),
-            want,
+            Ok(want),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn bench_mode_needs_a_known_scenario_after_the_flag() {
+    use crate::bench::Scenario::*;
+    use crate::shell::Mode::{self, *};
+    // (args after the program name, mode or error)
+    let cases: [(&[&str], Result<Mode, &str>); 7] = [
+        (&["--bench-scenario", "startup"], Ok(Bench(Startup))),
+        (&["--bench-scenario", "idle"], Ok(Bench(Idle))),
+        (&["--bench-scenario", "big_result"], Ok(Bench(BigResult))),
+        (&["--demo", "--bench-scenario", "idle"], Ok(Bench(Idle))),
+        (
+            &["--bench-scenario", "warm"],
+            Err("unknown bench scenario: warm"),
+        ),
+        (&["--bench-scenario"], Err("unknown bench scenario: ")),
+        (&["--bench-scenario=idle"], Ok(Normal)),
+    ];
+    for (args, want) in cases {
+        assert_eq!(
+            Mode::from_args(args.iter().map(|a| a.to_string())),
+            want.map_err(String::from),
             "{args:?}"
         );
     }
@@ -271,5 +297,67 @@ fn opening_a_table_loads_from_the_database_in_normal_mode_and_shows_mock_rows_in
             loading,
             "{mode:?}: the loading state"
         );
+    }
+}
+
+/// Bench mode handed a config root still writes nothing there: no config, workspaces,
+/// sessions or query log.
+#[gpui_kit::test]
+fn bench_mode_writes_nothing_under_the_config_root(cx: &mut gpui_kit::TestAppContext) {
+    let dir = crate::theme::tests::test_dir("bench-no-writes");
+    cx.update(gpui_kit::init);
+    let (window, _) = cx
+        .update(|cx| {
+            crate::shell::open_shell(
+                crate::shell::Mode::Bench(crate::bench::Scenario::Idle),
+                Default::default(),
+                None,
+                Some(dir.clone()),
+                cx,
+            )
+        })
+        .expect("open test window");
+    let mut vcx = gpui_kit::VisualTestContext::from_window(window, cx);
+    vcx.run_until_parked();
+    vcx.dispatch_action(crate::CycleTheme);
+    vcx.dispatch_action(crate::NewConsole);
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(2));
+    vcx.run_until_parked();
+    let written: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+    assert!(written.is_empty(), "{written:?}");
+    crate::theme::set_ui_scale(crate::theme::DEFAULT_UI_SCALE, &mut vcx.app.borrow_mut());
+}
+
+/// `big_result` opens its 5 tabs and isn't settled while any of them is still reading.
+#[gpui_kit::test]
+fn big_result_opens_five_tabs_and_waits_for_them_to_settle(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::AppContext as _;
+    let workspace = crate::bench::workspace(
+        Some("postgres://u:p@localhost:1/db".into()),
+        Some("/nowhere/bench.sqlite".into()),
+    )
+    .unwrap();
+    cx.update(gpui_kit::init);
+    // (scenario, tabs, the bench rows once parked)
+    let cases = [
+        (crate::bench::Scenario::BigResult, 5, None),
+        (crate::bench::Scenario::Idle, 1, Some(0)),
+    ];
+    for (scenario, want_tabs, want) in cases {
+        let (workspace, mode) = (workspace.clone(), crate::shell::Mode::Bench(scenario));
+        let (window, shell) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |window, cx| {
+                cx.new(|cx| {
+                    crate::shell::Shell::with_driver(mode, workspace, super::fake(), window, cx)
+                })
+            })
+            .expect("open test window")
+        });
+        let vcx = gpui_kit::VisualTestContext::from_window(window, cx);
+        vcx.run_until_parked();
+        let (tabs, rows) =
+            shell.read_with(&vcx, |this, cx| (this.tabs.tabs.len(), this.bench_rows(cx)));
+        assert_eq!((tabs, rows), (want_tabs, want), "{scenario:?}");
     }
 }

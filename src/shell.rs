@@ -28,20 +28,27 @@ enum TabContent {
 
 /// How the app starts. `Demo` (`--demo`) loads the sample workspace, tabs and query log and
 /// reads every connection through the mock driver; `Normal` starts empty on the real drivers.
+/// `Bench` (`--bench-scenario <name>`) runs one perf scenario without reading or writing config.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Mode {
     Normal,
     Demo,
+    Bench(crate::bench::Scenario),
 }
 
 impl Mode {
-    /// The mode for the command-line `args` after the program name. Any other argument is ignored.
-    pub(crate) fn from_args(args: impl IntoIterator<Item = String>) -> Self {
-        if args.into_iter().any(|a| a == "--demo") {
-            Mode::Demo
-        } else {
-            Mode::Normal
+    /// The mode for the command-line `args` after the program name. Any other argument is ignored;
+    /// an unknown or missing bench scenario is an error.
+    pub(crate) fn from_args(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
+        let args: Vec<String> = args.into_iter().collect();
+        if let Some(ix) = args.iter().position(|a| a == "--bench-scenario") {
+            let name = args.get(ix + 1).map(String::as_str);
+            return crate::bench::Scenario::parse(name).map(Mode::Bench);
         }
+        Ok(match args.iter().any(|a| a == "--demo") {
+            true => Mode::Demo,
+            false => Mode::Normal,
+        })
     }
 }
 

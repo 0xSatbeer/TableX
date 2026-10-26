@@ -9,6 +9,10 @@ use super::{PANEL_MAXIMIZED_CONTEXT, Shell, TabContent, layout::Edge};
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Effects flush after the frame is presented, so the deferred stamp follows it.
+        if crate::bench::frame_drawn() {
+            cx.defer(|_| crate::bench::first_frame_presented());
+        }
         // A vertical wheel scrolls the tab strip sideways, like VS Code.
         let tabs = div()
             .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, window, cx| {

@@ -210,6 +210,13 @@ impl Grid {
         self.load(cx);
     }
 
+    /// A table tab whose page read is in flight.
+    pub fn loading(&self) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|l| matches!(l.state, LiveState::Loading))
+    }
+
     /// Reads the current page again (F5, Refresh, Retry), connecting and reading the key first if needed.
     pub fn load(&mut self, cx: &mut Context<Self>) {
         let Some(live) = &mut self.live else { return };

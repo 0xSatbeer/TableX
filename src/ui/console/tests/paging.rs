@@ -146,3 +146,57 @@ fn close_session_closes_the_open_result(cx: &mut gpui_kit::TestAppContext) {
     cx.run_until_parked();
     assert_eq!(fake.pending(), ["close app_db"]);
 }
+
+#[gpui_kit::test]
+fn run_all_pages_reads_until_the_cap_a_short_page_or_an_error_then_settles(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use crate::model::{QueryError, QueryErrorKind};
+    let error = || QueryError {
+        kind: QueryErrorKind::Server,
+        message: "gone".into(),
+        position: None,
+        statement: 0,
+    };
+    // (rows the table holds, a fetch fails after this many pages, rows held at the end)
+    let cases = [
+        (CAP + 2 * PAGE, None, CAP),
+        (CAP, None, CAP),
+        (PAGE / 2, None, PAGE / 2),
+        (0, None, 0),
+        (CAP, Some(2), 2 * PAGE),
+    ];
+    for (total, fail_after, want) in cases {
+        let (fake, mut cx, console, _) = console(cx, "select n from t");
+        console.update(&mut cx, |c, cx| c.run_all_pages(cx));
+        cx.run_until_parked();
+        connect(&fake, &mut cx);
+        fake.resolve_query("open app_db", Ok(Opened::Rows(cols("n"))));
+        cx.run_until_parked();
+        let mut read = 0;
+        for page in 0.. {
+            assert!(page <= total / PAGE + 1, "{total}: the loop stops");
+            if fake.pending().is_empty() {
+                break;
+            }
+            assert!(
+                !console.read_with(&cx, |c, _| c.settled()),
+                "{total}: unsettled"
+            );
+            if fail_after == Some(page) {
+                fake.resolve_query::<Vec<Row>>("fetch app_db", Err(error()));
+            } else {
+                let n = PAGE.min(total - read);
+                fake.resolve_query("fetch app_db", Ok(numbered(read, n)));
+                read += n;
+            }
+            cx.run_until_parked();
+        }
+        let (settled, held) = console.read_with(&cx, |c, _| (c.settled(), c.rows_held()));
+        assert_eq!(
+            (settled, held),
+            (true, Some(want)),
+            "{total} {fail_after:?}"
+        );
+    }
+}

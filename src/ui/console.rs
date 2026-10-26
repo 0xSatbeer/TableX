@@ -93,6 +93,8 @@ pub struct Console {
     /// What the toolbar's database and schema dropdowns offer, listed on the tab's session.
     pub databases: Vec<String>,
     pub schemas: Vec<String>,
+    /// Every page of the run's result is read, up to `CAP` (`--bench-scenario big_result`).
+    fetch_all: bool,
     _run: Option<Task<()>>,
     _fetch: Option<Task<()>>,
     _context: Option<Task<()>>,
@@ -264,6 +266,7 @@ impl Console {
             in_transaction: false,
             databases: Vec::new(),
             schemas: Vec::new(),
+            fetch_all: false,
             _run: None,
             _fetch: None,
             _context: None,
@@ -777,6 +780,26 @@ impl Console {
         self.messages.extend(error);
         cx.emit(ConsoleEvent::Finished);
         cx.notify();
+        if self.fetch_all {
+            self.next_page(self.active_result, cx);
+        }
+    }
+
+    /// Runs the whole text and reads every page of its result, up to `CAP`.
+    pub fn run_all_pages(&mut self, cx: &mut Context<Self>) {
+        self.fetch_all = true;
+        self.execute(statements(&self.editor.read(cx).value()), cx);
+    }
+
+    /// No run or page read is in flight, nor one `run_all_pages` still wants.
+    pub fn settled(&self) -> bool {
+        let pending = |r: &Paged| r.fetching || (self.fetch_all && r.open);
+        !self.running && !self.results.iter().any(pending)
+    }
+
+    /// Rows the first result holds in memory.
+    pub fn rows_held(&self) -> Option<usize> {
+        self.results.first().map(|r| r.rows.len())
     }
 }
 
@@ -820,6 +843,9 @@ impl Console {
             }
         }
         cx.notify();
+        if self.fetch_all {
+            self.next_page(ix, cx);
+        }
     }
 
     /// Shows result `ix`'s previous page, from memory.
