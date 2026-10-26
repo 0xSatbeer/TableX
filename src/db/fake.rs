@@ -49,6 +49,7 @@ pub fn close(session: &Session) {
 pub struct Fake {
     pending: Mutex<Vec<(String, oneshot::Sender<Answer>)>>,
     tested: Mutex<Vec<ConnectionParams>>,
+    connected: Mutex<Vec<ConnectionParams>>,
     executed: Mutex<Vec<(String, Vec<String>, bool)>>,
     opened: Mutex<Vec<(String, bool)>>,
     queried: Mutex<Vec<String>>,
@@ -68,6 +69,11 @@ impl Fake {
     /// The params of every `test` call so far, oldest first.
     pub fn tested(&self) -> Vec<ConnectionParams> {
         self.tested.lock().unwrap().clone()
+    }
+
+    /// The params of every `connect` call so far, oldest first.
+    pub fn connected(&self) -> Vec<ConnectionParams> {
+        self.connected.lock().unwrap().clone()
     }
 
     /// The (database, statements, atomic) of every `execute` call so far, oldest first.
@@ -140,6 +146,7 @@ fn on(session: &Session) -> &str {
 
 impl Driver for Fake {
     fn connect(&self, params: &ConnectionParams) -> Reply<Session> {
+        self.connected.lock().unwrap().push(params.clone());
         self.call(format!("connect {}", params.database()))
     }
 

@@ -161,6 +161,16 @@ impl Explorer {
         if let Some(session) = self.sessions.get(&at).filter(|s| !s.is_closed()) {
             return Box::pin(futures::future::ready(Ok(session.clone())));
         }
+        // A restored tab can get here before Connect has read the saved password from the keychain.
+        if let Some(ci) = self
+            .workspace
+            .read(cx)
+            .connections
+            .iter()
+            .position(|c| c.id == id)
+        {
+            self.password_ready(ci, cx);
+        }
         let params = match self.params_on(id, db, cx) {
             Ok(params) => params,
             Err(reason) => return Box::pin(futures::future::ready(Err(reason))),

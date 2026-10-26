@@ -35,14 +35,17 @@ fn open_restored_in(
     tempfile::TempDir,
     std::sync::Arc<Fake>,
 ) {
-    let all = Workspaces {
+    let mut all = Workspaces {
         active: 1,
         list: crate::mock::workspaces(),
     };
+    // staging-pg (2) keeps its password in the keychain, as a saved one does.
+    all.list[0].connections[1].save_password = true;
     std::fs::write(dir.path().join("workspaces.toml"), workspaces_to_toml(&all)).unwrap();
     save_session(dir.path(), 1, session).unwrap();
     let keys = std::sync::Arc::new(MemKeychain::default());
     keys.set(ConnectionId(1), &Secret::new("one")).unwrap();
+    keys.set(ConnectionId(2), &Secret::new("two")).unwrap();
     cx.update(|cx| {
         gpui_kit::init(cx);
         cx.set_reduce_motion(true);
@@ -216,6 +219,28 @@ fn production_tabs_wait_for_a_click_while_others_connect_on_launch(cx: &mut Test
         "{:?}",
         fake.pending()
     );
+}
+
+#[gpui_kit::test]
+fn a_restored_table_connects_with_the_password_saved_in_the_keychain(cx: &mut TestAppContext) {
+    let session = SessionFile {
+        active_tab: Some(0),
+        tabs: vec![table(2, "app_db", "public", "users")],
+        ..SessionFile::default()
+    };
+    let (_cx, _shell, _dir, fake) = open_restored(cx, &session);
+
+    let connected = fake.connected();
+    assert!(!connected.is_empty());
+    for params in connected {
+        let crate::model::ConnectionParams::Postgres { password, .. } = params else {
+            panic!("staging-pg is Postgres");
+        };
+        assert_eq!(
+            password.map(|p| p.expose().to_string()).as_deref(),
+            Some("two")
+        );
+    }
 }
 
 fn object(name: &str) -> DbObject {
