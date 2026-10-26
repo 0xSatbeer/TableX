@@ -3,7 +3,7 @@
 use super::super::live::{count_sql, page_sql, select_sql};
 
 #[test]
-fn pages_order_by_the_primary_key_and_quote_names() {
+fn pages_order_by_the_primary_key_descending_and_quote_names() {
     assert_eq!(
         page_sql(
             "pub\"lic",
@@ -13,7 +13,7 @@ fn pages_order_by_the_primary_key_and_quote_names() {
             ("", ""),
             1_000
         ),
-        r#"SELECT * FROM "pub""lic"."order items" ORDER BY "a", "b" LIMIT 500 OFFSET 1000"#
+        r#"SELECT * FROM "pub""lic"."order items" ORDER BY "a" DESC, "b" DESC LIMIT 500 OFFSET 1000"#
     );
 }
 
@@ -52,7 +52,7 @@ fn a_filter_is_inserted_raw_and_its_order_replaces_the_key() {
     );
     assert_eq!(
         page_sql("public", "users", &["id".into()], false, ("a = 1", ""), 0),
-        r#"SELECT * FROM "public"."users" WHERE (a = 1) ORDER BY "id" LIMIT 500 OFFSET 0"#
+        r#"SELECT * FROM "public"."users" WHERE (a = 1) ORDER BY "id" DESC LIMIT 500 OFFSET 0"#
     );
     assert_eq!(
         count_sql("public", "users", "a = 1"),
@@ -67,7 +67,7 @@ fn all_rows_reads_the_filtered_ordered_table_without_a_limit() {
         (
             vec!["id".to_string()],
             ("a = 1", ""),
-            r#"SELECT * FROM "public"."users" WHERE (a = 1) ORDER BY "id""#,
+            r#"SELECT * FROM "public"."users" WHERE (a = 1) ORDER BY "id" DESC"#,
         ),
         (
             vec!["id".to_string()],

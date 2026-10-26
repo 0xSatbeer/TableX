@@ -45,6 +45,7 @@ actions!(
         EditConnection,
         DeleteConnection,
         RefreshNode,
+        Disconnect,
         ModifyObject,
         NewTable,
         NewDatabase,

@@ -22,6 +22,7 @@ impl Render for Explorer {
             .on_action(cx.listener(|this, _: &crate::RefreshNode, _, cx| {
                 this.refresh_row(this.selected, cx)
             }))
+            .on_action(cx.listener(|this, _: &crate::Disconnect, _, cx| this.disconnect_selected(cx)))
             .on_action(cx.listener(|this, _: &crate::OpenConsole, _, cx| this.open_console(cx)))
             .on_action(cx.listener(|this, _: &crate::OpenSelected, _, cx| this.open_selected(cx)))
             .on_action(cx.listener(|this, _: &crate::ShowDdl, _, cx| this.show_ddl(cx)))

@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, Selectable as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::Input,
@@ -25,6 +25,9 @@ impl Render for BottomPanel {
         } else {
             self.tab
         };
+        let console = self.console.as_ref().map(|c| c.read(cx));
+        let result_count = console.map_or(0, |c| c.results.len());
+        let active_result = console.map(|c| c.active_result);
         let theme = cx.theme();
         // Flat, same height as the editor strip; the active view is underlined, not boxed.
         let header = h_flex()
@@ -39,10 +42,20 @@ impl Render for BottomPanel {
                 TABS.iter()
                     .enumerate()
                     .filter(|(ix, _)| self.console.is_some() || *ix != RESULTS)
-                    .map(|(ix, label)| {
-                        let active = ix == tab;
+                    // Several result sets each get a header tab in place of "Results".
+                    .flat_map(|(ix, label)| match ix {
+                        RESULTS if result_count > 1 => (0..result_count)
+                            .map(|r| (ix, Some(r), SharedString::from(format!("Result {}", r + 1))))
+                            .collect(),
+                        _ => vec![(ix, None, SharedString::from(*label))],
+                    })
+                    .map(|(ix, result, label)| {
+                        let active = ix == tab && (result.is_none() || result == active_result);
                         div()
-                            .id(("panel-tab", ix))
+                            .id(match result {
+                                Some(r) => ElementId::from(("result-tab", r)),
+                                None => ElementId::from(("panel-tab", ix)),
+                            })
                             .h_full()
                             .flex()
                             .items_center()
@@ -61,9 +74,12 @@ impl Render for BottomPanel {
                             .hover(|d| d.text_color(theme.foreground))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.tab = ix;
+                                if let (Some(r), Some(console)) = (result, &this.console) {
+                                    console.update(cx, |console, _| console.active_result = r);
+                                }
                                 cx.notify();
                             }))
-                            .child(*label)
+                            .child(label)
                     }),
             )
             .child(div().flex_1())
@@ -206,7 +222,7 @@ impl Render for BottomPanel {
     }
 }
 
-/// The console's result tabs as a strip over the active one's page, with its page bar.
+/// The active result's page bar over its page.
 fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
     let this = console.read(cx);
@@ -236,20 +252,6 @@ fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
         .gap(theme::space_4())
         .border_b_1()
         .border_color(theme.border)
-        .children((0..this.results.len()).map(|ix| {
-            let console = console.clone();
-            Button::new(("result-tab", ix))
-                .ghost()
-                .xsmall()
-                .selected(ix == this.active_result)
-                .label(format!("Result {}", ix + 1))
-                .on_click(move |_, _, cx| {
-                    console.update(cx, |console, cx| {
-                        console.active_result = ix;
-                        cx.notify();
-                    })
-                })
-        }))
         .child(div().flex_1())
         .child(
             page("result-prev", IconName::ChevronLeft, "Previous page", false)

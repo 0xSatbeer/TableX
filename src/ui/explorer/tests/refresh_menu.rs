@@ -205,3 +205,28 @@ fn copy_qualified_name_puts_the_schema_and_name_quoted_on_the_clipboard_and_sqli
         assert_eq!(copied.as_deref(), Some("users"), "postgres {postgres}");
     }
 }
+
+#[gpui_kit::test]
+fn disconnect_on_any_row_of_a_connected_connection_disconnects_it_and_selects_its_row(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    for row in ["pg", "app", "public", "t"] {
+        let (mut cx, explorer, workspace, _) = tables_open(cx);
+        right_click(&explorer, &mut cx, row);
+        click(&mut cx, "menu-disconnect");
+        let status = workspace.read_with(&cx, |ws, _| ws.connections[0].status.clone());
+        assert_eq!(status, ConnectionStatus::Disconnected, "{row}");
+        assert_eq!(
+            labels(&explorer, &cx),
+            strings(&["pg"]),
+            "{row}: children hidden"
+        );
+        let selected = explorer.read_with(&cx, |e, _| e.selected_label());
+        assert_eq!(selected.as_deref(), Some("pg"), "{row}");
+        right_click(&explorer, &mut cx, "pg");
+        assert!(
+            cx.debug_bounds("menu-disconnect").is_none(),
+            "{row}: no Disconnect once disconnected"
+        );
+    }
+}

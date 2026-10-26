@@ -223,8 +223,16 @@ impl Grid {
                                         move |menu, _, _| {
                                             menu.action_context(focus.clone())
                                                 .min_w(theme::menu_sm())
-                                                .menu("Hide column", Box::new(HideColumn))
-                                                .menu("Show all columns", Box::new(ShowAllColumns))
+                                                .menu_with_icon(
+                                                    "Hide column",
+                                                    Icon::new(Lucide::EyeOff),
+                                                    Box::new(HideColumn),
+                                                )
+                                                .menu_with_icon(
+                                                    "Show all columns",
+                                                    Icon::new(Lucide::Eye),
+                                                    Box::new(ShowAllColumns),
+                                                )
                                         }
                                     }),
                             )

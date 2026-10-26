@@ -243,6 +243,10 @@ impl Render for NameOwnerDialog {
             Some(owner) => Select::new(owner).small().into_any_element(),
             None => div()
                 .debug_selector(|| "owner-loading".into())
+                // A small Select's height, so the field doesn't grow when the roles arrive.
+                .h_6()
+                .flex()
+                .items_center()
                 .text_size(theme::ui_sm())
                 .text_color(theme::text_secondary(cx.theme()))
                 .child("Loading roles…")

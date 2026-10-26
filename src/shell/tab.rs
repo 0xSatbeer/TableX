@@ -1,6 +1,6 @@
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, h_flex,
-    menu::{ContextMenuExt as _, PopupMenuItem},
+    ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, menu::ContextMenuExt as _,
     tooltip::Tooltip,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -30,10 +30,6 @@ impl Shell {
         let group: SharedString = format!("tab-{ix}").into();
         let pinned = t.pinned;
         let production = t.origin.as_ref().is_some_and(|o| o.production);
-        let structure = match &t.content {
-            TabContent::Grid(_, Some(s)) => Some(s.clone()),
-            _ => None,
-        };
         h_flex()
             .id(("tab", ix))
             .group(group.clone())
@@ -120,36 +116,37 @@ impl Shell {
                     this.tab_changed(cx);
                 }),
             )
-            .context_menu(move |menu, _, cx| {
-                // A table tab switches between its sub-tabs here.
-                let menu = match &structure {
-                    Some(s) => {
-                        let shown = s.read(cx).sub;
-                        s.read(cx)
-                            .subs()
-                            .iter()
-                            .fold(menu.label("Show"), |menu, &(sub, name)| {
-                                let s = s.clone();
-                                menu.item(PopupMenuItem::new(name).checked(sub == shown).on_click(
-                                    move |_, window, cx| {
-                                        s.update(cx, |s, cx| s.show(sub, window, cx))
-                                    },
-                                ))
-                            })
-                            .separator()
-                    }
-                    None => menu,
-                };
+            .context_menu(move |menu, _, _| {
                 menu.min_w(theme::menu_sm())
-                    .menu("Close", Box::new(CloseTab))
-                    .menu("Close others", Box::new(CloseOtherTabs))
-                    .menu("Close to the right", Box::new(CloseTabsToRight))
-                    .menu("Close all", Box::new(CloseAllTabs))
+                    .menu_with_icon("Close", Icon::new(Lucide::Close), Box::new(CloseTab))
+                    .menu_with_icon(
+                        "Close others",
+                        Icon::new(Lucide::ListX),
+                        Box::new(CloseOtherTabs),
+                    )
+                    .menu_with_icon(
+                        "Close to the right",
+                        Icon::new(Lucide::ArrowRightToLine),
+                        Box::new(CloseTabsToRight),
+                    )
+                    .menu_with_icon(
+                        "Close all",
+                        Icon::new(Lucide::SquareX),
+                        Box::new(CloseAllTabs),
+                    )
                     .separator()
-                    .menu(if pinned { "Unpin" } else { "Pin" }, Box::new(TogglePinTab))
+                    .menu_with_icon(
+                        if pinned { "Unpin" } else { "Pin" },
+                        Icon::new(if pinned { Lucide::PinOff } else { Lucide::Pin }),
+                        Box::new(TogglePinTab),
+                    )
                     .separator()
-                    .menu("Copy name", Box::new(CopyTabName))
-                    .menu("Reveal in explorer", Box::new(RevealTab))
+                    .menu_with_icon("Copy name", Icon::new(Lucide::Copy), Box::new(CopyTabName))
+                    .menu_with_icon(
+                        "Reveal in explorer",
+                        Icon::new(Lucide::LocateFixed),
+                        Box::new(RevealTab),
+                    )
             })
             .child(icon.small())
             .when(!pinned, |d| {

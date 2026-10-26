@@ -189,14 +189,18 @@ impl Render for ConnectionDialog {
                     ),
             )
             .children(fields)
-            .when_some(self.test_line(cx), |d, (line, color)| {
-                d.child(
-                    div()
-                        .debug_selector(|| "test-result".into())
-                        .text_size(theme::ui_sm())
-                        .text_color(color)
-                        .child(line),
-                )
-            })
+            // The result's line is always reserved, so the dialog doesn't grow when a test ends.
+            .child(div().min_h(theme::ui_sm() * 1.5).when_some(
+                self.test_line(cx),
+                |d, (line, color)| {
+                    d.child(
+                        div()
+                            .debug_selector(|| "test-result".into())
+                            .text_size(theme::ui_sm())
+                            .text_color(color)
+                            .child(line),
+                    )
+                },
+            ))
     }
 }

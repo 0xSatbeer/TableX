@@ -7,15 +7,34 @@ icon_assets!(
     LucideExtras,
     [
         ArrowDownWideNarrow,
+        ArrowRightToLine,
+        Braces,
         ChevronFirst,
         ChevronLast,
+        ClipboardPaste,
+        Code,
         Columns3,
         Database,
+        FolderInput,
         Funnel,
+        GitCommitHorizontal,
         KeyRound,
         Layers,
+        List,
+        ListX,
+        LocateFixed,
+        Pencil,
+        Pin,
+        PinOff,
+        Play,
+        Sheet,
         Square,
-        SquareCheck
+        SquareCheck,
+        SquarePen,
+        SquareX,
+        Table,
+        Trash,
+        Unplug
     ]
 );
 

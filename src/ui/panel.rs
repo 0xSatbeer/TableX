@@ -6,7 +6,6 @@ mod row;
 pub(crate) mod sql;
 
 use std::collections::{BTreeSet, VecDeque};
-use std::path::PathBuf;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -31,8 +30,6 @@ pub struct BottomPanel {
     pub console: Option<Entity<Console>>,
     tab: usize,
     log: VecDeque<QueryLogEntry>,
-    /// Normal mode's `ConfigDir` root, whose `logs/queries.jsonl` gets every pushed entry.
-    log_root: Option<PathBuf>,
     filter: LogFilter,
     search: Entity<InputState>,
     /// Indexes into `log` that pass the filters.
@@ -95,7 +92,6 @@ impl BottomPanel {
             console: None,
             tab: RESULTS,
             log,
-            log_root: None,
             filter,
             search,
             list: ListState::new(rows.len(), ListAlignment::Top, px(240.)),
@@ -120,28 +116,7 @@ impl BottomPanel {
 
     /// Logs `entry` as the newest row.
     pub fn push(&mut self, entry: QueryLogEntry, cx: &mut Context<Self>) {
-        if let Some(root) = &self.log_root
-            && let Err(e) = crate::persist::append_query_log(root, &entry)
-        {
-            eprintln!("could not append to the query log: {e}");
-        }
         push_log(&mut self.log, entry);
-        self.refilter(cx);
-        cx.notify();
-    }
-
-    /// Loads the query log saved under `root` ahead of the rows logged so far, and appends every
-    /// later entry there.
-    pub fn persist_log(&mut self, root: PathBuf, cx: &mut Context<Self>) {
-        let saved = crate::persist::load_query_log(&root);
-        let mut log = VecDeque::new();
-        saved
-            .into_iter()
-            .chain(self.log.drain(..))
-            .for_each(|e| push_log(&mut log, e));
-        self.log = log;
-        self.log_root = Some(root);
-        self.expanded.clear();
         self.refilter(cx);
         cx.notify();
     }

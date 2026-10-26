@@ -32,7 +32,8 @@ pub(super) fn click_action(kind: NodeKind, hit: Hit) -> Click {
 #[derive(Clone, Copy)]
 enum Menu {
     Connection,
-    Modify,
+    /// The item's label, naming what it modifies.
+    Modify(&'static str),
     Refresh,
 }
 
@@ -58,10 +59,16 @@ impl Explorer {
             .clone()
             .map(|ix| match self.nodes[ix].kind {
                 NodeKind::Connection(_) => Some(Menu::Connection),
-                NodeKind::Database | NodeKind::Schema | NodeKind::Object(ObjectKind::Table)
+                kind @ (NodeKind::Database
+                | NodeKind::Schema
+                | NodeKind::Object(ObjectKind::Table))
                     if ws.connections[self.nodes[ix].conn].kind() == DbKind::Postgres =>
                 {
-                    Some(Menu::Modify)
+                    Some(Menu::Modify(match kind {
+                        NodeKind::Database => "Modify database",
+                        NodeKind::Schema => "Modify schema",
+                        _ => "Modify table",
+                    }))
                 }
                 NodeKind::Database | NodeKind::Schema | NodeKind::Object(_) => Some(Menu::Refresh),
                 _ => None,
@@ -83,6 +90,11 @@ impl Explorer {
         let consoles: Vec<bool> = range
             .clone()
             .map(|ix| matches!(self.nodes[ix].kind, NodeKind::Database | NodeKind::Schema))
+            .collect();
+        // Disconnect: any row of a connected connection.
+        let connected: Vec<bool> = range
+            .clone()
+            .map(|ix| ws.connections[self.nodes[ix].conn].status == ConnectionStatus::Connected)
             .collect();
         // Object rows: whether they open in a tab, and whether Drop… can name them.
         let objects: Vec<Option<(bool, bool)>> = range
@@ -251,58 +263,62 @@ impl Explorer {
                         d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
-            .zip(menus.into_iter().zip(news).zip(consoles).zip(objects))
-            .map(|(row, (((menu, new), console), object))| match menu {
+            .zip(menus.into_iter().zip(news).zip(consoles).zip(objects).zip(connected))
+            .map(|(row, ((((menu, new), console), object), connected))| match menu {
                 Some(kind) => {
                     let (explorer, targets) = (explorer.clone(), targets.clone());
                     row
                     .context_menu(move |menu, window, cx| {
                         // Groups: create, open, copy, change, refresh, then destructive last; separator() skips empty groups.
                         let menu = menu.min_w(theme::menu());
+                        let danger = cx.theme().danger;
                         let menu = if new {
-                            menu.submenu("New", window, cx, |menu, _, _| {
-                                menu.menu_element(Box::new(crate::NewTable), |_, _| div().debug_selector(|| "menu-new-table".into()).child("Table"))
-                                    .menu_element(Box::new(crate::NewDatabase), |_, _| div().debug_selector(|| "menu-new-database".into()).child("Database"))
-                                    .menu_element(Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
-                                    .menu_element(Box::new(crate::NewUser), |_, _| div().debug_selector(|| "menu-new-user".into()).child("User"))
+                            menu.submenu_with_icon(Some(Icon::new(Lucide::Plus)), "New", window, cx, |menu, _, _| {
+                                menu.menu_element_with_icon(Icon::new(Lucide::Table), Box::new(crate::NewTable), |_, _| div().debug_selector(|| "menu-new-table".into()).child("Table"))
+                                    .menu_element_with_icon(Icon::new(Lucide::Database), Box::new(crate::NewDatabase), |_, _| div().debug_selector(|| "menu-new-database".into()).child("Database"))
+                                    .menu_element_with_icon(Icon::new(Lucide::KeyRound), Box::new(crate::NewRole), |_, _| div().debug_selector(|| "menu-new-role".into()).child("Role"))
+                                    .menu_element_with_icon(Icon::new(Lucide::User), Box::new(crate::NewUser), |_, _| div().debug_selector(|| "menu-new-user".into()).child("User"))
                             })
                         } else {
                             menu
                         };
                         let menu = menu.separator();
                         let menu = if console {
-                            menu.menu_element(Box::new(crate::OpenConsole), |_, _| div().debug_selector(|| "menu-open-console".into()).child("Open console"))
-                                .menu_element(Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console"))
+                            menu.menu_element_with_icon(Icon::new(Lucide::SquareTerminal), Box::new(crate::OpenConsole), |_, _| div().debug_selector(|| "menu-open-console".into()).child("Open console"))
+                                .menu_element_with_icon(Icon::new(Lucide::Plus), Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console"))
                         } else {
                             menu
                         };
                         let menu = match object {
                             Some((opens, _)) => menu
-                                .when(opens, |m| m.menu_element(Box::new(crate::OpenSelected), |_, _| div().debug_selector(|| "menu-open".into()).child("Open")))
-                                .menu_element(Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console here"))
-                                .when(opens, |m| m.menu_element(Box::new(crate::ShowDdl), |_, _| div().debug_selector(|| "menu-show-ddl".into()).child("Show DDL")))
+                                .when(opens, |m| m.menu_element_with_icon(Icon::new(Lucide::FolderOpen), Box::new(crate::OpenSelected), |_, _| div().debug_selector(|| "menu-open".into()).child("Open")))
+                                .menu_element_with_icon(Icon::new(Lucide::Plus), Box::new(crate::NewConsole), |_, _| div().debug_selector(|| "menu-new-console".into()).child("New console here"))
+                                .when(opens, |m| m.menu_element_with_icon(Icon::new(Lucide::Code), Box::new(crate::ShowDdl), |_, _| div().debug_selector(|| "menu-show-ddl".into()).child("Show DDL")))
                                 .separator()
-                                .menu_element(Box::new(crate::CopyName), |_, _| div().debug_selector(|| "menu-copy-name".into()).child("Copy name"))
-                                .menu_element(Box::new(crate::CopyQualifiedName), |_, _| div().debug_selector(|| "menu-copy-qualified".into()).child("Copy qualified name")),
+                                .menu_element_with_icon(Icon::new(Lucide::Copy), Box::new(crate::CopyName), |_, _| div().debug_selector(|| "menu-copy-name".into()).child("Copy name"))
+                                .menu_element_with_icon(Icon::new(Lucide::Copy), Box::new(crate::CopyQualifiedName), |_, _| div().debug_selector(|| "menu-copy-qualified".into()).child("Copy qualified name")),
                             None => menu,
                         };
                         let menu = menu.separator();
                         let menu = match kind {
                             Menu::Connection => {
-                                let menu = menu.menu_element(Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…"));
+                                let menu = menu.menu_element_with_icon(Icon::new(Lucide::Pencil), Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…"));
                                 if targets.is_empty() { menu } else { move_to_menu(menu, &explorer, &targets, window, cx) }
                             }
-                            Menu::Modify => menu.menu_element(Box::new(crate::ModifyObject), |_, _| div().debug_selector(|| "menu-modify".into()).child("Modify…")),
+                            Menu::Modify(label) => menu.menu_element_with_icon(Icon::new(Lucide::SquarePen), Box::new(crate::ModifyObject), move |_, _| div().debug_selector(|| "menu-modify".into()).child(label)),
                             Menu::Refresh => menu,
                         };
-                        menu.menu_element(Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
+                        menu.menu_element_with_icon(Icon::new(Lucide::RefreshCw), Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
+                            .when(connected, |m| {
+                                m.menu_element_with_icon(Icon::new(Lucide::Unplug), Box::new(crate::Disconnect), |_, _| div().debug_selector(|| "menu-disconnect".into()).child("Disconnect"))
+                            })
                             .when(matches!(kind, Menu::Connection), |m| {
-                                m.separator().menu_element(Box::new(crate::DeleteConnection), |_, cx| {
+                                m.separator().menu_element_with_icon(Icon::new(Lucide::Trash).text_color(danger), Box::new(crate::DeleteConnection), |_, cx| {
                                     div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete…")
                                 })
                             })
                             .when(object.is_some_and(|(_, drop)| drop), |m| {
-                                m.separator().menu_element(Box::new(crate::DropObject), |_, cx| {
+                                m.separator().menu_element_with_icon(Icon::new(Lucide::Trash).text_color(danger), Box::new(crate::DropObject), |_, cx| {
                                     div().debug_selector(|| "menu-drop".into()).text_color(cx.theme().danger).child("Drop…")
                                 })
                             })
@@ -324,15 +340,21 @@ fn move_to_menu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let (explorer, targets) = (explorer.clone(), targets.to_vec());
-    menu.submenu("Move to", window, cx, move |mut menu, _, _| {
-        for (to, name) in targets.iter().cloned() {
-            let explorer = explorer.clone();
-            menu = menu.item(PopupMenuItem::new(name).on_click(move |_, _, cx| {
-                _ = explorer.update(cx, |e, cx| e.move_selected(to, cx));
-            }));
-        }
-        menu
-    })
+    menu.submenu_with_icon(
+        Some(Icon::new(Lucide::FolderInput)),
+        "Move to",
+        window,
+        cx,
+        move |mut menu, _, _| {
+            for (to, name) in targets.iter().cloned() {
+                let explorer = explorer.clone();
+                menu = menu.item(PopupMenuItem::new(name).on_click(move |_, _, cx| {
+                    _ = explorer.update(cx, |e, cx| e.move_selected(to, cx));
+                }));
+            }
+            menu
+        },
+    )
 }
 
 impl Explorer {

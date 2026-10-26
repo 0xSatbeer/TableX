@@ -103,6 +103,7 @@ pub const NAMES: &[(&str, &str, &str)] = &[
         "Connections",
     ),
     ("queryx::RefreshNode", "Refresh", "Explorer"),
+    ("queryx::Disconnect", "Disconnect", "Connections"),
     ("queryx::ModifyObject", "Modify object", "Explorer"),
     ("queryx::NewTable", "New table", "Explorer"),
     ("queryx::NewDatabase", "New database", "Explorer"),

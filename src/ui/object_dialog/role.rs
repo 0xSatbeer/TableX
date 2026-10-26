@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use gpui_kit::StatefulInteractiveElement as _;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::prelude::FluentBuilder as _;
 
 use super::*;
 use crate::db::{Driver, Reply, Session};
@@ -136,8 +138,18 @@ impl RoleDialog {
 
 impl Render for RoleDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let loading = self.roles.is_empty() && self.error.is_none();
+        // Fixed height, so the dialog neither grows when the roles arrive nor runs off a long list.
         let members = v_flex()
+            .id("member-of-list")
+            .h(theme::list_row() * 5.)
+            .overflow_y_scroll()
             .gap(theme::space_4())
+            .when(loading, |d| {
+                d.text_size(theme::ui_sm())
+                    .text_color(theme::text_secondary(cx.theme()))
+                    .child("Loading roles…")
+            })
             .children(self.roles.iter().map(|role| {
                 let selector = format!("member-{role}");
                 let checked = self.member_of.contains(role);

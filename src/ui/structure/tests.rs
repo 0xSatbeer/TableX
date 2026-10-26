@@ -187,10 +187,6 @@ fn f5_on_the_sub_tab_reads_again(cx: &mut gpui_kit::TestAppContext) {
 #[gpui_kit::test]
 fn a_view_shows_its_definition(cx: &mut gpui_kit::TestAppContext) {
     let (fake, mut cx, structure, _explorer) = open(true, cx);
-    let names = structure.read_with(&cx, |s, _| {
-        s.subs().iter().map(|&(_, n)| n).collect::<Vec<_>>()
-    });
-    assert_eq!(names, ["Data", "Definition"], "views have no Structure");
     show(&mut cx, &structure, Sub::Ddl);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();

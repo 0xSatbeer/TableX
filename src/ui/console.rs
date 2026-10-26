@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::{Diagnostic, DiagnosticSeverity};
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Editor, EditorState, InputEvent, RopeExt as _},
@@ -1081,15 +1081,23 @@ impl Console {
     /// `connection ▸ database ▸ schema`; only the connection on SQLite.
     fn context(&self, cx: &mut Context<Self>) -> Option<Div> {
         let id = self.target.connection?;
-        let name = self
-            .target
-            .workspace
-            .read(cx)
-            .connections
-            .iter()
-            .find(|c| c.id == id)?
-            .name
-            .clone();
+        let conn = (self.target.workspace.read(cx).connections.iter()).find(|c| c.id == id)?;
+        let name = conn.name.clone();
+        // What the explorer has listed shows at once; the console's own fetch replaces it when it lands.
+        let model = conn.databases.iter().flatten();
+        let databases = match self.databases.is_empty() {
+            true => model.clone().map(|d| d.name.clone()).collect(),
+            false => self.databases.clone(),
+        };
+        let schemas = match self.schemas.is_empty() {
+            true => (model.clone().find(|d| d.name == self.target.database))
+                .and_then(|d| d.schemas.as_ref())
+                .into_iter()
+                .flatten()
+                .map(|s| s.name.clone())
+                .collect(),
+            false => self.schemas.clone(),
+        };
         let crumbs = h_flex()
             .gap(theme::space_4())
             .text_size(theme::ui_sm())
@@ -1137,17 +1145,22 @@ impl Console {
                 })
         };
         let schema = self.target.schema.clone().unwrap_or_default();
+        let sep = || {
+            Icon::new(Lucide::ChevronRight)
+                .xsmall()
+                .text_color(cx.theme().muted_foreground)
+        };
         Some(
             crumbs
-                .child("▸")
+                .child(sep())
                 .child(pick(
                     "console-database",
                     self.target.database.clone(),
-                    &self.databases,
+                    &databases,
                     true,
                 ))
-                .child("▸")
-                .child(pick("console-schema", schema, &self.schemas, false)),
+                .child(sep())
+                .child(pick("console-schema", schema, &schemas, false)),
         )
     }
 
@@ -1156,6 +1169,11 @@ impl Console {
         Button::new("console-mode")
             .ghost()
             .xsmall()
+            .icon(if manual {
+                Lucide::GitCommitHorizontal
+            } else {
+                Lucide::RefreshCw
+            })
             .label(if manual { "Manual" } else { "Auto-commit" })
             .disabled(self.running)
             .tooltip("Switch between auto-commit and manual transactions")
@@ -1188,6 +1206,7 @@ impl Render for Console {
                     .tooltip_with_action("Cancel", &Cancel, None)
                     .on_click(cx.listener(|this, _, window, cx| this.cancel(&Cancel, window, cx))),
                 false => Button::new("console-run")
+                    .icon(Lucide::Play)
                     .label("Run")
                     .tooltip_with_action("Run statement", &RunStatement, None)
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1201,8 +1220,10 @@ impl Render for Console {
             .border_b_1()
             .border_color(cx.theme().border)
             .gap(theme::space_4())
-            .children(self.context(cx))
             .child(run.ghost().xsmall())
+            .child(div().w_px().h(theme::space_16()).bg(cx.theme().border))
+            .children(self.context(cx))
+            .child(div().flex_1())
             .child(self.mode_toggle(cx))
             .when(self.manual, |d| {
                 let enabled = self.in_transaction && !self.running;

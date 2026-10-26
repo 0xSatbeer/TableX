@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike as _};
 use gpui_kit::assets::IconName;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::calendar::{Calendar, CalendarEvent, CalendarState, Date};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::time_field::{TimeField, TimeFieldState, TimePrecision};
@@ -313,26 +314,56 @@ impl Render for Grid {
                                 menu.action_context(focus.clone())
                                     .min_w(theme::menu())
                                     // The everyday copy first, in the format Ctrl+C uses.
-                                    .item(PopupMenuItem::new("Copy (Ctrl+C)").on_click(
-                                        move |_, _, cx| {
-                                            _ = grid.update(cx, |this, cx| {
-                                                this.copy_as(
-                                                    if this.copy_csv { csv } else { tsv },
-                                                    cx,
-                                                )
-                                            });
-                                        },
-                                    ))
+                                    .item(
+                                        PopupMenuItem::new("Copy (Ctrl+C)")
+                                            .icon(Icon::new(Lucide::Copy))
+                                            .on_click(move |_, _, cx| {
+                                                _ = grid.update(cx, |this, cx| {
+                                                    this.copy_as(
+                                                        if this.copy_csv { csv } else { tsv },
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
+                                    )
                                     .separator()
                                     .label("Copy as")
-                                    .menu("CSV", Box::new(CopyCsv))
-                                    .menu("JSON", Box::new(CopyJson))
-                                    .menu("Markdown", Box::new(CopyMarkdown))
-                                    .menu("SQL INSERT", Box::new(CopySqlInsert))
-                                    .menu("SQL IN-list", Box::new(CopySqlInList))
+                                    .menu_with_icon(
+                                        "CSV",
+                                        Icon::new(Lucide::Sheet),
+                                        Box::new(CopyCsv),
+                                    )
+                                    .menu_with_icon(
+                                        "JSON",
+                                        Icon::new(Lucide::Braces),
+                                        Box::new(CopyJson),
+                                    )
+                                    .menu_with_icon(
+                                        "Markdown",
+                                        Icon::new(Lucide::FileText),
+                                        Box::new(CopyMarkdown),
+                                    )
+                                    .menu_with_icon(
+                                        "SQL INSERT",
+                                        Icon::new(Lucide::Code),
+                                        Box::new(CopySqlInsert),
+                                    )
+                                    .menu_with_icon(
+                                        "SQL IN-list",
+                                        Icon::new(Lucide::List),
+                                        Box::new(CopySqlInList),
+                                    )
                                     .separator()
-                                    .menu("Paste (Ctrl+V)", Box::new(Paste))
-                                    .menu("Edit selected cells… (Enter)", Box::new(SetValue))
+                                    .menu_with_icon(
+                                        "Paste (Ctrl+V)",
+                                        Icon::new(Lucide::ClipboardPaste),
+                                        Box::new(Paste),
+                                    )
+                                    .menu_with_icon(
+                                        "Edit selected cells… (Enter)",
+                                        Icon::new(Lucide::Pencil),
+                                        Box::new(SetValue),
+                                    )
                             }
                         }),
                 )

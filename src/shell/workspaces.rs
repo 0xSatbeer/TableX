@@ -1,9 +1,10 @@
 //! The titlebar's workspace switcher and moving connections between workspaces.
 
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenuItem;
-use gpui_kit::component::{Sizable as _, WindowExt as _};
+use gpui_kit::component::{Icon, Sizable as _, WindowExt as _};
 use gpui_kit::*;
 
 use crate::model::{ConnectionId, ConnectionStatus, Workspace};
@@ -38,18 +39,24 @@ impl Shell {
                 let (new, rename, delete) = (shell.clone(), shell.clone(), shell.clone());
                 menu.separator()
                     .item(
-                        PopupMenuItem::new("New workspace…").on_click(move |_, window, cx| {
-                            _ = new.update(cx, |this, cx| this.ask_name(None, window, cx));
-                        }),
+                        PopupMenuItem::new("New workspace…")
+                            .icon(Icon::new(Lucide::Plus))
+                            .on_click(move |_, window, cx| {
+                                _ = new.update(cx, |this, cx| this.ask_name(None, window, cx));
+                            }),
                     )
                     .item(
-                        PopupMenuItem::new("Rename workspace…").on_click(move |_, window, cx| {
-                            _ = rename
-                                .update(cx, |this, cx| this.ask_name(Some(current), window, cx));
-                        }),
+                        PopupMenuItem::new("Rename workspace…")
+                            .icon(Icon::new(Lucide::Pencil))
+                            .on_click(move |_, window, cx| {
+                                _ = rename.update(cx, |this, cx| {
+                                    this.ask_name(Some(current), window, cx)
+                                });
+                            }),
                     )
                     .item(
                         PopupMenuItem::new("Delete workspace…")
+                            .icon(Icon::new(Lucide::Trash))
                             .disabled(!deletable)
                             .on_click(move |_, window, cx| {
                                 _ = delete.update(cx, |this, cx| this.confirm_delete(window, cx));

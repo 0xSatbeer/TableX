@@ -18,6 +18,8 @@ use crate::{ddl, theme};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sub {
     Data,
+    // Unreachable since the tab menu lost its sub-tab switch; kept, with its tests, for a future entry point.
+    #[allow(dead_code)]
     Structure,
     /// DDL on a table, Definition on a view.
     Ddl,
@@ -76,19 +78,6 @@ impl Structure {
         self.editor
             .as_ref()
             .map_or(String::new(), |e| e.read(cx).value().to_string())
-    }
-
-    /// The sub-tabs and their names, which the tab's context menu offers.
-    pub fn subs(&self) -> &'static [(Sub, &'static str)] {
-        if self.table.view {
-            &[(Sub::Data, "Data"), (Sub::Ddl, "Definition")]
-        } else {
-            &[
-                (Sub::Data, "Data"),
-                (Sub::Structure, "Structure"),
-                (Sub::Ddl, "DDL"),
-            ]
-        }
     }
 
     pub fn show(&mut self, sub: Sub, window: &mut Window, cx: &mut Context<Self>) {
@@ -325,7 +314,7 @@ impl Structure {
                         Button::new("structure-modify")
                             .debug_selector(|| "structure-modify".into())
                             .small()
-                            .label("Modify…")
+                            .label("Modify table")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 let key = this.key.clone();
                                 this.table

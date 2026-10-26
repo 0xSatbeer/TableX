@@ -473,3 +473,35 @@ fn renaming_a_column_through_another_ones_name_leaves_that_ones_key_alone(
         strings(&[r#"ALTER TABLE "public"."t" RENAME COLUMN "a" TO "c""#])
     );
 }
+
+#[gpui_kit::test]
+fn the_editor_keeps_its_height_when_the_definition_arrives(cx: &mut gpui_kit::TestAppContext) {
+    let (mut cx, _editor, fake) = open_unloaded(cx);
+    // The dialog slides in on the wall clock; bounds are read from still frames.
+    let settle = |cx: &mut gpui_kit::VisualTestContext| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    };
+    settle(&mut cx);
+    assert!(
+        cx.debug_bounds("columns-loading").is_some(),
+        "loading first"
+    );
+    let before = cx
+        .debug_bounds("table-status")
+        .expect("status drawn")
+        .origin
+        .y;
+    answer_def(&fake, &mut cx);
+    settle(&mut cx);
+    let after = cx
+        .debug_bounds("table-status")
+        .expect("status drawn")
+        .origin
+        .y;
+    assert_eq!(
+        before, after,
+        "the status line stays put, so the dialog didn't grow"
+    );
+}

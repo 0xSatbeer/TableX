@@ -539,9 +539,14 @@ pub(super) fn console_tab(
             console::ConsoleEvent::Logged(entry) => this
                 .bottom_panel
                 .update(cx, |panel, cx| panel.push(entry.clone(), cx)),
-            console::ConsoleEvent::Finished => this
-                .bottom_panel
-                .update(cx, |panel, cx| panel.show_run(!shown, cx)),
+            console::ConsoleEvent::Finished => {
+                if !this.layout.bottom_visible {
+                    this.layout.toggle_bottom();
+                }
+                this.bottom_panel
+                    .update(cx, |panel, cx| panel.show_run(!shown, cx));
+                cx.notify();
+            }
             console::ConsoleEvent::Moved => this.console_moved(&console, cx),
             console::ConsoleEvent::Lost => {
                 let tab = this

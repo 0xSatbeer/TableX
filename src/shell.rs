@@ -139,9 +139,8 @@ pub(crate) fn open_shell(
                 shell.persist_config(&root, window, cx);
                 shell.persist_workspaces(&root, window, cx);
                 shell.persist_session(&root, window, cx);
-                shell
-                    .bottom_panel
-                    .update(cx, |p, cx| p.persist_log(root, cx));
+                // Logs live only in memory; drop the file older builds kept.
+                _ = std::fs::remove_file(root.join("logs").join("queries.jsonl"));
             }
             if let Some(dir) = user_themes {
                 shell.watch_user_themes(dir, window, cx);

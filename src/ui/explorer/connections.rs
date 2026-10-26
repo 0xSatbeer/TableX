@@ -229,25 +229,49 @@ impl Explorer {
     /// Connection `id`'s session is gone: marks it Disconnected, drops its sessions and loads, tells
     /// the Shell (`ConnectionLost`) and shows one toast. Does nothing while it isn't connected.
     pub fn lost(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
-        let workspace = self.workspace.read(cx);
-        let Some(conn) = workspace.connections.iter().find(|c| c.id == id) else {
+        let Some(name) = self.close(id, cx) else {
             return;
         };
-        if conn.status != ConnectionStatus::Connected {
+        let notice = format!("Lost connection to {name}");
+        let window = self.window;
+        // Deferred: callers run inside entity or window updates.
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| toast::error(notice, window, cx));
+        });
+    }
+
+    /// Disconnect in a row's menu: closes the selected row's connection and selects its row.
+    pub(super) fn disconnect_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(ci) = self.nodes.get(self.selected).map(|n| n.conn) else {
             return;
+        };
+        let id = self.workspace.read(cx).connections[ci].id;
+        if self.close(id, cx).is_some() {
+            let row = self
+                .nodes
+                .iter()
+                .position(|n| n.conn == ci && matches!(n.kind, NodeKind::Connection(_)));
+            self.selected = row.unwrap_or(0);
+            cx.notify();
         }
-        let notice = format!("Lost connection to {}", conn.name);
+    }
+
+    /// Drops connection `id`'s sessions and loads, marks it Disconnected and tells the Shell
+    /// (`ConnectionLost`). Returns its name, or None when it wasn't connected.
+    fn close(&mut self, id: ConnectionId, cx: &mut Context<Self>) -> Option<String> {
+        let workspace = self.workspace.read(cx);
+        let conn = workspace.connections.iter().find(|c| c.id == id)?;
+        if conn.status != ConnectionStatus::Connected {
+            return None;
+        }
+        let name = conn.name.clone();
         self.next_gen(id);
         self.sessions.retain(|(conn, _), _| *conn != id);
         self.loads.retain(|k, _| !of_connection(k, id));
         self.set_status(id, ConnectionStatus::Disconnected, cx);
         self.refresh(cx);
         cx.emit(ConnectionLost { id });
-        let window = self.window;
-        // Deferred: callers run inside entity or window updates.
-        cx.defer(move |cx| {
-            let _ = window.update(cx, |_, window, cx| toast::error(notice, window, cx));
-        });
+        Some(name)
     }
 
     /// Closes the sessions of every connection whose params changed or that was deleted, drops

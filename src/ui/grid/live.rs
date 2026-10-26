@@ -95,7 +95,8 @@ pub(crate) fn select_sql(
     } else if key.is_empty() {
         String::new()
     } else {
-        let cols: Vec<_> = key.iter().map(|c| ident(c)).collect();
+        // Newest first by default: the key descending.
+        let cols: Vec<_> = key.iter().map(|c| format!("{} DESC", ident(c))).collect();
         format!(" ORDER BY {}", cols.join(", "))
     };
     format!(

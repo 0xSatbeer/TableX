@@ -4,7 +4,7 @@ use crate::model::{Column, ColumnMeta, QueryError, QueryErrorKind, QuerySource, 
 use std::sync::Arc;
 
 pub(super) const PAGE_1: &str =
-    r#"SELECT * FROM "public"."users" ORDER BY "id" LIMIT 500 OFFSET 0"#;
+    r#"SELECT * FROM "public"."users" ORDER BY "id" DESC LIMIT 500 OFFSET 0"#;
 
 pub(super) fn column(name: &str, is_pk: bool) -> Column {
     Column {
@@ -148,7 +148,7 @@ fn next_reads_the_following_page_and_stops_after_a_short_one(cx: &mut gpui_kit::
     click(&mut cx, "grid-next");
     assert_eq!(
         fake.queried().last().map(String::as_str),
-        Some(r#"SELECT * FROM "public"."users" ORDER BY "id" LIMIT 500 OFFSET 500"#)
+        Some(r#"SELECT * FROM "public"."users" ORDER BY "id" DESC LIMIT 500 OFFSET 500"#)
     );
     answer(&fake, Ok(rows(3)), &mut cx);
     assert_eq!(grid_rows(&shell, &cx), 3);
@@ -364,7 +364,7 @@ fn a_failing_filter_shows_the_error_and_keeps_the_rows(cx: &mut gpui_kit::TestAp
     cx.run_until_parked();
     assert_eq!(
         fake.queried().last().map(String::as_str),
-        Some(r#"SELECT * FROM "public"."users" ORDER BY "id" LIMIT 500 OFFSET 500"#),
+        Some(r#"SELECT * FROM "public"."users" ORDER BY "id" DESC LIMIT 500 OFFSET 500"#),
         "F5 reads the shown page, not the failed filter"
     );
     answer(&fake, Ok(rows(3)), &mut cx);

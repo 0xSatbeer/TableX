@@ -682,6 +682,8 @@ impl TableEditor {
         let Some(form) = &self.form else {
             return div()
                 .debug_selector(|| "columns-loading".into())
+                // As tall as the loaded list, so the dialog doesn't grow when it arrives.
+                .h(px(LIST_H + LIST_CHROME))
                 .text_size(theme::ui_sm())
                 .text_color(theme::text_secondary(cx.theme()))
                 .child("Loading columns…")
@@ -1015,4 +1017,5 @@ impl TableEditor {
 
 const LIST_H: f32 = 410.;
 /// The toolbar and borders around the list, so the SQL tab matches the others' height.
-const LIST_CHROME: f32 = 40.;
+// shortcut: measured at 100% UI scale, off by a few px at other scales; derive from theme tokens if that shows.
+const LIST_CHROME: f32 = 31.5;

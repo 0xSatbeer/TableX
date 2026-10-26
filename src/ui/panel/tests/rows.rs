@@ -151,35 +151,3 @@ fn truncated_log_sql_shows_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
         );
     }
 }
-
-#[gpui_kit::test]
-fn persisted_log_loads_and_pushes_append(cx: &mut gpui_kit::TestAppContext) {
-    use gpui_kit::{AppContext as _, Entity};
-    let root = std::env::temp_dir().join(format!("queryx-panel-log-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let saved = entry(1, "SELECT saved", QueryStatus::Ok, QuerySource::Console);
-    crate::persist::append_query_log(&root, &saved).unwrap();
-    cx.update(gpui_kit::init);
-    let (window, panel): (_, Entity<super::BottomPanel>) = cx.update(|cx| {
-        gpui_kit::open_window(Default::default(), cx, |window, cx| {
-            cx.new(|cx| {
-                super::BottomPanel::new(
-                    cx.new(|_| crate::mock::workspaces().remove(0)),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            })
-        })
-        .expect("open test window")
-    });
-    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
-    let new = entry(1, "SELECT new", QueryStatus::Ok, QuerySource::Console);
-    panel.update(&mut cx, |p, cx| {
-        p.persist_log(root.clone(), cx);
-        p.push(new.clone(), cx);
-    });
-    let logged = panel.read_with(&cx, |p, _| p.logged());
-    assert_eq!(logged, [saved.clone(), new.clone()]);
-    assert_eq!(crate::persist::load_query_log(&root), [saved, new]);
-}
