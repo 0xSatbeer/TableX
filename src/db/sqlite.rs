@@ -202,7 +202,6 @@ impl Driver for Sqlite {
                     columns: None,
                     keys: Vec::new(),
                     indexes: Vec::new(),
-                    row_estimate: None,
                 })
             })?;
             rows.collect()

@@ -120,14 +120,9 @@ fn truncated_status_path_shows_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
             ..Default::default()
         };
         let (window, bar): (_, Entity<super::StatusBar>) = cx.update(|cx| {
-            gpui_kit::open_window(options, cx, |window, cx| {
+            gpui_kit::open_window(options, cx, |_, cx| {
                 cx.new(|cx| {
-                    super::StatusBar::new(
-                        cx.new(|_| crate::mock::workspaces().remove(0)),
-                        true,
-                        window,
-                        cx,
-                    )
+                    super::StatusBar::new(cx.new(|_| crate::mock::workspaces().remove(0)), true, cx)
                 })
             })
             .expect("open test window")

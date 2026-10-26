@@ -151,7 +151,6 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
         columns: Some(vec![]),
         keys: vec![],
         indexes: vec![],
-        row_estimate: None,
     };
     for view in [
         "active_users",
@@ -164,7 +163,6 @@ fn schema(name: &str, salt: u64, tables: usize) -> Schema {
         v.kind = ObjectKind::View;
         v.keys.clear();
         v.indexes.clear();
-        v.row_estimate = None;
         v.columns.iter_mut().flatten().for_each(|c| c.is_pk = false);
         objects.push(v);
     }
@@ -260,6 +258,5 @@ fn table(name: String, r: u64) -> DbObject {
         columns: Some(columns),
         keys,
         indexes,
-        row_estimate: Some(mix(r) % 3_000_000),
     }
 }

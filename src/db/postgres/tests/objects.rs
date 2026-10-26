@@ -83,42 +83,7 @@ fn objects_come_by_kind_each_sorted_by_name() {
 }
 
 #[test]
-fn tables_carry_their_row_estimate_unless_never_analyzed() {
-    let Some(pg) = test_pg() else { return };
-    let schema = Scratch::new(&pg, "SCHEMA", "");
-    admin(
-        &pg,
-        &format!(
-            "SET search_path = {};
-         CREATE TABLE t (a int); INSERT INTO t SELECT generate_series(1, 1200); ANALYZE t;
-         CREATE TABLE one (a int); INSERT INTO one VALUES (1); ANALYZE one;
-         CREATE TABLE emptied (a int); ANALYZE emptied;
-         CREATE TABLE fresh (a int); INSERT INTO fresh VALUES (1);
-         CREATE VIEW v AS SELECT 1 AS x;",
-            schema.name
-        ),
-    );
-    // (object, row estimate)
-    let cases = [
-        ("t", Some(1200)),
-        ("one", Some(1)),
-        ("emptied", Some(0)),
-        ("fresh", None),
-        ("v", None),
-    ];
-    let (objects, _) = objects_of(&pg, &schema.name);
-    let objects = objects.expect("objects");
-    for (name, want) in cases {
-        let object = objects
-            .iter()
-            .find(|o| o.name == name)
-            .unwrap_or_else(|| panic!("{name} listed"));
-        assert_eq!(object.row_estimate, want, "{name}");
-    }
-}
-
-#[test]
-fn a_partitioned_table_lists_as_a_table_with_its_estimate_once_analyzed() {
+fn a_partitioned_table_lists_as_a_table() {
     let Some(pg) = test_pg() else { return };
     let schema = Scratch::new(&pg, "SCHEMA", "");
     admin(
@@ -139,14 +104,7 @@ fn a_partitioned_table_lists_as_a_table_with_its_estimate_once_analyzed() {
             .find(|o| o.name == "ev")
             .expect("ev listed")
     };
-    let before = ev();
-    assert_eq!(
-        (before.kind, before.row_estimate),
-        (ObjectKind::Table, None),
-        "never analyzed"
-    );
-    admin(&pg, &format!("ANALYZE {}.ev", schema.name));
-    assert_eq!(ev().row_estimate, Some(1200), "analyzed");
+    assert_eq!(ev().kind, ObjectKind::Table);
 }
 
 #[test]

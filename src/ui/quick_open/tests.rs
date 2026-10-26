@@ -11,7 +11,6 @@ fn object(kind: ObjectKind, name: &str) -> DbObject {
         columns: None,
         keys: vec![],
         indexes: vec![],
-        row_estimate: None,
     }
 }
 

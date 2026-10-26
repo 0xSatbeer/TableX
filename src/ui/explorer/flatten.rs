@@ -2,28 +2,6 @@
 
 use super::*;
 
-/// A row estimate rounded for the tree: `999`, `1.2k`, `12k`, `1.2M`.
-pub(super) fn row_estimate_label(rows: Option<u64>) -> Option<String> {
-    let rows = rows?;
-    if rows < 1000 {
-        return Some(rows.to_string());
-    }
-    let mut scaled = rows as f64;
-    for unit in ["k", "M", "B"] {
-        scaled /= 1000.0;
-        let rounded = if scaled < 10.0 {
-            (scaled * 10.0).round() / 10.0
-        } else {
-            scaled.round()
-        };
-        // 999_999 rounds to 1000k; carry it to the next unit instead.
-        if rounded < 1000.0 || unit == "B" {
-            return Some(format!("{rounded}{unit}"));
-        }
-    }
-    unreachable!("the last unit always returns")
-}
-
 /// The rows under a structure part: label, muted suffix, primary key.
 pub(super) fn part_rows(obj: &DbObject, part: Part) -> Vec<(&str, Option<&str>, bool)> {
     match part {
@@ -240,7 +218,6 @@ pub(super) fn flatten(
                     for obj in objects {
                         let key = format!("{key}/{}", seg(&obj.name));
                         let kind = NodeKind::Object(kind);
-                        let suffix = row_estimate_label(obj.row_estimate).map(Into::into);
                         let parts = [
                             (Part::Columns, obj.columns.as_ref().map_or(0, Vec::len)),
                             (Part::Keys, obj.keys.len()),
@@ -252,7 +229,7 @@ pub(super) fn flatten(
                         if !push(FlatNode {
                             expandable,
                             unloaded,
-                            suffix,
+                            suffix: None,
                             ..node(key.clone(), kind, &obj.name, 4)
                         }) {
                             continue;

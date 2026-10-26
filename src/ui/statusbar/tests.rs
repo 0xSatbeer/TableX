@@ -4,14 +4,6 @@ mod aggregate;
 mod connection_status;
 mod context;
 
-#[test]
-fn reads_private_memory_from_proc_status() {
-    let status =
-        "Name:\tqueryx\nVmRSS:\t   92160 kB\nRssAnon:\t   35840 kB\nRssFile:\t   56320 kB\n";
-    assert_eq!(super::rss_anon_mb(status), Some(35));
-    assert_eq!(super::rss_anon_mb("Name:\tqueryx\n"), None);
-}
-
 /// A bar `width` px wide over a workspace with Postgres connection 1 (db.acme.internal:5433)
 /// and SQLite connection 2 (/x/local.db), started with or without `demo`.
 fn open_bar(
@@ -62,8 +54,8 @@ fn open_bar(
     };
     let (window, bar) = cx.update(|cx| {
         let workspace = workspace.clone();
-        gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| super::StatusBar::new(workspace, demo, window, cx))
+        gpui_kit::open_window(options, cx, |_, cx| {
+            cx.new(|cx| super::StatusBar::new(workspace, demo, cx))
         })
         .expect("open test window")
     });

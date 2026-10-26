@@ -34,7 +34,6 @@ pub(super) fn table(name: &str) -> crate::model::DbObject {
         columns: None,
         keys: vec![],
         indexes: vec![],
-        row_estimate: None,
     }
 }
 

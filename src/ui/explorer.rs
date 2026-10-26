@@ -120,7 +120,7 @@ struct FlatNode {
     count: Option<usize>,
     expandable: bool,
     expanded: bool,
-    /// Muted text after the label: a table's row estimate or a column's type.
+    /// Muted text after the label: a column's type.
     suffix: Option<SharedString>,
     /// A primary-key column.
     pk: bool,

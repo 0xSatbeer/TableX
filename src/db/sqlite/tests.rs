@@ -185,12 +185,7 @@ fn objects_are_tables_and_views_sorted_by_name_without_internal_tables() {
         let objects = block_on(Sqlite.objects(&session, "main")).expect(sql);
         let got: Vec<_> = objects.iter().map(|o| (o.kind, o.name.as_str())).collect();
         assert_eq!(got, want, "{sql}");
-        assert!(
-            objects
-                .iter()
-                .all(|o| o.columns.is_none() && o.row_estimate.is_none()),
-            "{sql}"
-        );
+        assert!(objects.iter().all(|o| o.columns.is_none()), "{sql}");
     }
 }
 

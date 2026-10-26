@@ -23,7 +23,6 @@ fn object(kind: ObjectKind, name: &str, columns: &[&str]) -> DbObject {
         columns: Some(columns.iter().map(|c| column(c, "int4")).collect()),
         keys: vec![],
         indexes: vec![],
-        row_estimate: None,
     }
 }
 

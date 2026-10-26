@@ -1,6 +1,4 @@
-//! Status bar (QX-018). Its own entity so the memory readout re-renders only this bar.
-
-use std::time::Duration;
+//! Status bar (QX-018). Its own entity so its updates re-render only this bar.
 
 use gpui_kit::component::input::EditorState;
 use gpui_kit::*;
@@ -15,8 +13,6 @@ mod render;
 
 pub use aggregate::aggregate;
 
-const MEMORY_INTERVAL: Duration = Duration::from_secs(5);
-
 pub struct StatusBar {
     /// Where the active origin's connection status comes from.
     workspace: Entity<Workspace>,
@@ -26,7 +22,6 @@ pub struct StatusBar {
     origin: Option<Origin>,
     /// Some tab is open, so a missing origin means sample data rather than nothing.
     has_tab: bool,
-    memory_mb: Option<u64>,
     /// 1-based line and column of the focused console editor, and its selection length in chars.
     cursor: Option<(u32, u32, usize)>,
     _editor: Option<Subscription>,
@@ -38,9 +33,6 @@ pub struct StatusBar {
     grid_focused: bool,
     selection_key: Option<SelectionKey>,
     _grid: Option<Subscription>,
-    /// Runs only while the window is active; dropping it stops sampling.
-    sampler: Option<Task<()>>,
-    _activation: Subscription,
     _workspace: Subscription,
 }
 
@@ -94,18 +86,12 @@ fn readout(conn: &Connection) -> Readout {
 }
 
 impl StatusBar {
-    pub fn new(
-        workspace: Entity<Workspace>,
-        demo: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let mut this = Self {
+    pub fn new(workspace: Entity<Workspace>, demo: bool, cx: &mut Context<Self>) -> Self {
+        Self {
             workspace: workspace.clone(),
             demo,
             origin: None,
             has_tab: false,
-            memory_mb: None,
             cursor: None,
             _editor: None,
             mode: None,
@@ -114,12 +100,8 @@ impl StatusBar {
             grid_focused: false,
             selection_key: None,
             _grid: None,
-            sampler: None,
-            _activation: cx.observe_window_activation(window, Self::sync_sampler),
             _workspace: cx.observe(&workspace, |_, _, cx| cx.notify()),
-        };
-        this.sync_sampler(window, cx);
-        this
+        }
     }
 
     pub fn set_origin(&mut self, origin: Option<Origin>, has_tab: bool, cx: &mut Context<Self>) {
@@ -203,38 +185,6 @@ impl StatusBar {
             cx.notify();
         }
     }
-
-    fn sync_sampler(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !window.is_window_active() {
-            self.sampler = None;
-        } else if self.sampler.is_none() {
-            self.sampler = Some(cx.spawn(async move |this, cx| {
-                loop {
-                    let mb = std::fs::read_to_string("/proc/self/status")
-                        .ok()
-                        .and_then(|s| rss_anon_mb(&s));
-                    let alive = this.update(cx, |this, cx| {
-                        if this.memory_mb != mb {
-                            this.memory_mb = mb;
-                            cx.notify();
-                        }
-                    });
-                    if alive.is_err() {
-                        break;
-                    }
-                    cx.background_executor().timer(MEMORY_INTERVAL).await;
-                }
-            }));
-        }
-    }
-}
-
-/// Private memory (`RssAnon`) in MB, the number our budgets use (TICKET_MASTER §1).
-/// Linux only; elsewhere `/proc/self/status` is missing and the readout hides.
-fn rss_anon_mb(proc_status: &str) -> Option<u64> {
-    let line = proc_status.lines().find(|l| l.starts_with("RssAnon:"))?;
-    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
-    Some(kb / 1024)
 }
 
 #[cfg(test)]

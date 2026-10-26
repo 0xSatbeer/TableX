@@ -250,8 +250,6 @@ pub struct DbObject {
     pub columns: Option<Vec<Column>>,
     pub keys: Vec<Key>,
     pub indexes: Vec<Index>,
-    /// Tables only; views and other kinds have none.
-    pub row_estimate: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -191,15 +191,5 @@ impl Render for StatusBar {
                 0 => format!("Ln {line}, Col {col}"),
                 n => format!("Ln {line}, Col {col} ({n} selected)"),
             }))
-            .children(self.memory_mb.map(|mb| {
-                div()
-                    .id("memory")
-                    .font_family(theme.mono_font_family.clone())
-                    .pr(theme::space_4())
-                    .tooltip(|window, cx| {
-                        Tooltip::new("QueryX private memory (RssAnon)").build(window, cx)
-                    })
-                    .child(format!("{mb} MB"))
-            }))
     }
 }

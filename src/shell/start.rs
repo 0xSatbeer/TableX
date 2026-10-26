@@ -182,8 +182,7 @@ impl Shell {
             }
         })
         .detach();
-        let status_bar =
-            cx.new(|cx| statusbar::StatusBar::new(workspace.clone(), demo, window, cx));
+        let status_bar = cx.new(|cx| statusbar::StatusBar::new(workspace.clone(), demo, cx));
         cx.subscribe(&status_bar, |this, _, statusbar::Connect(id), cx| {
             this.explorer
                 .update(cx, |e, cx| e.connect_connection(*id, cx))

@@ -252,7 +252,6 @@ mod tests {
             columns: None,
             keys: Vec::new(),
             indexes: Vec::new(),
-            row_estimate: None,
         }
     }
 

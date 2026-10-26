@@ -68,20 +68,6 @@ fn all_objects() -> Vec<DbObject> {
 }
 
 #[test]
-fn tables_have_row_estimates_and_nothing_else_does() {
-    for o in all_objects() {
-        let want = o.kind == ObjectKind::Table;
-        assert_eq!(
-            o.row_estimate.is_some(),
-            want,
-            "{:?} {}: estimate presence",
-            o.kind,
-            o.name
-        );
-    }
-}
-
-#[test]
 fn only_id_columns_are_primary_keys() {
     for o in all_objects() {
         for c in o.columns.iter().flatten() {
