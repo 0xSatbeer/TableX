@@ -43,6 +43,7 @@ mod rows;
 mod selection;
 mod source;
 mod submit;
+mod table_page;
 mod toolbar;
 
 pub use self::export::Rerun;
@@ -207,6 +208,30 @@ impl Grid {
             grid.widths[c] = grid.widths[c].min(MAX_OPEN_WIDTH);
         }
         grid
+    }
+}
+
+impl Grid {
+    /// Shows `rs` in place of the rows from its first page, dropping pending edits. Column
+    /// widths, order and hidden columns stay while the columns do; returns whether they changed.
+    pub fn replace(&mut self, rs: ResultSet, cx: &mut Context<Self>) -> bool {
+        let reset = rs.columns != self.all.columns();
+        self.loaded = Rc::new(rs);
+        self.all = self.loaded.clone();
+        (self.added, self.deleted) = (0, BTreeSet::new());
+        self.edits.clear();
+        self.editing = None;
+        self.set_page(0, self.page_size, cx);
+        if reset {
+            let n = self.all.columns().len();
+            (self.widths, self.hidden) = (vec![DEFAULT_WIDTH; n], vec![false; n]);
+            self.col_order = (0..n).collect();
+            for c in 0..n {
+                self.autofit(c);
+                self.widths[c] = self.widths[c].min(MAX_OPEN_WIDTH);
+            }
+        }
+        reset
     }
 }
 

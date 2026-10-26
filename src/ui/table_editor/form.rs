@@ -174,6 +174,26 @@ impl TableForm {
         c.nullable &= !is_pk;
     }
 
+    /// Rows in the Indexes list: the indexes, then every UNIQUE constraint, as Structure lists them.
+    pub fn index_rows(&self) -> usize {
+        self.indexes.len() + self.unique_keys.len()
+    }
+
+    /// Removes Indexes list row `ix`. Returns the index's position when the row was an index,
+    /// whose inputs go too; a UNIQUE constraint has none.
+    pub fn remove_index_row(&mut self, ix: usize) -> Option<usize> {
+        match ix.checked_sub(self.indexes.len()) {
+            Some(n) => {
+                self.unique_keys.remove(n);
+                None
+            }
+            None => {
+                self.indexes.remove(ix);
+                Some(ix)
+            }
+        }
+    }
+
     /// The UNIQUE constraints, by their columns' current names.
     pub fn unique_indexes(&self) -> Vec<Index> {
         let name = |&ix: &usize| self.columns[ix].1.name.clone();
@@ -255,6 +275,23 @@ pub fn names(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_indexes_list_is_the_indexes_then_the_unique_constraints() {
+        let mut form = TableForm::create();
+        form.add_column();
+        form.set_unique(0, true);
+        form.indexes.push(Index {
+            name: "t_b_idx".into(),
+            columns: vec!["b".into()],
+            unique: false,
+        });
+        assert_eq!(form.index_rows(), 2);
+        assert_eq!(form.remove_index_row(1), None, "row 1 is the constraint");
+        assert!(form.unique_keys.is_empty());
+        assert_eq!(form.remove_index_row(0), Some(0), "row 0 is the index");
+        assert_eq!(form.index_rows(), 0);
+    }
 
     #[test]
     fn type_choices_add_the_tables_own_types_once_after_the_common_ones() {

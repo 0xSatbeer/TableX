@@ -185,7 +185,7 @@ fn the_active_console_shows_its_mode_and_other_tabs_show_none(cx: &mut gpui_kit:
         bar.update(&mut cx, |bar, cx| bar.set_console(Some(&console), cx));
         console.update_in(&mut cx, |c, window, cx| {
             c.set_manual(manual, window, cx);
-            c.in_transaction = in_transaction;
+            c.session.in_transaction = in_transaction;
             cx.notify();
         });
         cx.run_until_parked();

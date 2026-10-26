@@ -284,21 +284,11 @@ impl Shell {
         self.tab_changed(cx);
     }
 
-    /// Connection `id` was lost: its tables and structures show Disconnected, its consoles drop
-    /// their sessions and stay editable.
+    /// Connection `id` was lost: each of its tabs shows it.
     pub(super) fn connection_lost(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
         for tab in &self.tabs.tabs {
-            if !tab.origin.as_ref().is_some_and(|o| o.connection == id) {
-                continue;
-            }
-            match &tab.content {
-                TabContent::Grid(grid, structure) => {
-                    grid.update(cx, |grid, cx| grid.set_lost(cx));
-                    if let Some(s) = structure {
-                        s.update(cx, |s, cx| s.lost(cx));
-                    }
-                }
-                TabContent::Console(console) => console.update(cx, |c, cx| c.lost(cx)),
+            if tab.origin.as_ref().is_some_and(|o| o.connection == id) {
+                tab.content.lost(cx);
             }
         }
     }
@@ -311,14 +301,8 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         for tab in &self.tabs.tabs {
-            if !tab.origin.as_ref().is_some_and(|o| o.connection == id) {
-                continue;
-            }
-            if let TabContent::Grid(grid, structure) = &tab.content {
-                grid.update(cx, |grid, cx| grid.restored(cx));
-                if let Some(s) = structure {
-                    s.update(cx, |s, cx| s.restored(window, cx));
-                }
+            if tab.origin.as_ref().is_some_and(|o| o.connection == id) {
+                tab.content.restored(window, cx);
             }
         }
     }

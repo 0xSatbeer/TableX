@@ -29,12 +29,61 @@ pub(super) fn click_action(kind: NodeKind, hit: Hit) -> Click {
 }
 
 /// A row's menu: a connection's, a Postgres database's, schema's or table's, or Refresh alone.
-#[derive(Clone, Copy)]
-enum Menu {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum RowMenu {
     Connection,
     /// The item's label, naming what it modifies.
     Modify(&'static str),
     Refresh,
+}
+
+/// What a row's context menu offers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct RowActions {
+    pub(super) menu: RowMenu,
+    /// + New ▸ Table, Database, Role, User.
+    pub(super) new: bool,
+    /// Open console and New console.
+    pub(super) console: bool,
+    /// An object row: whether it opens in a tab, and whether Drop… can name it.
+    pub(super) object: Option<(bool, bool)>,
+    pub(super) connected: bool,
+}
+
+/// The menu a row of `kind` gets on a `db` connection, or None for rows without one.
+pub(super) fn row_actions(
+    kind: NodeKind,
+    db: DbKind,
+    connected: bool,
+    label: &str,
+) -> Option<RowActions> {
+    let postgres_owned = db == DbKind::Postgres
+        && matches!(
+            kind,
+            NodeKind::Database | NodeKind::Schema | NodeKind::Object(ObjectKind::Table)
+        );
+    let menu = match kind {
+        NodeKind::Connection(_) => RowMenu::Connection,
+        NodeKind::Database if postgres_owned => RowMenu::Modify("Modify database"),
+        NodeKind::Schema if postgres_owned => RowMenu::Modify("Modify schema"),
+        NodeKind::Object(ObjectKind::Table) if postgres_owned => RowMenu::Modify("Modify table"),
+        NodeKind::Database | NodeKind::Schema | NodeKind::Object(_) => RowMenu::Refresh,
+        _ => return None,
+    };
+    let object = match kind {
+        NodeKind::Object(k) => Some((
+            opens_tab(kind),
+            crate::ddl::drop_object(k, None, label).is_some(),
+        )),
+        _ => None,
+    };
+    Some(RowActions {
+        menu,
+        new: postgres_owned,
+        console: matches!(kind, NodeKind::Database | NodeKind::Schema),
+        object,
+        connected,
+    })
 }
 
 /// Table-like objects open in a tab and expand into their structure.
@@ -55,56 +104,19 @@ impl Explorer {
         let theme = cx.theme();
         let focused = self.focus.contains_focused(window, cx);
         let ws = self.workspace.read(cx);
-        let menus: Vec<Option<Menu>> = range
-            .clone()
-            .map(|ix| match self.nodes[ix].kind {
-                NodeKind::Connection(_) => Some(Menu::Connection),
-                kind @ (NodeKind::Database
-                | NodeKind::Schema
-                | NodeKind::Object(ObjectKind::Table))
-                    if ws.connections[self.nodes[ix].conn].kind() == DbKind::Postgres =>
-                {
-                    Some(Menu::Modify(match kind {
-                        NodeKind::Database => "Modify database",
-                        NodeKind::Schema => "Modify schema",
-                        _ => "Modify table",
-                    }))
-                }
-                NodeKind::Database | NodeKind::Schema | NodeKind::Object(_) => Some(Menu::Refresh),
-                _ => None,
-            })
-            .collect();
-        // + New: Postgres database, schema and table rows.
-        let news: Vec<bool> = range
+        let explorer = cx.entity().downgrade();
+        let targets = self.move_targets.clone();
+        let actions: Vec<Option<RowActions>> = range
             .clone()
             .map(|ix| {
                 let node = &self.nodes[ix];
-                matches!(
+                let conn = &ws.connections[node.conn];
+                row_actions(
                     node.kind,
-                    NodeKind::Database | NodeKind::Schema | NodeKind::Object(ObjectKind::Table)
-                ) && ws.connections[node.conn].kind() == DbKind::Postgres
-            })
-            .collect();
-        let explorer = cx.entity().downgrade();
-        let targets = self.move_targets.clone();
-        let consoles: Vec<bool> = range
-            .clone()
-            .map(|ix| matches!(self.nodes[ix].kind, NodeKind::Database | NodeKind::Schema))
-            .collect();
-        // Disconnect: any row of a connected connection.
-        let connected: Vec<bool> = range
-            .clone()
-            .map(|ix| ws.connections[self.nodes[ix].conn].status == ConnectionStatus::Connected)
-            .collect();
-        // Object rows: whether they open in a tab, and whether Drop… can name them.
-        let objects: Vec<Option<(bool, bool)>> = range
-            .clone()
-            .map(|ix| match self.nodes[ix].kind {
-                NodeKind::Object(kind) => Some((
-                    opens_tab(NodeKind::Object(kind)),
-                    crate::ddl::drop_object(kind, None, &self.nodes[ix].label).is_some(),
-                )),
-                _ => None,
+                    conn.kind(),
+                    conn.status == ConnectionStatus::Connected,
+                    &node.label,
+                )
             })
             .collect();
         range
@@ -263,9 +275,9 @@ impl Explorer {
                         d.child(theme::prod_badge(theme).debug_selector(|| format!("prod-badge-{ix}")))
                     })
             })
-            .zip(menus.into_iter().zip(news).zip(consoles).zip(objects).zip(connected))
-            .map(|(row, ((((menu, new), console), object), connected))| match menu {
-                Some(kind) => {
+            .zip(actions)
+            .map(|(row, actions)| match actions {
+                Some(RowActions { menu: kind, new, console, object, connected }) => {
                     let (explorer, targets) = (explorer.clone(), targets.clone());
                     row
                     .context_menu(move |menu, window, cx| {
@@ -301,18 +313,18 @@ impl Explorer {
                         };
                         let menu = menu.separator();
                         let menu = match kind {
-                            Menu::Connection => {
+                            RowMenu::Connection => {
                                 let menu = menu.menu_element_with_icon(Icon::new(Lucide::Pencil), Box::new(crate::EditConnection), |_, _| div().debug_selector(|| "menu-edit".into()).child("Edit…"));
                                 if targets.is_empty() { menu } else { move_to_menu(menu, &explorer, &targets, window, cx) }
                             }
-                            Menu::Modify(label) => menu.menu_element_with_icon(Icon::new(Lucide::SquarePen), Box::new(crate::ModifyObject), move |_, _| div().debug_selector(|| "menu-modify".into()).child(label)),
-                            Menu::Refresh => menu,
+                            RowMenu::Modify(label) => menu.menu_element_with_icon(Icon::new(Lucide::SquarePen), Box::new(crate::ModifyObject), move |_, _| div().debug_selector(|| "menu-modify".into()).child(label)),
+                            RowMenu::Refresh => menu,
                         };
                         menu.menu_element_with_icon(Icon::new(Lucide::RefreshCw), Box::new(crate::RefreshNode), |_, _| div().debug_selector(|| "menu-refresh".into()).child("Refresh"))
                             .when(connected, |m| {
                                 m.menu_element_with_icon(Icon::new(Lucide::Unplug), Box::new(crate::Disconnect), |_, _| div().debug_selector(|| "menu-disconnect".into()).child("Disconnect"))
                             })
-                            .when(matches!(kind, Menu::Connection), |m| {
+                            .when(matches!(kind, RowMenu::Connection), |m| {
                                 m.separator().menu_element_with_icon(Icon::new(Lucide::Trash).text_color(danger), Box::new(crate::DeleteConnection), |_, cx| {
                                     div().debug_selector(|| "menu-delete".into()).text_color(cx.theme().danger).child("Delete…")
                                 })

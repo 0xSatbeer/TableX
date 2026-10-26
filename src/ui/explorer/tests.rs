@@ -1,10 +1,11 @@
 use super::{
     Click, ERROR, Explorer, FlatNode, Focus, Hit, KeyRoute, Load, NodeKind, OpenObject, Part,
-    Rename, RenameKey, can_rename, click_action, default_expanded, filter_nodes, first_match,
-    flatten, fuzzy_match, highlight_ranges, no_match_text, other_names, parent_of, rename_swallows,
-    route_key, status_style, tree_nodes, validate_rename,
+    Rename, RenameKey, RowActions, RowMenu, can_rename, click_action, default_expanded,
+    filter_nodes, first_match, flatten, fuzzy_match, highlight_ranges, no_match_text, other_names,
+    parent_of, rename_swallows, route_key, row_actions, status_style, tree_nodes, validate_rename,
 };
 
+use crate::sessions::Sessions;
 use crate::{
     mock,
     model::{ConnectionStatus, DbKind, ObjectKind},

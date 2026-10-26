@@ -378,12 +378,8 @@ impl TableEditor {
     /// Removes index row `ix`, or the UNIQUE constraint listed after the indexes.
     fn remove_index(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(form) = &mut self.form else { return };
-        match ix.checked_sub(form.indexes.len()) {
-            Some(n) => _ = form.unique_keys.remove(n),
-            None => {
-                form.indexes.remove(ix);
-                self.indexes.remove(ix);
-            }
+        if let Some(index) = form.remove_index_row(ix) {
+            self.indexes.remove(index);
         }
         self.selected[1] = self.len(1).checked_sub(1).map(|last| ix.min(last));
         self.editing[1] = None;
@@ -471,12 +467,8 @@ impl TableEditor {
     }
 
     fn len(&self, list: usize) -> usize {
-        let constraints = self.form.as_ref().map_or(0, |f| f.unique_keys.len());
-        [
-            self.rows.len(),
-            self.indexes.len() + constraints,
-            self.foreign_keys.len(),
-        ][list]
+        let indexes = self.form.as_ref().map_or(0, TableForm::index_rows);
+        [self.rows.len(), indexes, self.foreign_keys.len()][list]
     }
 
     fn add(&mut self, list: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -906,10 +898,7 @@ impl TableEditor {
             ),
             (
                 "tab-indexes",
-                format!(
-                    "Indexes{}",
-                    count(form.map(|f| f.indexes.len() + f.unique_keys.len()))
-                ),
+                format!("Indexes{}", count(form.map(TableForm::index_rows))),
             ),
             (
                 "tab-fks",

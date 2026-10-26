@@ -112,10 +112,7 @@ impl Grid {
             &self.edits,
             &self.deleted,
         );
-        let production = t
-            .explorer
-            .upgrade()
-            .is_some_and(|e| e.read(cx).is_production(t.connection, cx));
+        let production = t.sessions.read(cx).is_production(t.connection, cx);
         if production {
             return self.confirm_production(statements, window, cx);
         }

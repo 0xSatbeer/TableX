@@ -200,3 +200,16 @@ fn run_all_pages_reads_until_the_cap_a_short_page_or_an_error_then_settles(
         );
     }
 }
+
+#[gpui_kit::test]
+fn paging_keeps_one_grid_so_its_column_widths_stay(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, mut cx, console) = run_select(cx, PAGE);
+    let grid = |cx: &VisualTestContext| console.read_with(cx, |c, _| c.results[0].grid.entity_id());
+    let first = grid(&cx);
+    next(&console, &mut cx);
+    fake.resolve_query("fetch app_db", Ok(numbered(500, 100)));
+    cx.run_until_parked();
+    prev(&console, &mut cx);
+    assert_eq!(grid(&cx), first);
+    assert_eq!(shown(&console, &cx), "500 rows");
+}

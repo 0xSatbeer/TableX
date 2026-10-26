@@ -52,10 +52,6 @@ impl Explorer {
             return;
         }
         // Another Postgres database needs a session of its own, opened with the same settings.
-        let open: crate::db::Reply<Session> = match self.sessions.get(&(id, db.clone())) {
-            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
-            None => self.driver.connect(&on_database(&conn.params, &db)),
-        };
         let refreshing = self.workspace.update(cx, |ws, _| {
             locate(ws, id, &segments).is_some_and(|node| node.loaded())
         });
@@ -67,21 +63,14 @@ impl Explorer {
                 Load::Loading
             },
         );
-        // Entered, so a connection Connected from the start (the demo's) matches its own results.
-        let generation = *self.gens.entry(id).or_default();
+        // Another Postgres database needs a session of its own, opened with the same settings.
+        let open = self.session_on(id, &db, cx);
+        let generation = self.generation(id, cx);
         let driver = self.driver.clone();
         cx.spawn(async move |this, cx| {
             let result = match open.await {
                 Ok(session) => {
-                    let current = this.update(cx, |this, _| {
-                        let current = this.gens.get(&id) == Some(&generation);
-                        if current {
-                            this.sessions
-                                .entry((id, db.clone()))
-                                .or_insert_with(|| session.clone());
-                        }
-                        current
-                    });
+                    let current = this.update(cx, |this, cx| this.generation(id, cx) == generation);
                     if !current.unwrap_or(false) {
                         return;
                     }
@@ -90,7 +79,7 @@ impl Explorer {
                 Err(reason) => Err(reason),
             };
             this.update(cx, |this, cx| {
-                if this.gens.get(&id) != Some(&generation) {
+                if this.generation(id, cx) != generation {
                     return;
                 }
                 match result {
@@ -135,19 +124,13 @@ impl Explorer {
                     Err(reason) => {
                         // A session the server closed is dropped, so Retry opens a new one,
                         // and its connection is lost unless it was already.
-                        let at = (id, db);
-                        if this.sessions.get(&at).is_some_and(Session::is_closed) {
-                            this.sessions.remove(&at);
-                            // `lost` bumps the generation whenever it acts.
-                            this.lost(id, cx);
-                            if this.gens.get(&id) != Some(&generation) {
-                                return;
-                            }
+                        if this.sessions.update(cx, |s, cx| s.read_failed(id, &db, cx)) {
+                            return;
                         }
                         // A connection whose databases can no longer be listed has failed as a whole.
                         if refreshing && segments.len() == 1 {
                             this.loads.remove(&key);
-                            this.set_status(id, ConnectionStatus::Error(reason), cx);
+                            this.sessions.update(cx, |s, cx| s.failed(id, reason, cx));
                             return this.refresh(cx);
                         }
                         this.workspace.update(cx, |ws, cx| {

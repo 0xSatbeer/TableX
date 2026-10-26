@@ -17,8 +17,8 @@ use super::{Console, Target};
 use crate::complete::{self, Item, ItemKind, SchemaSnapshot};
 use crate::db::{Driver, Reply, Session};
 use crate::model::{Connection, ConnectionId, DbKind, DbObject, ObjectKind};
+use crate::sessions::Sessions;
 use crate::sql;
-use crate::ui::explorer::Explorer;
 
 /// Connection, database, schema.
 type Place = (ConnectionId, String, String);
@@ -32,15 +32,15 @@ pub struct Cache {
     stale: HashSet<Place>,
     /// Requests in flight, by schema and table (`None`: the schema's objects), so each goes once.
     pending: HashSet<(Place, Option<String>)>,
-    /// The explorer whose sessions the requests run on.
-    explorer: Option<WeakEntity<Explorer>>,
+    /// The sessions the requests run on.
+    sessions: Option<WeakEntity<Sessions>>,
 }
 
 impl Global for Cache {}
 
-/// The explorer whose sessions the cache reads through from now on.
-pub fn set_explorer(explorer: WeakEntity<Explorer>, cx: &mut App) {
-    cx.default_global::<Cache>().explorer = Some(explorer);
+/// The sessions the cache reads through from now on.
+pub fn set_sessions(sessions: WeakEntity<Sessions>, cx: &mut App) {
+    cx.default_global::<Cache>().sessions = Some(sessions);
 }
 
 /// Forgets the schemas under tree path `path` (connection id, then database and schema names).
@@ -231,10 +231,8 @@ impl Cache {
 }
 
 fn session(target: &Target, cx: &App) -> Option<Session> {
-    let explorer = cx.try_global::<Cache>()?.explorer.as_ref()?.upgrade()?;
-    explorer
-        .read(cx)
-        .open_session(target.connection?, &target.database)
+    let sessions = cx.try_global::<Cache>()?.sessions.as_ref()?.upgrade()?;
+    sessions.read(cx).open(target.connection?, &target.database)
 }
 
 type Fetch = (Arc<dyn Driver>, Session);

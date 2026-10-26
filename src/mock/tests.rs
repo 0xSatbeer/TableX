@@ -91,6 +91,11 @@ fn run_query_picks_outcome_from_sql() {
         run_query("  SELECT * FROM users"),
         QueryOutcome::Rows(_)
     ));
+    // A table tab's count reads one integer cell.
+    assert!(matches!(
+        run_query("SELECT COUNT(*) FROM \"public\".\"users\""),
+        QueryOutcome::Rows(rs) if matches!(rs.rows[..], [ref r] if matches!(r[0], Value::Int(_)))
+    ));
     assert!(matches!(
         run_query("update t set a = 1"),
         QueryOutcome::Affected(_)

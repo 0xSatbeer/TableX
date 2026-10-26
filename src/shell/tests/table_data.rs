@@ -223,11 +223,11 @@ fn retry_after_the_session_dropped_connects_again_and_keeps_it(cx: &mut gpui_kit
     let (fake, window, shell) = open_users(cx);
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
     answer(&fake, Ok(rows(500)), &mut cx);
-    let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
-    let kept = explorer.update(&mut cx, |e, cx| {
-        e.session(crate::model::ConnectionId(1), "app_db", cx)
+    let sessions = shell.read_with(&cx, |this, _| this.sessions.clone());
+    let kept = sessions.update(&mut cx, |s, cx| {
+        s.session(crate::model::ConnectionId(1), "app_db", cx)
     });
-    let kept = futures::executor::block_on(kept).expect("the explorer kept the tab's session");
+    let kept = futures::executor::block_on(kept).expect("the registry kept the tab's session");
     fake::close(&kept);
     cx.simulate_keystrokes("f5");
     cx.run_until_parked();

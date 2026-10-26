@@ -9,6 +9,7 @@ mod keymap;
 mod mock;
 mod model;
 mod persist;
+mod sessions;
 mod shell;
 mod sql;
 mod theme;

@@ -119,9 +119,9 @@ impl Shell {
             .filter_map(|&ix| self.tabs.tabs.get(ix))
             .collect();
         let keys: Vec<SharedString> = doomed.iter().map(|t| t.key.clone()).collect();
-        let open_transaction = doomed
-            .iter()
-            .any(|t| matches!(&t.content, TabContent::Console(c) if c.read(cx).in_transaction));
+        let open_transaction = doomed.iter().any(
+            |t| matches!(&t.content, TabContent::Console(c) if c.read(cx).session.in_transaction),
+        );
         let has_text = doomed.iter().any(
             |t| matches!(&t.content, TabContent::Console(c) if !c.read(cx).text(cx).is_empty()),
         );

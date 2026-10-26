@@ -16,13 +16,17 @@ pub struct Origin {
 impl Origin {
     /// The database the connection's settings name: where a console starts out.
     pub fn of(conn: &crate::model::Connection) -> Self {
-        let tail = conn.params.database();
+        Self::at(conn, conn.params.database().into())
+    }
+
+    /// `conn` at `tail` (`database › schema`).
+    pub fn at(conn: &crate::model::Connection, tail: SharedString) -> Self {
         Self {
             connection: conn.id,
             color: conn.color,
             production: conn.is_production,
             path: join_path(&conn.name, &tail),
-            tail: tail.into(),
+            tail,
         }
     }
 }

@@ -1,6 +1,7 @@
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
+use crate::sessions::{self, Sessions};
 use crate::ui::{console, explorer, grid, panel, split, statusbar, structure, tabs};
 use crate::{db, mock, model, theme};
 use std::rc::Rc;
@@ -63,8 +64,10 @@ impl Shell {
             .iter()
             .find(|c| demo && c.is_production)
             .map(|c| (tabs::Origin::of(c), c.id, c.params.database()));
+        let handle = window.window_handle();
+        let sessions = cx.new(|cx| Sessions::new(workspace.clone(), driver.clone(), handle, cx));
         let explorer =
-            cx.new(|cx| explorer::Explorer::new(workspace.clone(), driver.clone(), window, cx));
+            cx.new(|cx| explorer::Explorer::new(workspace.clone(), sessions.clone(), window, cx));
         cx.observe(&workspace, |this, workspace, cx| {
             this.tabs.refresh_origins(workspace.read(cx));
             let (origin, has_tab) = (
@@ -82,14 +85,14 @@ impl Shell {
             |this, _, ev: &explorer::ConnectionDeleted, cx| this.close_connection_tabs(ev.id, cx),
         )
         .detach();
-        cx.subscribe(&explorer, |this, _, ev: &explorer::ConnectionLost, cx| {
+        cx.subscribe(&sessions, |this, _, ev: &sessions::ConnectionLost, cx| {
             this.connection_lost(ev.id, cx)
         })
         .detach();
         cx.subscribe_in(
-            &explorer,
+            &sessions,
             window,
-            |this, _, ev: &explorer::ConnectionRestored, window, cx| {
+            |this, _, ev: &sessions::ConnectionRestored, window, cx| {
                 this.connection_restored(ev.id, window, cx)
             },
         )
@@ -102,26 +105,25 @@ impl Shell {
             },
         )
         .detach();
-        cx.subscribe(&explorer, move |this, _, ev: &explorer::OpenObject, cx| {
+        cx.subscribe(&explorer, |this, _, ev: &explorer::OpenObject, cx| {
             let open = this.tabs.tabs.iter().any(|t| t.key == ev.key);
-            let table = (!demo && !open)
+            let table = (!open)
                 .then(|| this.explorer.update(cx, |e, cx| e.table(&ev.key, cx)))
                 .flatten();
-            let rows = match demo.then(|| mock::run_query(&format!("SELECT * FROM {}", ev.name))) {
-                None => model::ResultSet {
-                    columns: Vec::new(),
-                    rows: Vec::new(),
-                },
-                Some(model::QueryOutcome::Rows(rs)) => rs,
-                Some(_) => mock::edge_cases(),
-            };
             let mut tab = match table {
                 Some(table) => {
                     let grid = cx.new(|cx| grid::Grid::table(table.clone(), cx));
                     grid.update(cx, |grid, cx| grid.load(cx));
-                    table_tab(ev.key.clone(), grid, table, cx)
+                    table_tab(ev.key.clone(), grid, table, this.explorer.downgrade(), cx)
                 }
-                None => grid_tab(ev.key.clone(), Rc::new(rows), cx),
+                None => grid_tab(
+                    ev.key.clone(),
+                    Rc::new(model::ResultSet {
+                        columns: Vec::new(),
+                        rows: Vec::new(),
+                    }),
+                    cx,
+                ),
             };
             (tab.title, tab.origin, tab.preview) =
                 (ev.name.clone(), Some(ev.origin.clone()), ev.preview);
@@ -249,6 +251,7 @@ impl Shell {
             overflow_search,
             workspace: workspace.clone(),
             driver,
+            sessions,
             explorer,
             tab_scroll: ScrollHandle::new(),
             tabs: tabs::Tabs::new(tabs),
@@ -310,16 +313,8 @@ impl Shell {
         }
         for (conn, schema) in [(pg, "public"), (lite, "main")] {
             let database = conn.params.database();
-            let table = grid::Table {
-                driver: self.driver.clone(),
-                connection: conn.id,
-                database: database.clone(),
-                explorer: self.explorer.downgrade(),
-                schema: schema.into(),
-                name: "bench_rows".into(),
-                sqlite_table: conn.kind() == model::DbKind::Sqlite,
-                view: false,
-            };
+            let place = (database.clone(), schema.into(), "bench_rows".into());
+            let table = grid::Table::new(&self.sessions, conn, place, model::ObjectKind::Table, cx);
             let grid = cx.new(|cx| grid::Grid::table(table.clone(), cx));
             grid.update(cx, |grid, cx| grid.load(cx));
             let key = explorer::object_key(
@@ -329,7 +324,9 @@ impl Shell {
                 model::ObjectKind::Table,
                 "bench_rows",
             );
-            self.tabs.open(table_tab(key.into(), grid, table, cx));
+            let explorer = self.explorer.downgrade();
+            self.tabs
+                .open(table_tab(key.into(), grid, table, explorer, cx));
         }
     }
 
@@ -402,13 +399,7 @@ impl Shell {
     ) -> tabs::EditorTab<TabContent> {
         let key = console_key(conn.id, &database, schema.as_deref());
         let tail = tabs::join_path(&database, schema.as_deref().unwrap_or(""));
-        let origin = tabs::Origin {
-            connection: conn.id,
-            color: conn.color,
-            production: conn.is_production,
-            path: tabs::join_path(&conn.name, &tail),
-            tail,
-        };
+        let origin = tabs::Origin::at(conn, tail);
         let title = format!("{database} — console");
         let target = console::Target {
             workspace: self.workspace.clone(),
@@ -478,9 +469,10 @@ pub(super) fn table_tab(
     key: SharedString,
     grid: Entity<grid::Grid>,
     table: grid::Table,
+    explorer: WeakEntity<explorer::Explorer>,
     cx: &mut Context<Shell>,
 ) -> tabs::EditorTab<TabContent> {
-    let s = cx.new(|cx| structure::Structure::new(grid.clone(), table, key.clone(), cx));
+    let s = cx.new(|cx| structure::Structure::new(grid.clone(), table, key.clone(), explorer, cx));
     // Focus and the status bar's aggregate follow the shown sub-tab.
     cx.observe(&s, |_, _, cx| cx.notify()).detach();
     grid_tab_of(key, grid, Some(s), cx)
@@ -555,7 +547,7 @@ pub(super) fn console_tab(
                     .iter()
                     .find(|t| matches!(&t.content, TabContent::Console(c) if *c == console));
                 if let Some(id) = tab.and_then(|t| t.origin.as_ref()).map(|o| o.connection) {
-                    this.explorer.update(cx, |e, cx| e.lost(id, cx));
+                    this.sessions.update(cx, |s, cx| s.lost(id, cx));
                 }
             }
         }

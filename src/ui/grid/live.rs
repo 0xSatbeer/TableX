@@ -4,15 +4,15 @@ use std::time::{Instant, SystemTime};
 
 use gpui_kit::component::spinner::Spinner;
 
+use super::table_page::{Failure, PageState, TABLE_PAGE, TablePage, count_sql, page_sql};
 use super::*;
 use crate::db::{Driver, Reply, Session};
 use crate::ddl::ident;
 use crate::model::{
-    Column, ConnectionId, QueryError, QueryErrorKind, QueryLogEntry, QuerySource, QueryStatus,
+    Column, Connection, ConnectionId, DbKind, ObjectKind, QueryError, QueryLogEntry, QuerySource,
+    QueryStatus,
 };
-use crate::ui::explorer::Explorer;
-
-pub(super) const TABLE_PAGE: usize = 500;
+use crate::sessions::Sessions;
 
 /// Where a table tab reads its rows.
 #[derive(Clone)]
@@ -21,7 +21,7 @@ pub struct Table {
     pub connection: ConnectionId,
     pub database: String,
     /// Owns the session on `database` that pages and counts run on.
-    pub explorer: WeakEntity<Explorer>,
+    pub sessions: Entity<Sessions>,
     pub schema: String,
     pub name: String,
     /// A SQLite table, which reads its `rowid` when it has no primary key.
@@ -30,22 +30,33 @@ pub struct Table {
     pub view: bool,
 }
 
+impl Table {
+    /// Where `kind` object `name` in `database`'s `schema` on `conn` reads its rows.
+    pub fn new(
+        sessions: &Entity<Sessions>,
+        conn: &Connection,
+        (database, schema, name): (String, String, String),
+        kind: ObjectKind,
+        cx: &App,
+    ) -> Self {
+        Self {
+            driver: sessions.read(cx).driver(),
+            connection: conn.id,
+            database,
+            sessions: sessions.clone(),
+            schema,
+            name,
+            sqlite_table: conn.kind() == DbKind::Sqlite && kind == ObjectKind::Table,
+            view: kind != ObjectKind::Table,
+        }
+    }
+}
+
 pub(super) struct Live {
     pub(super) table: Table,
     /// Primary key columns, read before the first page.
     pub(super) key: Option<Vec<String>>,
-    offset: usize,
-    /// The last page came back with `TABLE_PAGE` rows, so more may follow.
-    full: bool,
-    total: Option<usize>,
-    /// The applied WHERE and ORDER BY fragments, inserted raw.
-    where_: String,
-    order_by: String,
-    /// Why the last filtered read failed, shown under the toolbar over the old rows.
-    filter_error: Option<String>,
-    /// The where, order by, offset and total the shown rows came from, while an applied filter is unread.
-    before: Option<(String, String, usize, Option<usize>)>,
-    state: LiveState,
+    pub(super) page: TablePage,
     /// The last Submit's failing row in `all` and why; its edits stay pending.
     pub(super) submit_error: Option<(Option<usize>, String)>,
     pub(super) _submit: Option<Task<()>>,
@@ -53,76 +64,11 @@ pub(super) struct Live {
     _count: Option<Task<()>>,
 }
 
-enum LiveState {
-    /// A restored production tab: nothing is read until Connect is clicked.
-    Disconnected,
-    /// The connection was lost: nothing is read until Reconnect is clicked.
-    Lost,
-    Loading,
-    Failed(String),
-    Ready,
-}
-
 pub enum GridEvent {
     Logged(QueryLogEntry),
 }
 
 impl EventEmitter<GridEvent> for Grid {}
-
-pub(crate) fn page_sql(
-    schema: &str,
-    name: &str,
-    key: &[String],
-    rowid: bool,
-    filter: (&str, &str),
-    offset: usize,
-) -> String {
-    let select = select_sql(schema, name, key, rowid, filter);
-    format!("{select} LIMIT {TABLE_PAGE} OFFSET {offset}")
-}
-
-/// Every row of the table through the filter, ordered as its pages are.
-pub(crate) fn select_sql(
-    schema: &str,
-    name: &str,
-    key: &[String],
-    rowid: bool,
-    (where_, order_by): (&str, &str),
-) -> String {
-    let select = if rowid { "rowid, *" } else { "*" };
-    let order = if !order_by.is_empty() {
-        format!(" ORDER BY {order_by}")
-    } else if key.is_empty() {
-        String::new()
-    } else {
-        // Newest first by default: the key descending.
-        let cols: Vec<_> = key.iter().map(|c| format!("{} DESC", ident(c))).collect();
-        format!(" ORDER BY {}", cols.join(", "))
-    };
-    format!(
-        "SELECT {select} FROM {}.{}{}{order}",
-        ident(schema),
-        ident(name),
-        where_clause(where_)
-    )
-}
-
-pub(crate) fn count_sql(schema: &str, name: &str, where_: &str) -> String {
-    format!(
-        "SELECT COUNT(*) FROM {}.{}{}",
-        ident(schema),
-        ident(name),
-        where_clause(where_)
-    )
-}
-
-fn where_clause(where_: &str) -> String {
-    if where_.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE ({where_})")
-    }
-}
 
 fn primary_key(columns: Vec<Column>) -> Vec<String> {
     columns
@@ -144,14 +90,7 @@ impl Grid {
         grid.live = Some(Live {
             table,
             key: None,
-            offset: 0,
-            full: false,
-            total: None,
-            where_: String::new(),
-            order_by: String::new(),
-            filter_error: None,
-            before: None,
-            state: LiveState::Loading,
+            page: TablePage::new(),
             submit_error: None,
             _submit: None,
             _load: None,
@@ -163,27 +102,27 @@ impl Grid {
     /// The table this tab reads, with its applied WHERE and ORDER BY.
     pub fn source(&self) -> Option<(&Table, &str, &str)> {
         let live = self.live.as_ref()?;
-        Some((&live.table, &live.where_, &live.order_by))
+        Some((&live.table, &live.page.where_, &live.page.order_by))
     }
 
     /// Sets the WHERE and ORDER BY the next `load` reads with, as a restored tab had them.
     pub fn set_filter(&mut self, where_: String, order_by: String) {
         if let Some(live) = &mut self.live {
-            (live.where_, live.order_by) = (where_, order_by);
+            (live.page.where_, live.page.order_by) = (where_, order_by);
         }
     }
 
     /// Waits for a Connect click instead of reading, as a restored production tab does.
     pub fn set_disconnected(&mut self) {
         if let Some(live) = &mut self.live {
-            live.state = LiveState::Disconnected;
+            live.page.state = PageState::Disconnected;
         }
     }
 
     /// Shows Disconnected · Reconnect over the rows, as every tab on a lost connection does.
     pub fn set_lost(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = &mut self.live {
-            live.state = LiveState::Lost;
+            live.page.state = PageState::Lost;
             cx.notify();
         }
     }
@@ -193,20 +132,17 @@ impl Grid {
         if self
             .live
             .as_ref()
-            .is_some_and(|l| matches!(l.state, LiveState::Lost))
+            .is_some_and(|l| l.page.state == PageState::Lost)
         {
             self.load(cx);
         }
     }
 
-    /// Connect on a disconnected tab: connects its connection in the tree and reads the page.
+    /// Connect on a disconnected tab: connects its connection and reads the page.
     fn connect(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = &self.live {
             let id = live.table.connection;
-            _ = live
-                .table
-                .explorer
-                .update(cx, |e, cx| e.connect_connection(id, cx));
+            live.table.sessions.update(cx, |s, cx| s.connect(id, cx));
         }
         self.load(cx);
     }
@@ -215,22 +151,22 @@ impl Grid {
     pub fn loading(&self) -> bool {
         self.live
             .as_ref()
-            .is_some_and(|l| matches!(l.state, LiveState::Loading))
+            .is_some_and(|l| l.page.state == PageState::Loading)
     }
 
     /// Reads the current page again (F5, Refresh, Retry), connecting and reading the key first if needed.
     pub fn load(&mut self, cx: &mut Context<Self>) {
         let Some(live) = &mut self.live else { return };
-        live.state = LiveState::Loading;
+        live.page.state = PageState::Loading;
         let t = &live.table;
         let driver = t.driver.clone();
         let (schema, name, key, offset) = (
             t.schema.clone(),
             t.name.clone(),
             live.key.clone(),
-            live.offset,
+            live.page.offset,
         );
-        let (where_, order_by) = (live.where_.clone(), live.order_by.clone());
+        let (where_, order_by) = (live.page.where_.clone(), live.page.order_by.clone());
         let sqlite_table = t.sqlite_table;
         let session = self.session(cx);
         let Some(live) = &mut self.live else { return };
@@ -274,7 +210,7 @@ impl Grid {
 
     fn goto(&mut self, offset: usize, cx: &mut Context<Self>) {
         if let Some(live) = &mut self.live {
-            live.offset = offset;
+            live.page.offset = offset;
             self.load(cx);
         }
     }
@@ -289,14 +225,7 @@ impl Grid {
             order_input.read(cx).value().trim().to_string(),
         );
         let Some(live) = &mut self.live else { return };
-        let (old_where, old_order) = (
-            std::mem::replace(&mut live.where_, where_),
-            std::mem::replace(&mut live.order_by, order_by),
-        );
-        let (offset, total) = (live.offset, live.total.take());
-        live.before
-            .get_or_insert((old_where, old_order, offset, total));
-        live.offset = 0;
+        live.page.apply_filter(where_, order_by);
         self.load(cx);
     }
 
@@ -317,76 +246,41 @@ impl Grid {
         self.apply_filter(cx);
     }
 
-    /// A failed page read: with a filter applied it is the filter's fault, so the old rows stay.
-    /// The tab goes back to what the shown rows came from.
+    /// A failed page read: the tab shows why, or its connection is lost.
     fn query_failed(&mut self, error: QueryError, cx: &mut Context<Self>) {
         let Some(live) = &mut self.live else { return };
-        let filtered =
-            live.before.is_some() || !live.where_.is_empty() || !live.order_by.is_empty();
-        if let Some(before) = live.before.take() {
-            (live.where_, live.order_by, live.offset, live.total) = before;
+        if live.page.read_failed(error) == Failure::Lost {
+            let (id, sessions) = (live.table.connection, live.table.sessions.clone());
+            sessions.update(cx, |s, cx| s.lost(id, cx));
         }
-        if error.kind == QueryErrorKind::Disconnected {
-            let id = live.table.connection;
-            let explorer = live.table.explorer.clone();
-            self.set_lost(cx);
-            _ = explorer.update(cx, |e, cx| e.lost(id, cx));
-            return;
-        }
-        if !filtered || error.kind != QueryErrorKind::Server {
-            return self.failed(error.message, cx);
-        }
-        live.filter_error = Some(error.message);
-        live.state = LiveState::Ready;
         cx.notify();
     }
 
     fn failed(&mut self, reason: String, cx: &mut Context<Self>) {
         if let Some(live) = &mut self.live {
-            live.state = LiveState::Failed(reason);
+            live.page.state = PageState::Failed(reason);
             cx.notify();
         }
     }
 
     fn paged(&mut self, rs: ResultSet, rowid: bool, cx: &mut Context<Self>) {
         let Some(live) = &mut self.live else { return };
-        live.full = rs.rows.len() == TABLE_PAGE;
-        if !live.full {
-            live.total = Some(live.offset + rs.rows.len());
-        }
-        live.state = LiveState::Ready;
-        live.filter_error = None;
-        live.before = None;
+        live.page.paged(rs.rows.len());
         live.submit_error = None;
-        let reset = rs.columns != self.all.columns();
-        self.loaded = Rc::new(rs);
-        self.all = self.loaded.clone();
-        (self.added, self.deleted) = (0, BTreeSet::new());
-        self.edits.clear();
-        self.editing = None;
         // The server sorted these rows; the header keeps showing which way.
         let sort = self.sort;
-        self.set_page(0, TABLE_PAGE, cx);
+        let reset = self.replace(rs, cx);
         self.sort = sort.filter(|_| !reset);
-        if reset {
-            let n = self.all.columns().len();
-            (self.widths, self.hidden) = (vec![DEFAULT_WIDTH; n], vec![false; n]);
-            self.col_order = (0..n).collect();
-            // SQLite's rowid tells rows apart for editing; it isn't the table's own column.
-            if rowid && n > 1 {
-                self.hidden[0] = true;
-            }
-            for c in 0..n {
-                self.autofit(c);
-                self.widths[c] = self.widths[c].min(MAX_OPEN_WIDTH);
-            }
+        // SQLite's rowid tells rows apart for editing; it isn't the table's own column.
+        if reset && rowid && self.hidden.len() > 1 {
+            self.hidden[0] = true;
         }
     }
 
     fn count(&mut self, cx: &mut Context<Self>) {
         let session = self.session(cx);
         let Some(live) = &mut self.live else { return };
-        let sql = count_sql(&live.table.schema, &live.table.name, &live.where_);
+        let sql = count_sql(&live.table.schema, &live.table.name, &live.page.where_);
         let driver = live.table.driver.clone();
         live._count = Some(cx.spawn(async move |this, cx| {
             let Ok(session) = session.await else { return };
@@ -403,7 +297,7 @@ impl Grid {
                     _ => None,
                 };
                 if let Some(live) = &mut this.live {
-                    live.total = total.or(live.total);
+                    live.page.counted(total);
                 }
                 cx.notify();
             })
@@ -411,19 +305,15 @@ impl Grid {
         }));
     }
 
-    /// The explorer's open session on the table's database, connecting a new one when it has none.
+    /// The open session on the table's database, connecting a new one when it has none.
     pub(super) fn session(&self, cx: &mut Context<Self>) -> Reply<Session> {
-        let gone = || -> Reply<Session> {
-            Box::pin(futures::future::ready(Err("The explorer is closed".into())))
-        };
         let Some(live) = &self.live else {
-            return gone();
+            return Box::pin(futures::future::ready(Err("Not a table tab".into())));
         };
         let (id, database) = (live.table.connection, live.table.database.clone());
         live.table
-            .explorer
-            .update(cx, |e, cx| e.session(id, &database, cx))
-            .unwrap_or_else(|_| gone())
+            .sessions
+            .update(cx, |s, cx| s.session(id, &database, cx))
     }
 
     fn log(
@@ -468,10 +358,9 @@ impl Grid {
     /// First, Previous, the row range with its count, Next and Last for a table tab.
     pub(super) fn render_live_pager(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let live = self.live.as_ref()?;
-        let (offset, len) = (live.offset, self.loaded.row_count());
-        let last = live
-            .total
-            .map(|n| n.saturating_sub(1) / TABLE_PAGE * TABLE_PAGE);
+        let len = self.loaded.row_count();
+        let pager = live.page.pager(len);
+        let offset = pager.offset;
         let button = |id: &'static str, icon: IconName, tip: &'static str, to: Option<usize>| {
             Button::new(id)
                 .ghost()
@@ -486,15 +375,7 @@ impl Grid {
                     }
                 }))
         };
-        let count = match live.total {
-            Some(n) => grouped(n),
-            None => format!("{}+", grouped(offset + len)),
-        };
-        let range = if len == 0 {
-            "No rows".to_string()
-        } else {
-            format!("{}–{} of", grouped(offset + 1), grouped(offset + len))
-        };
+        let (range, count) = (pager.range, pager.count);
         Some(
             h_flex()
                 .gap(theme::space_2())
@@ -508,11 +389,11 @@ impl Grid {
                     "grid-prev",
                     IconName::ChevronLeft,
                     "Previous page",
-                    Some(offset.saturating_sub(TABLE_PAGE)),
+                    Some(pager.prev),
                 ))
                 .child(div().px(theme::space_4()).child(range))
                 .when(len > 0, |d| {
-                    let known = live.total.is_some();
+                    let known = pager.known;
                     d.child(
                         div()
                             .debug_selector(|| format!("grid-count:{count}"))
@@ -534,20 +415,20 @@ impl Grid {
                     "grid-next",
                     IconName::ChevronRight,
                     "Next page",
-                    live.full.then_some(offset + TABLE_PAGE),
+                    pager.next,
                 )))
                 .child(button(
                     "grid-last",
                     IconName::ChevronLast,
                     "Last page",
-                    last,
+                    pager.last,
                 )),
         )
     }
 
     /// Why the filtered read failed, under the toolbar.
     pub(super) fn render_filter_error(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let reason = self.live.as_ref()?.filter_error.clone()?;
+        let reason = self.live.as_ref()?.page.filter_error.clone()?;
         let theme = cx.theme();
         Some(
             div()
@@ -580,10 +461,10 @@ impl Grid {
                 .text_color(theme.muted_foreground)
         };
         let live = self.live.as_ref()?;
-        match &live.state {
-            LiveState::Ready if self.all.row_count() > 0 => None,
-            LiveState::Ready => {
-                let text = match live.where_.is_empty() {
+        match &live.page.state {
+            PageState::Ready if self.all.row_count() > 0 => None,
+            PageState::Ready => {
+                let text = match live.page.where_.is_empty() {
                     true => "No rows",
                     false => "No rows match this filter",
                 };
@@ -597,7 +478,7 @@ impl Grid {
                         .into_any_element(),
                 )
             }
-            LiveState::Disconnected => Some(
+            PageState::Disconnected => Some(
                 overlay()
                     .child("Disconnected")
                     .child(
@@ -610,7 +491,7 @@ impl Grid {
                     )
                     .into_any_element(),
             ),
-            LiveState::Lost => Some(
+            PageState::Lost => Some(
                 overlay()
                     .child("Disconnected")
                     .child(
@@ -623,14 +504,14 @@ impl Grid {
                     )
                     .into_any_element(),
             ),
-            LiveState::Loading => Some(
+            PageState::Loading => Some(
                 overlay()
                     .debug_selector(|| "table-loading".into())
                     .child(Spinner::new().color(theme.muted_foreground))
                     .child("Loading…")
                     .into_any_element(),
             ),
-            LiveState::Failed(reason) => Some(
+            PageState::Failed(reason) => Some(
                 overlay()
                     .child(
                         div()

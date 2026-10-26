@@ -51,11 +51,15 @@ fn all_rows_is_off_only_for_writing_statements_and_results_without_a_query(
         let got = grid.read_with(cx, |g, _| g.all_rows_off().is_some());
         assert_eq!(got, off, "{sql:?}");
     }
+    let workspace = cx.new(|_| crate::mock::workspaces().remove(0));
+    let handle = gpui_kit::VisualContext::window_handle(cx.add_empty_window());
+    let sessions =
+        cx.new(|cx| crate::sessions::Sessions::new(workspace, driver.clone(), handle, cx));
     let table = Table {
         driver,
         connection: ConnectionId(1),
         database: "app".into(),
-        explorer: gpui_kit::WeakEntity::new_invalid(),
+        sessions,
         schema: "public".into(),
         name: "users".into(),
         sqlite_table: false,

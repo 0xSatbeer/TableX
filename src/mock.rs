@@ -264,6 +264,17 @@ pub fn run_query(sql: &str) -> QueryOutcome {
     let h = mix(SEED ^ sql.bytes().fold(0, |acc, b| mix(acc ^ b as u64)));
     match first.to_ascii_lowercase().as_str() {
         "" => QueryOutcome::Error("empty query".into()),
+        "select"
+            if sql
+                .trim_start()
+                .to_ascii_uppercase()
+                .starts_with("SELECT COUNT(*)") =>
+        {
+            QueryOutcome::Rows(ResultSet {
+                columns: meta(&[("count", "int8")]),
+                rows: vec![vec![Value::Int((h % 200) as i64)].into()],
+            })
+        }
         "select" | "with" | "values" | "table" | "explain" | "show" => {
             let rows = (h % 200) as usize;
             QueryOutcome::Rows(ResultSet {

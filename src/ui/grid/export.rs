@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use futures::StreamExt as _;
 use gpui_kit::component::{Selectable as _, WindowExt as _, notification::Notification};
 
-use super::live::select_sql;
+use super::table_page::select_sql;
 use super::*;
 use crate::db::{Driver, Reply, Session};
 use crate::ddl::ident;
@@ -272,13 +272,10 @@ impl Grid {
         }
         let (t, where_, order_by) = self.source()?;
         let key = self.live.as_ref()?.key.clone().unwrap_or_default();
-        let explorer = t.explorer.upgrade()?;
         Some(AllRows {
             driver: t.driver.clone(),
             sql: select_sql(&t.schema, &t.name, &key, false, (where_, order_by)),
-            connect: explorer
-                .read(cx)
-                .fresh_session(t.connection, &t.database, cx),
+            connect: t.sessions.read(cx).fresh(t.connection, &t.database, cx),
         })
     }
 

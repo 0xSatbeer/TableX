@@ -1,6 +1,6 @@
 //! The SQL a table tab reads its pages and count with.
 
-use super::super::live::{count_sql, page_sql, select_sql};
+use super::super::table_page::{count_sql, page_sql, select_sql};
 
 #[test]
 fn pages_order_by_the_primary_key_descending_and_quote_names() {

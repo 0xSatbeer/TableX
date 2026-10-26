@@ -97,7 +97,9 @@ pub(super) fn open_explorer(
     let ws = workspace.clone();
     let (window, explorer) = cx.update(|cx| {
         gpui_kit::open_window(Default::default(), cx, |window, cx| {
-            cx.new(|cx| super::Explorer::new(ws, driver, window, cx))
+            let handle = window.window_handle();
+            let sessions = cx.new(|cx| Sessions::new(ws.clone(), driver, handle, cx));
+            cx.new(|cx| super::Explorer::new(ws, sessions, window, cx))
         })
         .expect("open test window")
     });

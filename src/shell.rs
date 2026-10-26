@@ -26,6 +26,32 @@ enum TabContent {
     Console(Entity<console::Console>),
 }
 
+impl TabContent {
+    /// Its connection was lost: tables and structures show Disconnected, consoles drop their
+    /// sessions and stay editable.
+    fn lost(&self, cx: &mut App) {
+        match self {
+            TabContent::Grid(grid, structure) => {
+                grid.update(cx, |grid, cx| grid.set_lost(cx));
+                if let Some(s) = structure {
+                    s.update(cx, |s, cx| s.lost(cx));
+                }
+            }
+            TabContent::Console(console) => console.update(cx, |c, cx| c.lost(cx)),
+        }
+    }
+
+    /// Its connection is back: lost tables and structures read again.
+    fn restored(&self, window: &mut Window, cx: &mut App) {
+        if let TabContent::Grid(grid, structure) = self {
+            grid.update(cx, |grid, cx| grid.restored(cx));
+            if let Some(s) = structure {
+                s.update(cx, |s, cx| s.restored(window, cx));
+            }
+        }
+    }
+}
+
 /// How the app starts. `Demo` (`--demo`) loads the sample workspace, tabs and query log and
 /// reads every connection through the mock driver; `Normal` starts empty on the real drivers.
 /// `Bench` (`--bench-scenario <name>`) runs one perf scenario without reading or writing config.
@@ -59,6 +85,8 @@ pub(crate) struct Shell {
     workspace: Entity<model::Workspace>,
     /// What new consoles run on.
     driver: std::sync::Arc<dyn db::Driver>,
+    /// Every connection's sessions and status; tabs and the explorer read through it.
+    sessions: Entity<crate::sessions::Sessions>,
     explorer: Entity<explorer::Explorer>,
     tabs: tabs::Tabs<TabContent>,
     tab_scroll: ScrollHandle,

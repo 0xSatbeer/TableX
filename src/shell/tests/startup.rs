@@ -241,7 +241,7 @@ fn a_demo_start_shows_the_acme_workspace_the_sample_tabs_and_the_mock_log(
 }
 
 #[gpui_kit::test]
-fn opening_a_table_loads_from_the_database_in_normal_mode_and_shows_mock_rows_in_demo_mode(
+fn opening_a_table_loads_from_the_driver_in_normal_and_demo_mode(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     use gpui_kit::AppContext as _;
@@ -249,12 +249,8 @@ fn opening_a_table_loads_from_the_database_in_normal_mode_and_shows_mock_rows_in
         gpui_kit::init(cx);
         cx.set_reduce_motion(true);
     });
-    // (mode, rows in the tab's grid, still loading from the database)
-    let cases = [
-        (crate::shell::Mode::Normal, 0, true),
-        (crate::shell::Mode::Demo, 1, false),
-    ];
-    for (mode, min_rows, loading) in cases {
+    // Demo tables read through the Mock driver like any other, so a Fake keeps both loading.
+    for mode in [crate::shell::Mode::Normal, crate::shell::Mode::Demo] {
         let (window, shell) = cx.update(|cx| {
             gpui_kit::open_window(Default::default(), cx, |window, cx| {
                 cx.new(|cx| {
@@ -287,14 +283,9 @@ fn opening_a_table_loads_from_the_database_in_normal_mode_and_shows_mock_rows_in
             (tab.title.to_string(), rows)
         });
         assert_eq!(title, "users", "{mode:?}");
-        if loading {
-            assert_eq!(rows, 0, "{mode:?}: an empty grid");
-        } else {
-            assert!(rows >= min_rows, "{mode:?}: mock rows");
-        }
-        assert_eq!(
+        assert_eq!(rows, 0, "{mode:?}: an empty grid");
+        assert!(
             vcx.debug_bounds("table-loading").is_some(),
-            loading,
             "{mode:?}: the loading state"
         );
     }
@@ -360,4 +351,30 @@ fn big_result_opens_five_tabs_and_waits_for_them_to_settle(cx: &mut gpui_kit::Te
             shell.read_with(&vcx, |this, cx| (this.tabs.tabs.len(), this.bench_rows(cx)));
         assert_eq!((tabs, rows), (want_tabs, want), "{scenario:?}");
     }
+}
+
+#[gpui_kit::test]
+fn a_demo_table_reads_its_rows_through_the_mock_driver(cx: &mut gpui_kit::TestAppContext) {
+    let (window, shell) = open_started(cx, crate::shell::Mode::Demo);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    let explorer = shell.read_with(&cx, |this, _| this.explorer.clone());
+    explorer.update_in(&mut cx, |e, window, cx| {
+        e.reveal("1/app_db/public/table/users", window, cx)
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("enter");
+    // The mock driver answers after its simulated latency.
+    for _ in 0..20 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+    }
+    let rows = shell.read_with(&cx, |this, cx| {
+        match &this.tabs.active().expect("a tab").content {
+            crate::shell::TabContent::Grid(grid, _) => grid.read(cx).row_count(),
+            crate::shell::TabContent::Console(_) => panic!("a grid tab opens"),
+        }
+    });
+    assert!(rows > 0, "mock rows");
+    assert!(cx.debug_bounds("table-loading").is_none());
 }

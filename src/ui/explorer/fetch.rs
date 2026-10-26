@@ -2,20 +2,6 @@
 
 use super::*;
 
-/// `params` pointed at database `db`: a Postgres server's other database, or the SQLite file itself.
-pub(crate) fn on_database(params: &ConnectionParams, db: &str) -> ConnectionParams {
-    match params {
-        ConnectionParams::Postgres { .. } if params.database() != db => {
-            let mut params = params.clone();
-            if let ConnectionParams::Postgres { database, .. } = &mut params {
-                *database = db.to_string();
-            }
-            params
-        }
-        _ => params.clone(),
-    }
-}
-
 /// What a load of one tree level brings back.
 pub(super) enum Children {
     Databases(Vec<String>),

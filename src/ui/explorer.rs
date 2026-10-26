@@ -25,11 +25,13 @@ use crate::model::{
     Column, Connection, ConnectionId, ConnectionParams, ConnectionStatus, Database, DbKind,
     DbObject, Key, ObjectKind, Schema, Workspace,
 };
+use crate::sessions::{
+    ConnectionChanged, ConnectionLost, ConnectionRestored, PasswordNeeded, Sessions,
+};
 use crate::ui::connection_dialog::{Confirmed, ConnectionDialog, DeleteConfirm, Saved};
 use crate::ui::object_dialog::{Apply, NameOwnerDialog, Owned, RoleDialog};
 use crate::ui::table_editor::TableEditor;
 use crate::ui::tabs::Origin;
-use crate::ui::toast;
 use crate::{assets, theme};
 
 mod connections;
@@ -46,7 +48,7 @@ mod rows;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use fetch::on_database;
+pub(crate) use crate::sessions::on_database;
 use fetch::*;
 use filter::*;
 use flatten::*;
@@ -170,20 +172,6 @@ pub struct ConnectionDeleted {
 
 impl EventEmitter<ConnectionDeleted> for Explorer {}
 
-/// Emitted when connection `id`'s session was found gone, so the Shell can mark its tabs.
-pub struct ConnectionLost {
-    pub id: ConnectionId,
-}
-
-impl EventEmitter<ConnectionLost> for Explorer {}
-
-/// Emitted when connection `id` connected, so the Shell can re-read its lost tabs.
-pub struct ConnectionRestored {
-    pub id: ConnectionId,
-}
-
-impl EventEmitter<ConnectionRestored> for Explorer {}
-
 /// "Move to ▸ <workspace>" on connection `id`: the Shell moves it to workspace `to`.
 pub struct MoveConnection {
     pub id: ConnectionId,
@@ -200,12 +188,10 @@ pub struct Explorer {
     expanded: HashSet<String>,
     /// Nodes whose children are loading or failed to.
     loads: HashMap<String, Load>,
-    /// Each connection's generation: every connect bumps it, and a result carrying an older one is dropped.
-    gens: HashMap<ConnectionId, u64>,
-    /// Open sessions by connection and database.
-    sessions: HashMap<(ConnectionId, String), Session>,
-    /// Each connection's params at the last workspace change, to spot edits and deletes made anywhere.
-    params: HashMap<ConnectionId, ConnectionParams>,
+    /// Every session the tree reads through, and each connection's generation.
+    sessions: Entity<Sessions>,
+    /// Connections connecting for `*`: everything they list is expanded.
+    connect_all: HashSet<ConnectionId>,
     /// Mirror of the field's text; non-empty shows only matches and their ancestors.
     filter: String,
     field: Entity<InputState>,
@@ -228,26 +214,36 @@ pub struct Explorer {
 impl Explorer {
     pub fn new(
         workspace: Entity<Workspace>,
-        driver: Arc<dyn Driver>,
+        sessions: Entity<Sessions>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let driver = sessions.read(cx).driver();
+        cx.subscribe(&sessions, |this, _, ev: &ConnectionLost, cx| {
+            this.disconnected(ev.id, cx)
+        })
+        .detach();
+        cx.subscribe(&sessions, |this, _, ev: &ConnectionRestored, cx| {
+            this.connected(ev.id, cx)
+        })
+        .detach();
+        cx.subscribe(&sessions, |this, _, ev: &ConnectionChanged, cx| {
+            this.changed(ev.id, cx)
+        })
+        .detach();
+        cx.subscribe(&sessions, |this, _, ev: &PasswordNeeded, cx| {
+            this.ask_password(ev.id, cx)
+        })
+        .detach();
         // Collapsed until the Shell restores the session's expanded nodes (`set_expanded_paths`).
         let expanded = HashSet::new();
         let nodes = flatten(workspace.read(cx), &expanded, &HashMap::new(), false);
         // Edits made elsewhere (rename, recolor, connect, new params, delete) rebuild the rows.
         cx.observe(&workspace, |this, _, cx| {
-            this.forget_changed(cx);
             this.refresh(cx);
         })
         .detach();
-        let params = workspace
-            .read(cx)
-            .connections
-            .iter()
-            .map(|c| (c.id, c.params.clone()))
-            .collect();
-        crate::ui::console::completion::set_explorer(cx.weak_entity(), cx);
+        crate::ui::console::completion::set_sessions(sessions.downgrade(), cx);
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("Filter objects…"));
         cx.subscribe(&field, |this, field, ev: &InputEvent, cx| {
             if let InputEvent::Change = ev {
@@ -263,9 +259,8 @@ impl Explorer {
             driver,
             expanded,
             loads: HashMap::new(),
-            gens: HashMap::new(),
-            sessions: HashMap::new(),
-            params,
+            sessions,
+            connect_all: HashSet::new(),
             filter: String::new(),
             nodes,
             selected: 0,
@@ -321,12 +316,6 @@ impl Explorer {
             })
             .collect();
         self.refresh(cx);
-    }
-
-    /// The open session on `database` of connection `id`, for console completion's reads.
-    pub fn open_session(&self, id: ConnectionId, database: &str) -> Option<Session> {
-        let session = self.sessions.get(&(id, database.to_string()))?;
-        (!session.is_closed()).then(|| session.clone())
     }
 
     /// Connects connection `id` without opening its row, as restoring a session's tabs does.

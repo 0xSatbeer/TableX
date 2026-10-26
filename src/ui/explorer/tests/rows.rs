@@ -150,14 +150,11 @@ fn truncated_tree_names_show_their_full_text_in_a_tooltip(cx: &mut gpui_kit::Tes
         };
         let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
             gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| {
-                    super::Explorer::new(
-                        cx.new(|_| ws),
-                        Arc::new(crate::db::Live::default()),
-                        window,
-                        cx,
-                    )
-                })
+                let ws = cx.new(|_| ws);
+                let (handle, driver) =
+                    (window.window_handle(), Arc::new(crate::db::Live::default()));
+                let sessions = cx.new(|cx| Sessions::new(ws.clone(), driver, handle, cx));
+                cx.new(|cx| super::Explorer::new(ws, sessions, window, cx))
             })
             .expect("open test window")
         });
@@ -174,4 +171,70 @@ fn truncated_tree_names_show_their_full_text_in_a_tooltip(cx: &mut gpui_kit::Tes
             name.len()
         );
     }
+}
+
+#[test]
+fn row_menus_offer_modify_and_new_only_on_postgres_and_disconnect_only_when_connected() {
+    let (pg, lite) = (DbKind::Postgres, DbKind::Sqlite);
+    let table = NodeKind::Object(ObjectKind::Table);
+    let actions = |menu, new, console, object| RowActions {
+        menu,
+        new,
+        console,
+        object,
+        connected: true,
+    };
+    let cases = [
+        (
+            NodeKind::Connection(pg),
+            pg,
+            Some(actions(RowMenu::Connection, false, false, None)),
+        ),
+        (
+            NodeKind::Database,
+            pg,
+            Some(actions(
+                RowMenu::Modify("Modify database"),
+                true,
+                true,
+                None,
+            )),
+        ),
+        (
+            NodeKind::Database,
+            lite,
+            Some(actions(RowMenu::Refresh, false, true, None)),
+        ),
+        (
+            NodeKind::Schema,
+            pg,
+            Some(actions(RowMenu::Modify("Modify schema"), true, true, None)),
+        ),
+        (
+            table,
+            pg,
+            Some(actions(
+                RowMenu::Modify("Modify table"),
+                true,
+                false,
+                Some((true, true)),
+            )),
+        ),
+        (
+            table,
+            lite,
+            Some(actions(RowMenu::Refresh, false, false, Some((true, true)))),
+        ),
+        (NodeKind::Group(ObjectKind::Table), pg, None),
+        (NodeKind::Loading, pg, None),
+    ];
+    for (kind, db, want) in cases {
+        assert_eq!(
+            row_actions(kind, db, true, "users"),
+            want,
+            "{kind:?} {db:?}"
+        );
+    }
+    let offline = row_actions(NodeKind::Database, pg, false, "app_db").unwrap();
+    assert!(!offline.connected);
 }

@@ -25,6 +25,7 @@ use crate::model::{
 };
 use crate::ui::{explorer, grid, tabs};
 use crate::{ddl, sql, theme};
+use session::{ConsoleSession, RunStart};
 
 actions!(
     console,
@@ -32,6 +33,7 @@ actions!(
 );
 
 pub mod completion;
+mod session;
 
 pub(crate) const CONTEXT: &str = "Console";
 /// How long after the last edit the text is saved.
@@ -74,8 +76,8 @@ pub enum ConsoleEvent {
 pub struct Console {
     pub editor: Entity<EditorState>,
     target: Target,
-    /// Opened on the first run and kept, so each console has its own.
-    session: Option<Session>,
+    /// Its own session and transaction.
+    pub session: ConsoleSession,
     /// The last run's statements with their byte offsets in the editor text.
     last: Vec<(usize, String)>,
     /// The last run's row-returning statements, in order.
@@ -87,9 +89,6 @@ pub struct Console {
     /// Set by the shell: the editor's zoomed mono size.
     pub text_size: Pixels,
     running: bool,
-    /// Manual mode: runs open a transaction that only Commit or Rollback ends.
-    manual: bool,
-    pub in_transaction: bool,
     /// What the toolbar's database and schema dropdowns offer, listed on the tab's session.
     pub databases: Vec<String>,
     pub schemas: Vec<String>,
@@ -117,15 +116,13 @@ pub struct Paged {
     /// Every row has been read.
     done: bool,
     fetching: bool,
-    /// The statement, for the grid's Export All rows.
-    rerun: Option<grid::Rerun>,
 }
 
 impl Paged {
     fn new(rs: ResultSet, rerun: Option<grid::Rerun>, cx: &mut App) -> Self {
         let done = rs.rows.len() < PAGE;
         Self {
-            grid: grid(rs.clone(), rerun.clone(), cx),
+            grid: grid(rs.clone(), rerun, cx),
             columns: rs.columns,
             rows: rs.rows,
             dropped: 0,
@@ -133,7 +130,6 @@ impl Paged {
             open: !done,
             done,
             fetching: false,
-            rerun,
         }
     }
 
@@ -192,7 +188,8 @@ impl Paged {
             columns: self.columns.clone(),
             rows: self.rows[start..end].to_vec(),
         };
-        self.grid = grid(rs, self.rerun.clone(), cx);
+        // One grid across pages, so widths and hidden columns stay.
+        self.grid.update(cx, |grid, cx| grid.replace(rs, cx));
     }
 
     /// Appends a fetch's rows, moving to them, and drops whole pages from the front past `CAP`.
@@ -254,7 +251,7 @@ impl Console {
         Self {
             editor,
             target,
-            session: None,
+            session: ConsoleSession::default(),
             last: Vec::new(),
             results: Vec::new(),
             active_result: 0,
@@ -262,8 +259,6 @@ impl Console {
             text_size: theme::scaled(theme::MONO),
             running: false,
             error: None,
-            manual: false,
-            in_transaction: false,
             databases: Vec::new(),
             schemas: Vec::new(),
             fetch_all: false,
@@ -325,22 +320,17 @@ impl Console {
 
     /// Whether each statement commits on its own (not manual mode).
     pub fn autocommit(&self) -> bool {
-        !self.manual
+        !self.session.manual
     }
 
     /// What the status bar shows for this console.
     pub fn mode(&self) -> &'static str {
-        match (self.manual, self.in_transaction) {
-            (_, true) => "TX",
-            (true, false) => "MANUAL",
-            (false, false) => "AUTO-COMMIT",
-        }
+        self.session.mode()
     }
 
     /// Switches mode; leaving manual with a transaction open asks whether to commit or roll it back.
     pub fn set_manual(&mut self, manual: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if manual || !self.in_transaction {
-            self.manual = manual;
+        if self.session.set_manual(manual) {
             cx.notify();
             return;
         }
@@ -354,7 +344,7 @@ impl Console {
                     .label(label)
                     .on_click(move |_, window, cx| {
                         console.update(cx, |c, cx| {
-                            c.manual = false;
+                            c.session.manual = false;
                             c.end_transaction(sql, cx);
                         });
                         window.close_dialog(cx);
@@ -385,11 +375,7 @@ impl Console {
 
     /// Ends the open transaction with `sql`, `COMMIT` or `ROLLBACK`.
     pub fn end_transaction(&mut self, sql: &'static str, cx: &mut Context<Self>) {
-        let Some(session) = self
-            .session
-            .clone()
-            .filter(|_| self.in_transaction && !self.running)
-        else {
+        let Some(session) = self.session.transaction().filter(|_| !self.running) else {
             return;
         };
         self.running = true;
@@ -399,7 +385,7 @@ impl Console {
             let result = open.await;
             this.update(cx, |this, cx| {
                 match result {
-                    Ok(_) => this.in_transaction = false,
+                    Ok(_) => this.session.ended(),
                     Err(error) => _ = this.failed(error, 0, Duration::ZERO, cx),
                 }
                 this.finish(None, cx);
@@ -443,7 +429,7 @@ impl Console {
             cx.propagate();
             return;
         }
-        let Some(session) = self.session.clone().filter(|s| !s.is_closed()) else {
+        let Some(session) = self.session.open() else {
             self._run = None;
             self.finish(Some("Cancelled".into()), cx);
             return;
@@ -579,13 +565,16 @@ impl Console {
             return;
         };
         self.running = true;
-        let session = self.session.clone().filter(|s| !s.is_closed());
-        // A dropped session took its transaction with it; a new one must BEGIN again.
-        if session.is_none() && std::mem::take(&mut self.in_transaction) {
+        let RunStart {
+            session,
+            begin,
+            autocommit,
+            rolled_back,
+        } = self.session.start_run();
+        if rolled_back {
             self.messages
                 .push("Connection lost · the open transaction was rolled back".into());
         }
-        let (begin, autocommit) = (self.manual && !self.in_transaction, !self.manual);
         let driver = self.target.driver.clone();
         let schema = self.target.schema.clone();
         self._run = Some(cx.spawn(async move |this, cx| {
@@ -604,7 +593,7 @@ impl Console {
                     }
                 },
             };
-            this.update(cx, |this, _| this.session = Some(session.clone()))
+            this.update(cx, |this, _| this.session.ran_on(session.clone()))
                 .ok();
             if begin {
                 let began = driver.open(&session, "BEGIN".into(), false).await;
@@ -665,7 +654,7 @@ impl Console {
             self.finish(None, cx);
             return false;
         }
-        self.in_transaction = true;
+        self.session.began();
         cx.notify();
         true
     }
@@ -715,7 +704,7 @@ impl Console {
 
     /// Drops the session, whose connection was lost; the next Run connects again.
     pub fn lost(&mut self, cx: &mut Context<Self>) {
-        (self.session, self.in_transaction) = (None, false);
+        self.session.lost();
         cx.notify();
     }
 
@@ -818,7 +807,7 @@ impl Console {
             cx.notify();
             return;
         }
-        let Some(session) = self.session.clone().filter(|_| !self.running) else {
+        let Some(session) = self.session.open().filter(|_| !self.running) else {
             return;
         };
         result.fetching = true;
@@ -874,8 +863,7 @@ impl Console {
         for result in &mut self.results {
             (result.open, result.fetching) = (false, false);
         }
-        let in_transaction = std::mem::take(&mut self.in_transaction);
-        let Some(session) = self.session.take() else {
+        let Some((session, in_transaction)) = self.session.take() else {
             return;
         };
         let driver = &self.target.driver;
@@ -959,7 +947,7 @@ impl Console {
         let Some(params) = self.pg_params(cx).filter(|_| !self.running) else {
             return;
         };
-        let session = self.session.clone().filter(|s| !s.is_closed());
+        let session = self.session.open();
         let (driver, schema) = (self.target.driver.clone(), self.target.schema.clone());
         self._context = Some(cx.spawn(async move |this, cx| {
             let session = match session {
@@ -973,10 +961,8 @@ impl Console {
                     }
                 },
             };
-            this.update(cx, |this, _| {
-                this.session.get_or_insert_with(|| session.clone());
-            })
-            .ok();
+            this.update(cx, |this, _| this.session.keep(session.clone()))
+                .ok();
             let (databases, schemas) = (driver.databases(&session), driver.schemas(&session));
             let (databases, schemas) = (databases.await, schemas.await);
             this.update(cx, |this, cx| {
@@ -991,10 +977,10 @@ impl Console {
     /// Points the session's `search_path` at `schema`; without a session the next connect does.
     pub fn pick_schema(&mut self, schema: String, cx: &mut Context<Self>) {
         // A SET inside a transaction is undone by its rollback, leaving the toolbar wrong.
-        if self.running || self.in_transaction {
+        if self.running || !self.session.can_set_schema() {
             return;
         }
-        let Some(session) = self.session.clone().filter(|s| !s.is_closed()) else {
+        let Some(session) = self.session.open() else {
             self.target.schema = Some(schema);
             cx.emit(ConsoleEvent::Moved);
             cx.notify();
@@ -1029,7 +1015,7 @@ impl Console {
         if self.running || database == self.target.database {
             return;
         }
-        if !self.in_transaction {
+        if !self.session.in_transaction {
             self.switch_database(database, cx);
             return;
         }
@@ -1119,8 +1105,8 @@ impl Console {
                 .xsmall()
                 .label(label)
                 .dropdown_caret(true)
-                .disabled(self.running || (!on_database && self.in_transaction))
-                .when(!on_database && self.in_transaction, |b| {
+                .disabled(self.running || (!on_database && self.session.in_transaction))
+                .when(!on_database && self.session.in_transaction, |b| {
                     b.tooltip("Commit or roll back to change the schema")
                 })
                 .dropdown_menu(move |menu, _, cx| {
@@ -1165,7 +1151,7 @@ impl Console {
     }
 
     fn mode_toggle(&self, cx: &mut Context<Self>) -> Button {
-        let manual = self.manual;
+        let manual = self.session.manual;
         Button::new("console-mode")
             .ghost()
             .xsmall()
@@ -1225,8 +1211,8 @@ impl Render for Console {
             .children(self.context(cx))
             .child(div().flex_1())
             .child(self.mode_toggle(cx))
-            .when(self.manual, |d| {
-                let enabled = self.in_transaction && !self.running;
+            .when(self.session.manual, |d| {
+                let enabled = self.session.in_transaction && !self.running;
                 d.child(self.end_button("Commit", "COMMIT", enabled, cx))
                     .child(self.end_button("Rollback", "ROLLBACK", enabled, cx))
             });

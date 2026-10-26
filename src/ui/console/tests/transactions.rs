@@ -113,7 +113,7 @@ fn a_run_after_the_session_dropped_says_the_transaction_rolled_back_and_begins_a
     connect(&fake, &mut cx);
     affected(&fake, &mut cx);
     affected(&fake, &mut cx);
-    let session = console.read_with(&cx, |c, _| c.session.clone().expect("a session"));
+    let session = console.read_with(&cx, |c, _| c.session.open().expect("a session"));
     crate::db::fake::close(&session);
     cx.simulate_keystrokes("ctrl-shift-enter");
     cx.run_until_parked();

@@ -1,21 +1,16 @@
 use super::{Structure, Sub, Table};
 use crate::db::fake::{self, Fake};
 use crate::model::{Column, ForeignKey, Index, TableDef, Trigger};
-use gpui_kit::Entity;
 use gpui_kit::{AppContext as _, VisualTestContext};
+use gpui_kit::{Entity, WeakEntity};
 use std::sync::Arc;
 
 /// A Structure view on `public.users` (a view when `view`) of the sample workspace's first
-/// connection, reading through a Fake. The explorer is returned so it outlives the test.
+/// connection, reading through a Fake.
 fn open(
     view: bool,
     cx: &mut gpui_kit::TestAppContext,
-) -> (
-    Arc<Fake>,
-    VisualTestContext,
-    Entity<Structure>,
-    gpui_kit::AnyEntity,
-) {
+) -> (Arc<Fake>, VisualTestContext, Entity<Structure>) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         cx.set_reduce_motion(true);
@@ -24,19 +19,17 @@ fn open(
     let driver: Arc<dyn crate::db::Driver> = fake.clone();
     let workspace = crate::mock::workspaces().remove(0);
     let connection = workspace.connections[0].id;
-    let mut kept = None;
     let (window, structure) = cx.update(|cx| {
         gpui_kit::open_window(Default::default(), cx, |window, cx| {
             let workspace = cx.new(|_| workspace);
-            let explorer = cx.new(|cx| {
-                crate::ui::explorer::Explorer::new(workspace, driver.clone(), window, cx)
-            });
-            kept = Some(explorer.clone().into_any());
+            let handle = window.window_handle();
+            let sessions =
+                cx.new(|cx| crate::sessions::Sessions::new(workspace, driver.clone(), handle, cx));
             let table = Table {
                 driver,
                 connection,
                 database: "app_db".into(),
-                explorer: explorer.downgrade(),
+                sessions,
                 schema: "public".into(),
                 name: "users".into(),
                 sqlite_table: false,
@@ -44,14 +37,14 @@ fn open(
             };
             cx.new(|cx| {
                 let grid = cx.new(|cx| crate::ui::grid::Grid::table(table.clone(), cx));
-                Structure::new(grid, table, "key".into(), cx)
+                Structure::new(grid, table, "key".into(), WeakEntity::new_invalid(), cx)
             })
         })
         .expect("open test window")
     });
     let vcx = VisualTestContext::from_window(window, cx);
     vcx.run_until_parked();
-    (fake, vcx, structure.clone(), kept.expect("explorer"))
+    (fake, vcx, structure)
 }
 
 /// What picking `sub` in the tab's context menu does.
@@ -114,7 +107,7 @@ fn audit() -> Trigger {
 
 #[gpui_kit::test]
 fn structure_loads_on_first_show_and_lists_everything(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, structure, _explorer) = open(false, cx);
+    let (fake, mut cx, structure) = open(false, cx);
     assert!(
         fake.pending().is_empty(),
         "nothing read before the sub-tab is shown"
@@ -139,7 +132,7 @@ fn structure_loads_on_first_show_and_lists_everything(cx: &mut gpui_kit::TestApp
 
 #[gpui_kit::test]
 fn empty_sections_say_so_and_ddl_reuses_the_load(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, structure, _explorer) = open(false, cx);
+    let (fake, mut cx, structure) = open(false, cx);
     show(&mut cx, &structure, Sub::Structure);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();
@@ -169,7 +162,7 @@ fn empty_sections_say_so_and_ddl_reuses_the_load(cx: &mut gpui_kit::TestAppConte
 
 #[gpui_kit::test]
 fn f5_on_the_sub_tab_reads_again(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, structure, _explorer) = open(false, cx);
+    let (fake, mut cx, structure) = open(false, cx);
     show(&mut cx, &structure, Sub::Ddl);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();
@@ -186,7 +179,7 @@ fn f5_on_the_sub_tab_reads_again(cx: &mut gpui_kit::TestAppContext) {
 
 #[gpui_kit::test]
 fn a_view_shows_its_definition(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, structure, _explorer) = open(true, cx);
+    let (fake, mut cx, structure) = open(true, cx);
     show(&mut cx, &structure, Sub::Ddl);
     fake.resolve("connect app_db", Ok(fake::session("app_db")));
     cx.run_until_parked();
@@ -204,7 +197,7 @@ fn a_view_shows_its_definition(cx: &mut gpui_kit::TestAppContext) {
 
 #[gpui_kit::test]
 fn ddl_says_loading_then_the_error_and_retry_reads_it_again(cx: &mut gpui_kit::TestAppContext) {
-    let (fake, mut cx, structure, _explorer) = open(false, cx);
+    let (fake, mut cx, structure) = open(false, cx);
     show(&mut cx, &structure, Sub::Ddl);
     assert!(cx.debug_bounds("structure-state:Loading…").is_some());
     fake.resolve("connect app_db", Ok(fake::session("app_db")));

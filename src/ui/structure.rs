@@ -40,6 +40,8 @@ pub struct Structure {
     table: Table,
     /// The explorer row the tab was opened from, which Modify… selects.
     key: SharedString,
+    /// Where Modify… opens the table editor.
+    explorer: WeakEntity<crate::ui::explorer::Explorer>,
     pub sub: Sub,
     load: Load,
     /// The DDL or view definition, read-only.
@@ -52,12 +54,14 @@ impl Structure {
         grid: Entity<Grid>,
         table: Table,
         key: SharedString,
+        explorer: WeakEntity<crate::ui::explorer::Explorer>,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             grid,
             table,
             key,
+            explorer,
             sub: Sub::Data,
             load: Load::NotLoaded,
             editor: None,
@@ -111,13 +115,9 @@ impl Structure {
     fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.load = Load::Loading;
         let t = self.table.clone();
-        let gone = || -> crate::db::Reply<crate::db::Session> {
-            Box::pin(futures::future::ready(Err("The explorer is closed".into())))
-        };
         let session = t
-            .explorer
-            .update(cx, |e, cx| e.session(t.connection, &t.database, cx))
-            .unwrap_or_else(|_| gone());
+            .sessions
+            .update(cx, |s, cx| s.session(t.connection, &t.database, cx));
         cx.spawn_in(window, async move |this, cx| {
             let read = async {
                 let session = session.await?;
@@ -317,8 +317,7 @@ impl Structure {
                             .label("Modify table")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 let key = this.key.clone();
-                                this.table
-                                    .explorer
+                                this.explorer
                                     .update(cx, |e, cx| {
                                         e.reveal(&key, window, cx);
                                         e.modify_object(window, cx)

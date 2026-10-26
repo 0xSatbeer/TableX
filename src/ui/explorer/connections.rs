@@ -2,92 +2,49 @@
 
 use super::*;
 use crate::db::Reply;
-use crate::model::Secret;
 use crate::persist::Keys;
+use crate::sessions::Connect;
 use crate::ui::password_prompt::{Entered, PasswordPrompt, keychain_failed};
-use futures::FutureExt as _;
 
 impl Explorer {
     /// Connects connection `ci`, then lists its databases. Expanding a connection that is not
     /// connected and Retry on a failed one both come here. `all` expands everything it lists, as `*` does.
     pub(super) fn connect(&mut self, ci: usize, all: bool, cx: &mut Context<Self>) {
-        if !self.password_ready(ci, cx) {
-            return self.ask_password(ci, all, cx);
+        let id = self.workspace.read(cx).connections[ci].id;
+        if all {
+            self.connect_all.insert(id);
         }
-        let key = self.workspace.read(cx).connections[ci].id.0.to_string();
+        match self.sessions.update(cx, |s, cx| s.connect(id, cx)) {
+            // Asked for in `PasswordNeeded`; the row opens once it connects.
+            Connect::NeedsPassword => return,
+            // Loads from before carry the old generation and will be dropped, so none stays in flight.
+            Connect::Started => self.loads.retain(|k, _| !of_connection(k, id)),
+            Connect::Busy => {}
+        }
         // Opened even when a connect is already running, so an expand while Connecting isn't lost.
-        self.expanded.insert(key.clone());
-        let started = self.workspace.update(cx, |ws, cx| {
-            let conn = &mut ws.connections[ci];
-            if matches!(
-                conn.status,
-                ConnectionStatus::Connected | ConnectionStatus::Connecting
-            ) {
-                return None;
-            }
-            conn.status = ConnectionStatus::Connecting;
-            cx.notify();
-            Some((conn.id, conn.params.clone()))
-        });
-        let Some((id, params)) = started else {
-            return self.refresh(cx);
-        };
-        let generation = self.next_gen(id);
-        // Loads from before carry the old generation and will be dropped, so none stays in flight.
-        self.loads.retain(|k, _| !of_connection(k, id));
-        let reply = self.driver.connect(&params);
-        cx.spawn(async move |this, cx| {
-            let result = reply.await;
-            this.update(cx, |this, cx| {
-                if this.gens.get(&id) != Some(&generation) {
-                    return;
-                }
-                match result {
-                    Ok(session) => {
-                        this.sessions.insert((id, params.database()), session);
-                        this.set_status(id, ConnectionStatus::Connected, cx);
-                        cx.emit(ConnectionRestored { id });
-                        this.load(key, all, cx);
-                    }
-                    Err(reason) => this.set_status(id, ConnectionStatus::Error(reason), cx),
-                }
-                this.refresh(cx);
-            })
-            .ok();
-        })
-        .detach();
+        self.expanded.insert(id.0.to_string());
         self.refresh(cx);
     }
 
-    /// Whether connection `ci` has what it connects with: no password needed, one in memory,
-    /// or one the keychain gives (then kept in memory).
-    fn password_ready(&mut self, ci: usize, cx: &mut Context<Self>) -> bool {
-        let conn = &self.workspace.read(cx).connections[ci];
-        let ConnectionParams::Postgres { password: None, .. } = conn.params else {
-            return true;
-        };
-        if !conn.save_password {
-            return false;
-        }
-        let id = conn.id;
-        // shortcut: the keychain is read on the UI thread; move it off if a slow D-Bus shows.
-        match Keys::of(cx).get(id) {
-            Ok(Some(password)) => {
-                self.remember_password(id, password, cx);
-                true
-            }
-            Ok(None) => false,
-            Err(error) => {
-                keychain_failed(&error, cx);
-                false
-            }
-        }
+    /// Connection `id` connected, here or anywhere: its databases are listed.
+    pub(super) fn connected(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        let all = self.connect_all.remove(&id);
+        self.load(id.0.to_string(), all, cx);
+        self.refresh(cx);
     }
 
-    /// Asks for connection `ci`'s password, then connects with it; Cancel leaves it as it was.
-    fn ask_password(&mut self, ci: usize, all: bool, cx: &mut Context<Self>) {
-        let conn = &self.workspace.read(cx).connections[ci];
-        let (id, name, window) = (conn.id, conn.name.clone(), self.window);
+    /// Asks for connection `id`'s password, then connects with it; Cancel leaves it as it was.
+    pub(super) fn ask_password(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        let Some(conn) = self
+            .workspace
+            .read(cx)
+            .connections
+            .iter()
+            .find(|c| c.id == id)
+        else {
+            return;
+        };
+        let (name, window) = (conn.name.clone(), self.window);
         let this = cx.entity().downgrade();
         // Deferred: this runs inside the window's event handling, which holds the window.
         cx.defer(move |cx| {
@@ -95,28 +52,15 @@ impl Explorer {
                 let prompt = PasswordPrompt::open(&name, window, cx);
                 let _ = this.update(cx, |_, cx| {
                     cx.subscribe(&prompt, move |this, _, Entered(password), cx| {
-                        this.remember_password(id, password.clone(), cx);
+                        this.sessions
+                            .update(cx, |s, cx| s.remember_password(id, password.clone(), cx));
+                        let all = this.connect_all.contains(&id);
                         this.connect_connection_all(id, all, cx);
                     })
                     .detach()
                 });
             });
         });
-    }
-
-    /// Keeps `password` on connection `id` until quit, without counting as a params edit.
-    fn remember_password(&mut self, id: ConnectionId, secret: Secret, cx: &mut Context<Self>) {
-        let params = self.workspace.update(cx, |ws, cx| {
-            let conn = ws.connections.iter_mut().find(|c| c.id == id)?;
-            if let ConnectionParams::Postgres { password, .. } = &mut conn.params {
-                *password = Some(secret);
-            }
-            cx.notify();
-            Some(conn.params.clone())
-        });
-        if let Some(params) = params {
-            self.params.insert(id, params);
-        }
     }
 
     /// Where the table or view row keyed `key` reads its rows: on the session for its database.
@@ -128,85 +72,14 @@ impl Explorer {
         let conn = &self.workspace.read(cx).connections[node.conn];
         let mut parts = segments(key).into_iter().skip(1);
         let (database, schema) = (parts.next()?, parts.next()?);
-        Some(crate::ui::grid::Table {
-            driver: self.driver.clone(),
-            connection: conn.id,
-            explorer: cx.entity().downgrade(),
-            name: parts.nth(1)?,
-            database,
-            schema,
-            sqlite_table: conn.kind() == DbKind::Sqlite && kind == ObjectKind::Table,
-            view: kind != ObjectKind::Table,
-        })
-    }
-
-    /// Whether connection `id` is marked production now.
-    pub fn is_production(&self, id: ConnectionId, cx: &App) -> bool {
-        let workspace = self.workspace.read(cx);
-        workspace
-            .connections
-            .iter()
-            .any(|c| c.id == id && c.is_production)
-    }
-
-    /// The open session on connection `id`'s database `db`; without one, a new one, kept for the
-    /// next caller unless the connection changed meanwhile.
-    pub fn session(
-        &mut self,
-        id: ConnectionId,
-        db: &str,
-        cx: &mut Context<Self>,
-    ) -> Reply<Session> {
-        let at = (id, db.to_string());
-        if let Some(session) = self.sessions.get(&at).filter(|s| !s.is_closed()) {
-            return Box::pin(futures::future::ready(Ok(session.clone())));
-        }
-        // A restored tab can get here before Connect has read the saved password from the keychain.
-        if let Some(ci) = self
-            .workspace
-            .read(cx)
-            .connections
-            .iter()
-            .position(|c| c.id == id)
-        {
-            self.password_ready(ci, cx);
-        }
-        let params = match self.params_on(id, db, cx) {
-            Ok(params) => params,
-            Err(reason) => return Box::pin(futures::future::ready(Err(reason))),
-        };
-        let reply = self.driver.connect(&params).shared();
-        let generation = *self.gens.entry(id).or_default();
-        let keep = reply.clone();
-        cx.spawn(async move |this, cx| {
-            let Ok(session) = keep.await else { return };
-            this.update(cx, |this, _| {
-                if this.gens.get(&id) == Some(&generation) {
-                    let kept = this.sessions.entry(at).or_insert_with(|| session.clone());
-                    if kept.is_closed() {
-                        *kept = session;
-                    }
-                }
-            })
-            .ok();
-        })
-        .detach();
-        reply.boxed()
-    }
-
-    /// A new session on connection `id`'s database `db`, kept by nobody: the caller owns it.
-    pub fn fresh_session(&self, id: ConnectionId, db: &str, cx: &App) -> Reply<Session> {
-        match self.params_on(id, db, cx) {
-            Ok(params) => self.driver.connect(&params),
-            Err(reason) => Box::pin(futures::future::ready(Err(reason))),
-        }
-    }
-
-    fn params_on(&self, id: ConnectionId, db: &str, cx: &App) -> Result<ConnectionParams, String> {
-        let workspace = self.workspace.read(cx);
-        let conn = workspace.connections.iter().find(|c| c.id == id);
-        let conn = conn.ok_or("The connection was deleted")?;
-        Ok(on_database(&conn.params, db))
+        let place = (database, schema, parts.nth(1)?);
+        Some(crate::ui::grid::Table::new(
+            &self.sessions,
+            conn,
+            place,
+            kind,
+            cx,
+        ))
     }
 
     /// Connects connection `id` as Retry on its error row does (Connect or Retry in the status bar).
@@ -226,27 +99,18 @@ impl Explorer {
         }
     }
 
-    /// Connection `id`'s session is gone: marks it Disconnected, drops its sessions and loads, tells
-    /// the Shell (`ConnectionLost`) and shows one toast. Does nothing while it isn't connected.
-    pub fn lost(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
-        let Some(name) = self.close(id, cx) else {
-            return;
-        };
-        let notice = format!("Lost connection to {name}");
-        let window = self.window;
-        // Deferred: callers run inside entity or window updates.
-        cx.defer(move |cx| {
-            let _ = window.update(cx, |_, window, cx| toast::error(notice, window, cx));
-        });
-    }
-
     /// Disconnect in a row's menu: closes the selected row's connection and selects its row.
     pub(super) fn disconnect_selected(&mut self, cx: &mut Context<Self>) {
         let Some(ci) = self.nodes.get(self.selected).map(|n| n.conn) else {
             return;
         };
         let id = self.workspace.read(cx).connections[ci].id;
-        if self.close(id, cx).is_some() {
+        if self
+            .sessions
+            .update(cx, |s, cx| s.disconnect(id, cx))
+            .is_some()
+        {
+            self.disconnected(id, cx);
             let row = self
                 .nodes
                 .iter()
@@ -256,68 +120,31 @@ impl Explorer {
         }
     }
 
-    /// Drops connection `id`'s sessions and loads, marks it Disconnected and tells the Shell
-    /// (`ConnectionLost`). Returns its name, or None when it wasn't connected.
-    fn close(&mut self, id: ConnectionId, cx: &mut Context<Self>) -> Option<String> {
-        let workspace = self.workspace.read(cx);
-        let conn = workspace.connections.iter().find(|c| c.id == id)?;
-        if conn.status != ConnectionStatus::Connected {
-            return None;
-        }
-        let name = conn.name.clone();
-        self.next_gen(id);
-        self.sessions.retain(|(conn, _), _| *conn != id);
+    /// Connection `id` went Disconnected: what it was loading is dropped.
+    pub(super) fn disconnected(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
         self.loads.retain(|k, _| !of_connection(k, id));
-        self.set_status(id, ConnectionStatus::Disconnected, cx);
         self.refresh(cx);
-        cx.emit(ConnectionLost { id });
-        Some(name)
     }
 
-    /// Closes the sessions of every connection whose params changed or that was deleted, drops
-    /// what it was loading and collapses it, so nothing from its old server lands or stays.
-    pub(super) fn forget_changed(&mut self, cx: &mut Context<Self>) {
-        let now: HashMap<_, _> = self
-            .workspace
-            .read(cx)
-            .connections
-            .iter()
-            .map(|c| (c.id, c.params.clone()))
-            .collect();
-        let changed: Vec<ConnectionId> = self
-            .params
-            .iter()
-            .filter(|(id, params)| now.get(id) != Some(params))
-            .map(|(id, _)| *id)
-            .collect();
-        for id in changed {
-            self.next_gen(id);
-            self.sessions.retain(|(conn, _), _| *conn != id);
-            self.expanded.retain(|k| !of_connection(k, id));
-            self.loads.retain(|k, _| !of_connection(k, id));
-        }
-        self.params = now;
+    /// Connection `id`'s params changed or it was deleted: it collapses and drops its loads.
+    pub(super) fn changed(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        self.expanded.retain(|k| !of_connection(k, id));
+        self.loads.retain(|k, _| !of_connection(k, id));
+        self.refresh(cx);
     }
 
-    /// Bumps connection `id`'s generation, so every result started before is dropped.
-    pub(super) fn next_gen(&mut self, id: ConnectionId) -> u64 {
-        let generation = self.gens.entry(id).or_default();
-        *generation += 1;
-        *generation
-    }
-
-    pub(super) fn set_status(
-        &mut self,
+    /// The session on connection `id`'s database `db`, from the registry.
+    pub(super) fn session_on(
+        &self,
         id: ConnectionId,
-        status: ConnectionStatus,
+        db: &str,
         cx: &mut Context<Self>,
-    ) {
-        self.workspace.update(cx, |ws, cx| {
-            if let Some(conn) = ws.connections.iter_mut().find(|c| c.id == id) {
-                conn.status = status;
-                cx.notify();
-            }
-        });
+    ) -> Reply<Session> {
+        self.sessions.update(cx, |s, cx| s.session(id, db, cx))
+    }
+
+    pub(super) fn generation(&self, id: ConnectionId, cx: &App) -> u64 {
+        self.sessions.read(cx).generation(id)
     }
 
     /// Opens the Add connection dialog ("+" in the header, `AddConnection`).
@@ -405,10 +232,7 @@ impl Explorer {
         let db_key = ancestors(&node.key)
             .get(1)
             .map_or(node.key.clone(), |k| k.to_string());
-        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
-            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
-            None => self.driver.connect(&on_database(&conn.params, &db)),
-        };
+        let open = self.session_on(conn.id, &db, cx);
         let dialog = NameOwnerDialog::open(
             self.driver.clone(),
             open,
@@ -425,7 +249,7 @@ impl Explorer {
                 let (on, atomic, refresh) = match kind {
                     // Dropping the session on `db` keeps it from blocking a rename.
                     Owned::Database => {
-                        this.sessions.remove(&(conn.id, db.clone()));
+                        this.sessions.update(cx, |s, _| s.release(conn.id, &db));
                         ("postgres", false, conn.id.0.to_string())
                     }
                     Owned::Schema => (db.as_str(), true, db_key.clone()),
@@ -463,10 +287,7 @@ impl Explorer {
         let parts = segments(&node.key);
         let (db, schema, table) = (parts[1].clone(), &parts[2], &parts[4]);
         let schema_key = ancestors(&node.key)[2].to_string();
-        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
-            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
-            None => self.driver.connect(&on_database(&conn.params, &db)),
-        };
+        let open = self.session_on(conn.id, &db, cx);
         let dialog = TableEditor::open(
             self.driver.clone(),
             open,
@@ -560,10 +381,7 @@ impl Explorer {
             return;
         };
         let db = segments(&node.key)[1].clone();
-        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
-            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
-            None => self.driver.connect(&on_database(&conn.params, &db)),
-        };
+        let open = self.session_on(conn.id, &db, cx);
         let dialog = NameOwnerDialog::create(
             self.driver.clone(),
             open,
@@ -613,10 +431,7 @@ impl Explorer {
             return;
         }
         let db = segments(&node.key)[1].clone();
-        let open: crate::db::Reply<Session> = match self.sessions.get(&(conn.id, db.clone())) {
-            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
-            None => self.driver.connect(&on_database(&conn.params, &db)),
-        };
+        let open = self.session_on(conn.id, &db, cx);
         let dialog = RoleDialog::open(
             self.driver.clone(),
             open,
@@ -663,25 +478,12 @@ impl Explorer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(params) = self.params.get(&id).cloned() else {
-            return;
-        };
-        let at = (id, on.to_string());
-        let open: crate::db::Reply<Session> = match self.sessions.get(&at) {
-            Some(session) => Box::pin(futures::future::ready(Ok(session.clone()))),
-            None => self.driver.connect(&on_database(&params, on)),
-        };
-        let generation = *self.gens.entry(id).or_default();
+        let open = self.session_on(id, on, cx);
+        let generation = self.generation(id, cx);
         let driver = self.driver.clone();
         cx.spawn_in(window, async move |this, cx| {
             let result = match open.await {
                 Ok(session) => {
-                    this.update(cx, |this, _| {
-                        if this.gens.get(&id) == Some(&generation) {
-                            this.sessions.entry(at).or_insert_with(|| session.clone());
-                        }
-                    })
-                    .ok();
                     let done = driver.execute(&session, statements, atomic).await;
                     done.map_err(|err| err.message)
                 }
@@ -690,8 +492,7 @@ impl Explorer {
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => {
                     window.close_dialog(cx);
-                    if let Some(refresh) =
-                        refresh.filter(|_| this.gens.get(&id) == Some(&generation))
+                    if let Some(refresh) = refresh.filter(|_| this.generation(id, cx) == generation)
                     {
                         this.load(refresh, false, cx);
                     }

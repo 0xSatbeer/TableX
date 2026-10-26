@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui_kit::*;
 
-use crate::model::{DbKind, ObjectKind};
+use crate::model::ObjectKind;
 use crate::persist::{self, SessionFile, SessionTab};
 use crate::ui::{explorer, grid, tabs};
 
@@ -117,16 +117,8 @@ impl Shell {
             } => {
                 // shortcut: C8 doesn't say table or view, so a view restores as a table (editable,
                 // its saves fail on the server); add the kind to the file if that bites.
-                let table = grid::Table {
-                    driver: self.driver.clone(),
-                    connection: conn.id,
-                    database: database.clone(),
-                    explorer: self.explorer.downgrade(),
-                    schema: schema.clone(),
-                    name: object.clone(),
-                    sqlite_table: conn.kind() == DbKind::Sqlite,
-                    view: false,
-                };
+                let place = (database.clone(), schema.clone(), object.clone());
+                let table = grid::Table::new(&self.sessions, &conn, place, ObjectKind::Table, cx);
                 let grid = cx.new(|cx| {
                     let mut grid = grid::Grid::table(table.clone(), cx);
                     grid.set_filter(where_.clone(), order_by.clone());
@@ -141,16 +133,11 @@ impl Shell {
                     explorer::object_key(conn.id, database, schema, ObjectKind::Table, object)
                         .into();
                 let tail = tabs::join_path(database, schema);
-                let mut tab = start::table_tab(key, grid, table, cx);
+                let explorer = self.explorer.downgrade();
+                let mut tab = start::table_tab(key, grid, table, explorer, cx);
                 tab.tooltip = Some(format!("{} › {tail} › {object}", conn.name).into());
                 tab.title = object.clone().into();
-                tab.origin = Some(tabs::Origin {
-                    connection: conn.id,
-                    color: conn.color,
-                    production: conn.is_production,
-                    path: tabs::join_path(&conn.name, &tail),
-                    tail,
-                });
+                tab.origin = Some(tabs::Origin::at(&conn, tail));
                 tab.pinned = *pinned;
                 Some(tab)
             }

@@ -216,14 +216,10 @@ fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext
         .key;
     let (window, explorer): (_, Entity<super::Explorer>) = cx.update(|cx| {
         gpui_kit::open_window(Default::default(), cx, |window, cx| {
-            cx.new(|cx| {
-                super::Explorer::new(
-                    cx.new(|_| ws),
-                    Arc::new(crate::db::Live::default()),
-                    window,
-                    cx,
-                )
-            })
+            let ws = cx.new(|_| ws);
+            let (handle, driver) = (window.window_handle(), Arc::new(crate::db::Live::default()));
+            let sessions = cx.new(|cx| Sessions::new(ws.clone(), driver, handle, cx));
+            cx.new(|cx| super::Explorer::new(ws, sessions, window, cx))
         })
         .expect("open test window")
     });
