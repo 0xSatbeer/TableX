@@ -11,6 +11,7 @@ use super::{
 mod add_delete;
 mod cell_edit;
 mod columns;
+mod completion;
 mod copy;
 mod editor;
 mod export;

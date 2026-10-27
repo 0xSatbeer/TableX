@@ -28,6 +28,8 @@ pub struct Table {
     pub sqlite_table: bool,
     /// A view (or materialized view): never editable.
     pub view: bool,
+    /// The filter bar completes in this dialect.
+    pub dialect: DbKind,
 }
 
 impl Table {
@@ -48,6 +50,7 @@ impl Table {
             name,
             sqlite_table: conn.kind() == DbKind::Sqlite && kind == ObjectKind::Table,
             view: kind != ObjectKind::Table,
+            dialect: conn.kind(),
         }
     }
 }

@@ -17,7 +17,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{EditorState, Input, InputEvent, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     tooltip::Tooltip,
     v_flex,
@@ -28,6 +28,7 @@ use gpui_kit::*;
 use crate::model::{ColumnMeta, ResultSet, Row, Value};
 use crate::{mock, theme};
 
+mod completion;
 mod copy;
 mod edit;
 mod export;
@@ -104,8 +105,8 @@ pub struct Grid {
     mono: Pixels,
     /// What Ctrl+C copies as, picked in the toolbar.
     copy_csv: bool,
-    /// WHERE and ORDER BY inputs; made on first render, since InputState needs the window.
-    filter: Option<(Entity<InputState>, Entity<InputState>)>,
+    /// WHERE and ORDER BY inputs; made on first render, since EditorState needs the window.
+    filter: Option<(Entity<EditorState>, Entity<EditorState>)>,
     /// Share of the filter bar the WHERE input takes, and (mouse x, share) while its edge is dragged.
     where_share: f32,
     filter_drag: Option<(Pixels, f32)>,

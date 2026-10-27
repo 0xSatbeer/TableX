@@ -253,8 +253,8 @@ fn filter_inputs(
     shell: &gpui_kit::Entity<crate::shell::Shell>,
     cx: &gpui_kit::VisualTestContext,
 ) -> (
-    gpui_kit::Entity<gpui_kit::component::input::InputState>,
-    gpui_kit::Entity<gpui_kit::component::input::InputState>,
+    gpui_kit::Entity<gpui_kit::component::input::EditorState>,
+    gpui_kit::Entity<gpui_kit::component::input::EditorState>,
 ) {
     shell.read_with(cx, |this, cx| {
         match &this.tabs.active().expect("a tab").content {
@@ -272,9 +272,21 @@ fn apply_filter(
     cx: &mut gpui_kit::VisualTestContext,
 ) {
     let (where_input, order_input) = filter_inputs(shell, cx);
-    type_into(cx, order_input, order_by);
-    type_into(cx, where_input, where_);
+    type_into_filter(cx, order_input, order_by);
+    type_into_filter(cx, where_input, where_);
     cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+}
+
+/// Replaces a filter box's text by typing into it.
+fn type_into_filter(
+    cx: &mut gpui_kit::VisualTestContext,
+    input: gpui_kit::Entity<gpui_kit::component::input::EditorState>,
+    text: &str,
+) {
+    cx.update(|window, cx| input.update(cx, |input, cx| input.focus(window, cx)));
+    cx.simulate_keystrokes("ctrl-a backspace");
+    cx.simulate_input(text);
     cx.run_until_parked();
 }
 
@@ -545,4 +557,30 @@ fn a_postgres_table_without_a_key_is_read_only(cx: &mut gpui_kit::TestAppContext
     );
     set(&shell, &[((0, 1), "x")], &mut cx);
     assert_eq!(pending_edits(&shell, &cx), 0, "edits are refused");
+}
+
+#[gpui_kit::test]
+fn a_filter_box_stays_on_one_line(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(rows(2)), &mut cx);
+    let (where_input, _) = filter_inputs(&shell, &cx);
+    type_into_filter(&mut cx, where_input.clone(), "");
+    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("a = 1\r\nAND b".into()));
+    cx.simulate_keystrokes("ctrl-v");
+    cx.simulate_input(" = 2");
+    cx.run_until_parked();
+    let value = where_input.read_with(&cx, |input, _| input.value().to_string());
+    assert_eq!(value, "a = 1  AND b = 2");
+    let bounds = cx
+        .debug_bounds("grid-filter-where")
+        .expect("the WHERE box drawn");
+    cx.simulate_event(gpui_kit::ScrollWheelEvent {
+        position: bounds.center(),
+        delta: gpui_kit::ScrollDelta::Lines(gpui_kit::point(0., -5.)),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    let scrolled = where_input.read_with(&cx, |input, _| input.scroll_offset().y);
+    assert_eq!(scrolled, gpui_kit::px(0.), "the box doesn't scroll down");
 }

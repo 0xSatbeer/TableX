@@ -64,6 +64,7 @@ fn all_rows_is_off_only_for_writing_statements_and_results_without_a_query(
         name: "users".into(),
         sqlite_table: false,
         view: false,
+        dialect: crate::model::DbKind::Postgres,
     };
     let grid = cx.new(|cx| Grid::table(table, cx));
     assert_eq!(

@@ -135,7 +135,7 @@ impl Grid {
     }
 
     #[cfg(test)]
-    pub fn filter_inputs(&self) -> (Entity<InputState>, Entity<InputState>) {
+    pub fn filter_inputs(&self) -> (Entity<EditorState>, Entity<EditorState>) {
         self.filter.clone().expect("the filter bar is drawn")
     }
 

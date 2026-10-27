@@ -34,6 +34,7 @@ fn open(
                 name: "users".into(),
                 sqlite_table: false,
                 view,
+                dialect: crate::model::DbKind::Postgres,
             };
             cx.new(|cx| {
                 let grid = cx.new(|cx| crate::ui::grid::Grid::table(table.clone(), cx));

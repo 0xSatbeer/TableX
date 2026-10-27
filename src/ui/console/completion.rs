@@ -127,7 +127,7 @@ fn statement_words(sql: &str, offset: usize) -> HashSet<String> {
 }
 
 /// Where the identifier the cursor ends starts, an opening `"` included.
-fn partial_start(sql: &str, offset: usize) -> usize {
+pub(crate) fn partial_start(sql: &str, offset: usize) -> usize {
     let word = |c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '"');
     let back = sql[..offset]
         .char_indices()
@@ -136,7 +136,7 @@ fn partial_start(sql: &str, offset: usize) -> usize {
     back.last().map_or(offset, |(i, _)| i)
 }
 
-fn lsp_item(item: Item, range: lsp_types::Range, partial: &str) -> CompletionItem {
+pub(crate) fn lsp_item(item: Item, range: lsp_types::Range, partial: &str) -> CompletionItem {
     CompletionItem {
         label: item.label,
         kind: Some(lsp_kind(item.kind)),

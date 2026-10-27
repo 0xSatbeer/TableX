@@ -255,12 +255,8 @@ impl Grid {
             .border_color(theme.border)
             .text_size(theme::ui())
             .child(
-                div().w(relative(self.where_share)).min_w_0().child(
-                    Input::new(&where_input)
-                        .small()
-                        .bordered(false)
-                        .prefix(icon(IconName::Funnel)),
-                ),
+                filter_box("where", &where_input, icon(IconName::Funnel))
+                    .w(relative(self.where_share)),
             )
             .child(
                 div()
@@ -279,39 +275,85 @@ impl Grid {
                         }),
                     ),
             )
-            .child(
-                div().flex_1().min_w_0().child(
-                    Input::new(&order_input)
-                        .small()
-                        .bordered(false)
-                        .prefix(icon(IconName::ArrowDownWideNarrow)),
-                ),
-            )
+            .child(filter_box("order", &order_input, icon(IconName::ArrowDownWideNarrow)).flex_1())
     }
 }
 
-/// A filter bar box; Enter in it applies both boxes.
+/// A filter bar box: one line of highlighted, completed SQL; Enter in it applies both boxes.
 fn filter_input(
     placeholder: &'static str,
     window: &mut Window,
     cx: &mut Context<Grid>,
-) -> Entity<InputState> {
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
-    cx.subscribe(&input, |this, _, ev: &InputEvent, cx| {
-        if let InputEvent::PressEnter { .. } = ev {
-            // A typed ORDER BY replaces the header's sort.
-            let order_by = this
-                .filter
-                .as_ref()
-                .map(|(_, o)| o.read(cx).value().trim().to_string());
-            if order_by.is_some_and(|o| o != this.sort_order_by()) {
-                this.sort = None;
+) -> Entity<EditorState> {
+    let input = cx.new(|cx| {
+        EditorState::new(window, cx)
+            .language("sql")
+            .line_number(false)
+            .soft_wrap(false)
+            .scroll_beyond_last_line(Some(0))
+            .submit_on_enter(true)
+            .placeholder(placeholder)
+    });
+    let provider = Rc::new(completion::Provider {
+        grid: cx.weak_entity(),
+        clause: placeholder,
+    });
+    input.update(cx, |e, cx| {
+        e.lsp_mut().completion_provider = Some(provider);
+        e.set_highlighter_factory(completion::highlighter(placeholder), cx);
+    });
+    cx.subscribe_in(
+        &input,
+        window,
+        |this, input, ev: &InputEvent, window, cx| {
+            if let InputEvent::Change = ev {
+                input.update(cx, |input, cx| one_line(input, window, cx));
             }
-            this.apply_filter(cx);
-        }
-    })
+            if let InputEvent::PressEnter { .. } = ev {
+                // A typed ORDER BY replaces the header's sort.
+                let order_by = this
+                    .filter
+                    .as_ref()
+                    .map(|(_, o)| o.read(cx).value().trim().to_string());
+                if order_by.is_some_and(|o| o != this.sort_order_by()) {
+                    this.sort = None;
+                }
+                this.apply_filter(cx);
+            }
+        },
+    )
     .detach();
     input
+}
+
+/// Turns line breaks a paste or Shift+Enter brought in into spaces, the caret staying put.
+fn one_line(input: &mut EditorState, window: &mut Window, cx: &mut Context<EditorState>) {
+    let text = input.value();
+    if !text.contains(['\n', '\r']) {
+        return;
+    }
+    let cursor = input.cursor();
+    // Byte for byte, so `cursor` still points at the same character.
+    let flat = text.replace(['\n', '\r'], " ");
+    input.replace_all(flat, window, cx);
+    let at = gpui_kit::component::input::RopeExt::offset_to_position(input.text(), cursor);
+    input.set_cursor_position(at, window, cx);
+}
+
+fn filter_box(name: &'static str, state: &Entity<EditorState>, icon: Icon) -> Div {
+    h_flex()
+        .debug_selector(move || format!("grid-filter-{name}"))
+        .min_w_0()
+        .items_center()
+        .pl(theme::space_8())
+        .gap(theme::space_4())
+        .child(icon)
+        .child(
+            gpui_kit::component::input::Editor::new(state)
+                .bordered(false)
+                .h(px(28.))
+                .flex_1(),
+        )
 }
 
 /// The row range, which opens the rows-per-page menu of a result in memory.
