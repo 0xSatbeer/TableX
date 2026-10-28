@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libx11-xcb-dev libvulkan-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
+      # rustup installs the version pinned in rust-toolchain.toml
+      - run: rustup component add rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      # compose, not a service container: the test server needs ssl=on and an init script
+      - name: Start test Postgres
+        run: |
+          docker compose up -d
+          # the entrypoint's init server has no TCP listener, so this passes only once the real one is up
+          until docker compose exec -T postgres pg_isready -h localhost -U queryx; do sleep 1; done
+      - run: cargo test --locked
+        env:
+          QUERYX_TEST_PG: postgres://queryx:queryx@localhost:55432/queryx
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --release

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=QueryX
+Comment=Database client
+Exec=queryx
+Icon=queryx
+Terminal=false
+Categories=Development;Database;
+StartupWMClass=queryx

@@ -106,20 +106,16 @@ impl Render for Shell {
                         .w_full()
                         .pr(theme::space_8())
                         .justify_between()
-                        // Wordmark: a console prompt with its cursor parked. Static, nothing moves when idle.
                         .child(
                             h_flex()
                                 .items_center()
-                                .gap(px(1.))
-                                .font_family(theme.mono_font_family.clone())
-                                .font_weight(FontWeight::BOLD)
-                                .text_size(theme::ui())
-                                .child("queryx")
+                                .gap(theme::space_4())
+                                .child(img(crate::assets::APP_ICON).size(theme::space_16()))
                                 .child(
                                     div()
-                                        .w(theme::space_6() + px(1.))
-                                        .h(theme::ui())
-                                        .bg(theme.primary),
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_size(theme::ui())
+                                        .child("QueryX"),
                                 ),
                         )
                         .child(

@@ -2,6 +2,7 @@
 name = "queryx"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 # The date pickers in gpui-component speak chrono; it is already in the tree through them.
@@ -27,9 +28,19 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 # Saved passwords (C5): the OS keychain only, no bundled crypto or async runtime.
 keyring = { version = "3", default-features = false, features = ["sync-secret-service", "apple-native", "windows-native"] }
 
+# Embeds assets/icons/app/queryx.ico in the Windows exe (build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 tempfile = "3"
 gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "test-support"] }
+
+# macOS .app bundle (cargo bundle).
+[package.metadata.bundle]
+name = "QueryX"
+identifier = "dev.queryx.QueryX"
+icon = ["assets/icons/app/queryx.icns"]
 
 [profile.release]
 lto = "fat"
