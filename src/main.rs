@@ -91,8 +91,8 @@ fn main() {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),
                 window_min_size: Some(size(px(900.), px(600.))),
-                // Matches queryx.desktop so Linux docks show the app icon.
-                app_id: Some("queryx".into()),
+                // Matches io.github._0xSatbeer.QueryX.desktop so Linux docks show the app icon.
+                app_id: Some("io.github._0xSatbeer.QueryX".into()),
                 ..TitleBar::window_options()
             };
             let keychain: std::sync::Arc<dyn persist::Keychain> = match bench {
