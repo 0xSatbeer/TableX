@@ -194,6 +194,8 @@ pub struct Explorer {
     connect_all: HashSet<ConnectionId>,
     /// Mirror of the field's text; non-empty shows only matches and their ancestors.
     filter: String,
+    /// The funnel toggled the filter row on; it also shows while `filter` is non-empty.
+    show_filter: bool,
     field: Entity<InputState>,
     nodes: Vec<FlatNode>,
     selected: usize,
@@ -262,6 +264,7 @@ impl Explorer {
             sessions,
             connect_all: HashSet::new(),
             filter: String::new(),
+            show_filter: false,
             nodes,
             selected: 0,
             picked: false,

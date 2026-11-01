@@ -237,3 +237,21 @@ fn reveal_clears_the_field_text_and_the_filter(cx: &mut gpui_kit::TestAppContext
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn funnel_shows_the_filter_row_and_hiding_clears_it(cx: &mut gpui_kit::TestAppContext) {
+    let (mut cx, explorer, _, _) = open_explorer(cx, vec![pg(1, "pg", "app")]);
+    let shown =
+        |cx: &mut gpui_kit::VisualTestContext| explorer.read_with(cx, |e, _| e.filter_shown());
+    assert!(!shown(&mut cx), "hidden at start");
+    explorer.update_in(&mut cx, |e, w, cx| e.toggle_filter(w, cx));
+    assert!(shown(&mut cx), "funnel shows it");
+    cx.simulate_input("zz");
+    explorer.update_in(&mut cx, |e, w, cx| e.toggle_filter(w, cx));
+    assert!(!shown(&mut cx), "funnel hides it");
+    assert_eq!(
+        explorer.read_with(&cx, |e, _| e.filter.clone()),
+        "",
+        "hiding clears the filter"
+    );
+}

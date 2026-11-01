@@ -35,6 +35,7 @@ mod sessions;
 mod star;
 mod structure;
 mod support;
+mod toolbar;
 mod tree;
 
 use drive::*;

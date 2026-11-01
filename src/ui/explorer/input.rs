@@ -5,7 +5,24 @@ use super::*;
 impl Explorer {
     /// Focuses the filter field (Ctrl+Alt+F).
     pub fn focus_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_filter = true;
         window.focus(&self.field.focus_handle(cx), cx);
+        cx.notify();
+    }
+
+    /// The funnel: shows and focuses the filter row, or clears and hides it.
+    pub(super) fn toggle_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.filter_shown() {
+            self.show_filter = false;
+            self.put_filter(String::new(), window, cx);
+            window.focus(&self.focus, cx);
+        } else {
+            self.focus_field(window, cx);
+        }
+    }
+
+    pub(super) fn filter_shown(&self) -> bool {
+        self.show_filter || !self.filter.is_empty()
     }
 
     /// Replaces the field's text and applies it as the filter (`set_value` emits no Change).
