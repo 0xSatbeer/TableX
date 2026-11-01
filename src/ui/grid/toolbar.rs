@@ -49,6 +49,7 @@ impl Grid {
             .px(theme::space_4())
             .py(theme::space_2())
             .gap(theme::space_2())
+            .bg(theme.background)
             .border_b_1()
             .border_color(theme.border)
             .text_size(theme::ui())

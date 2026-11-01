@@ -478,7 +478,7 @@ impl Grid {
                 .items_center()
                 .justify_center()
                 .gap(theme::space_8())
-                .bg(theme.background)
+                .bg(theme.table)
                 .text_size(theme::ui_sm())
                 .text_color(theme.muted_foreground)
         };
