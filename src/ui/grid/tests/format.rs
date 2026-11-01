@@ -76,11 +76,11 @@ fn aligns_right_by_kind_and_type() {
 #[test]
 fn row_height_scales_with_the_zoomed_font() {
     let cases = [
-        (12.5, 26.),
-        (13.5, 28.08),
-        (11.5, 23.92),
-        (9., 18.72),
-        (24., 49.92),
+        (13., 22.),
+        (14., 23.69),
+        (12., 20.31),
+        (9., 15.23),
+        (24., 40.62),
     ];
     for (mono, want) in cases {
         let got: f32 = row_height(px(mono)).into();

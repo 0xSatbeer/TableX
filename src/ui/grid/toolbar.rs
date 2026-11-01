@@ -194,13 +194,10 @@ impl Grid {
                 Button::new("grid-copy-format")
                     .ghost()
                     .small()
-                    .label(if self.copy_csv {
-                        "Copy as CSV"
-                    } else {
-                        "Copy as TSV"
-                    })
+                    .label(if self.copy_csv { "CSV" } else { "TSV" })
                     .dropdown_caret(true)
                     .tooltip("Format Ctrl+C copies")
+                    .accessibility_label("Format Ctrl+C copies")
                     .dropdown_menu(move |menu, _, _| {
                         [
                             ("TSV (tab-separated)", false),

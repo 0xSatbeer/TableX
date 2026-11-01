@@ -80,17 +80,20 @@ pub enum ThemeChoice {
     Dark,
     Light,
     System,
+    /// JetBrains Darcula (DataGrip) look.
+    Darcula,
     User(SharedString),
 }
 
 impl ThemeChoice {
-    pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::System];
+    pub const ALL: [Self; 4] = [Self::Dark, Self::Light, Self::System, Self::Darcula];
 
     pub fn next(&self) -> Self {
         match self {
             Self::Dark => Self::Light,
             Self::Light => Self::System,
-            Self::System | Self::User(_) => Self::Dark,
+            Self::System => Self::Darcula,
+            Self::Darcula | Self::User(_) => Self::Dark,
         }
     }
 
@@ -99,6 +102,7 @@ impl ThemeChoice {
             Self::Dark => "Dark",
             Self::Light => "Light",
             Self::System => "System",
+            Self::Darcula => "Darcula",
             Self::User(name) => name,
         }
     }
@@ -124,6 +128,10 @@ impl ThemeChoice {
                 }
                 None => ThemeMode::Dark,
             },
+            Self::Darcula => {
+                dark = builtin(BUILT_IN[2]).unwrap_or(dark);
+                ThemeMode::Dark
+            }
             Self::Dark => ThemeMode::Dark,
         };
         // `Theme::change` loads whichever of these two matches the mode it is given.

@@ -227,6 +227,7 @@ fn each_theme_choice_a_scale_and_a_font_size_round_trip_through_config_toml() {
         ThemeChoice::Dark,
         ThemeChoice::Light,
         ThemeChoice::System,
+        ThemeChoice::Darcula,
         ThemeChoice::User("Nord".into()),
     ] {
         let config = Config {

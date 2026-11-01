@@ -47,8 +47,12 @@ pub(super) fn paste_targets(
         .collect()
 }
 
+/// Whether an edit puts back the loaded value. Postgres `numeric` loads as text but edits as a float.
+pub(super) fn unchanged(was: &Value, now: &Value) -> bool {
+    was == now || matches!((was, now), (Value::Text(t), Value::Float(f)) if t.parse() == Ok(*f))
+}
+
 impl Grid {
-    /// Stores `cells` (display row, display column, typed text) as pending edits.
     /// Stores `cells` (display row, display column, value) as pending edits.
     pub(super) fn set_values(
         &mut self,
@@ -60,8 +64,13 @@ impl Grid {
         }
         self.notice = None;
         for ((r, c), value) in cells {
-            self.edits
-                .insert((self.abs_row(r), self.col_order[c]), value);
+            let (at, s) = (self.abs_row(r), self.col_order[c]);
+            // Back to the loaded value: no longer an edit. A new row's cell keeps it, since blank means DEFAULT.
+            if at >= self.added && unchanged(&self.all.row(at)[s], &value) {
+                self.edits.remove(&(at, s));
+            } else {
+                self.edits.insert((at, s), value);
+            }
         }
         self.revision += 1;
         cx.notify();

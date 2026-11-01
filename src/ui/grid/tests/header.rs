@@ -3,20 +3,36 @@
 use super::*;
 
 #[test]
-fn header_model_shows_name_type_and_pk_icon() {
-    let m = |n: &str, t: &str, pk| HeaderModel {
+fn header_model_shows_name_type_and_key_icons() {
+    let m = |n: &str, t: &str, pk, fk| HeaderModel {
         name: n.into(),
         data_type: t.into(),
         pk,
+        fk,
     };
     let cases = [
-        (col("id", "bigint", true), m("id", "bigint", true)),
-        (col("email", "text", false), m("email", "text", false)),
-        (col("", "", false), m("", "", false)),
+        (col("id", "bigint", true), m("id", "bigint", true, false)),
+        (
+            col("email", "text", false),
+            m("email", "text", false, false),
+        ),
+        (col("", "", false), m("", "", false, false)),
     ];
     for (c, want) in cases {
-        assert_eq!(header_model(&c), want);
+        assert_eq!(header_model(&c, &[], &[]), want);
     }
+    // A table tab names its keys: a key column read from the table gets its icon, FK too.
+    let (key, fks) = (
+        ["id".to_string()],
+        ["user_id".to_string(), "id".to_string()],
+    );
+    let flags = |c: ColumnMeta| {
+        let m = header_model(&c, &key, &fks);
+        (m.pk, m.fk)
+    };
+    assert_eq!(flags(col("id", "bigint", false)), (true, true));
+    assert_eq!(flags(col("user_id", "bigint", false)), (false, true));
+    assert_eq!(flags(col("email", "text", false)), (false, false));
     // The icon belongs to the column: a reordered PK keeps it, and so does a hidden one (the model ignores both).
     let cols = [
         col("a", "text", false),
@@ -25,18 +41,43 @@ fn header_model_shows_name_type_and_pk_icon() {
     ];
     let shown: Vec<bool> = [1usize, 0, 2]
         .iter()
-        .map(|&s| header_model(&cols[s]).pk)
+        .map(|&s| header_model(&cols[s], &[], &[]).pk)
         .collect();
     assert_eq!(shown, [true, false, false]);
 }
 
 #[test]
-fn header_height_fits_two_lines() {
-    use crate::theme::{badge_line, space_4, space_8};
-    assert_eq!(header_height(badge_line(), space_8()), px(40.));
-    assert_eq!(header_height(px(16.), px(0.)), px(32.));
-    assert_eq!(header_height(px(14.), space_4()), px(32.));
-    assert!(header_height(badge_line(), space_8()) >= badge_line() * 2.);
+fn type_icon_follows_the_column_type() {
+    use gpui_kit::assets::IconName as Lucide;
+    let cases = [
+        ("integer", Lucide::Hash),
+        ("INTEGER", Lucide::Hash),
+        ("numeric(10,2)", Lucide::Hash),
+        ("bigserial", Lucide::Hash),
+        ("interval", Lucide::Clock),
+        ("text", Lucide::Type),
+        ("character varying(255)", Lucide::Type),
+        ("boolean", Lucide::ToggleLeft),
+        ("timestamp with time zone", Lucide::CalendarClock),
+        ("timestamptz", Lucide::CalendarClock),
+        ("DATETIME", Lucide::CalendarClock),
+        ("date", Lucide::Calendar),
+        ("time without time zone", Lucide::Clock),
+        ("jsonb", Lucide::Braces),
+        ("bytea", Lucide::Binary),
+        ("BLOB", Lucide::Binary),
+        ("uuid", Lucide::FingerprintPattern),
+        ("inet", Lucide::Network),
+        ("integer[]", Lucide::Brackets),
+        ("_int4", Lucide::Brackets),
+        ("", Lucide::Type),
+    ];
+    for (ty, want) in cases {
+        assert_eq!(type_icon(&col("c", ty, false)), want, "{ty}");
+    }
+    let mut kind = col("event", "event_kind", false);
+    kind.enum_values = [std::sync::Arc::from("signup")].into();
+    assert_eq!(type_icon(&kind), Lucide::List);
 }
 
 #[test]
@@ -51,17 +92,24 @@ fn sort_is_available_up_to_client_sort_max() {
         (1_000_000, SortAvail::Disabled(WHY)),
     ];
     for (rows, want) in cases {
-        assert_eq!(sort_availability(rows), want, "{rows} rows");
+        assert_eq!(sort_availability(rows, "text"), want, "{rows} rows");
+    }
+    for ty in ["json", "jsonb", "JSONB"] {
+        assert_eq!(
+            sort_availability(1, ty),
+            SortAvail::Disabled("JSON columns can't be sorted"),
+            "{ty}"
+        );
     }
     assert_eq!(
-        sort_availability(super::BigEvents::new().row_count()),
+        sort_availability(super::BigEvents::new().row_count(), "bigint"),
         SortAvail::Disabled(WHY),
         "big_events"
     );
 }
 
 #[gpui_kit::test]
-fn truncated_header_names_and_types_show_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
+fn truncated_header_names_show_a_tooltip(cx: &mut gpui_kit::TestAppContext) {
     use crate::model::ResultSet;
     use crate::theme::tests::hover_shows_truncation_tip;
     use gpui_kit::AppContext as _;
@@ -105,10 +153,8 @@ fn truncated_header_names_and_types_show_a_tooltip(cx: &mut gpui_kit::TestAppCon
     // (selector, tooltip shown); ones that fit first, so no earlier tooltip lingers.
     let cases = [
         ("header-name-0", false),
-        ("header-type-0", false),
-        ("header-type-1", false),
         ("header-name-1", true),
-        ("header-type-2", true),
+        ("header-name-2", true),
     ];
     for (selector, tip) in cases {
         assert_eq!(
@@ -144,12 +190,12 @@ fn opening_widths_fit_short_headers_beside_the_sort_control(cx: &mut gpui_kit::T
     });
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
     cx.run_until_parked();
-    for selector in [
-        "header-name-0",
-        "header-type-0",
-        "header-name-1",
-        "header-type-1",
-    ] {
+    // The type moved out of the header into the hover tooltip.
+    for selector in ["header-name-0", "header-tip-1"] {
+        hover_shows_truncation_tip(&mut cx, selector.into());
+        assert!(cx.debug_bounds("type-tip").is_some(), "{selector}");
+    }
+    for selector in ["header-name-0", "header-name-1"] {
         assert!(
             !hover_shows_truncation_tip(&mut cx, selector.into()),
             "{selector}"

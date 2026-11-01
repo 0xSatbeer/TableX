@@ -59,6 +59,8 @@ pub(super) struct Live {
     pub(super) table: Table,
     /// Primary key columns, read before the first page.
     pub(super) key: Option<Vec<String>>,
+    /// Columns in a foreign key, read with `key`.
+    pub(super) fks: Vec<String>,
     pub(super) page: TablePage,
     /// The last Submit's failing row in `all` and why; its edits stay pending.
     pub(super) submit_error: Option<(Option<usize>, String)>,
@@ -93,6 +95,7 @@ impl Grid {
         grid.live = Some(Live {
             table,
             key: None,
+            fks: Vec::new(),
             page: TablePage::new(),
             submit_error: None,
             _submit: None,
@@ -176,13 +179,26 @@ impl Grid {
         live._load = Some(cx.spawn(async move |this, cx| {
             let ready = async {
                 let session = session.await?;
-                let key = match key {
-                    Some(key) => key,
-                    None => primary_key(driver.columns(&session, &schema, &name).await?),
+                let (key, fks) = match key {
+                    Some(key) => (key, None),
+                    None => {
+                        let key = primary_key(driver.columns(&session, &schema, &name).await?);
+                        // Only for the header icon: SQLite and views have no table_def, so none.
+                        let fks = driver.table_def(&session, &schema, &name).await.map_or(
+                            Vec::new(),
+                            |def| {
+                                def.foreign_keys
+                                    .into_iter()
+                                    .flat_map(|f| f.columns)
+                                    .collect()
+                            },
+                        );
+                        (key, Some(fks))
+                    }
                 };
-                Ok::<_, String>((session, key))
+                Ok::<_, String>((session, key, fks))
             };
-            let (session, key) = match ready.await {
+            let (session, key, fks) = match ready.await {
                 Ok(ready) => ready,
                 Err(reason) => {
                     this.update(cx, |this, cx| this.failed(reason, cx)).ok();
@@ -194,6 +210,9 @@ impl Grid {
             this.update(cx, |this, _| {
                 if let Some(live) = &mut this.live {
                     live.key = Some(key);
+                    if let Some(fks) = fks {
+                        live.fks = fks;
+                    }
                 }
             })
             .ok();

@@ -2,10 +2,10 @@ use super::{
     BigEvents, Block, CellKind, ColumnMeta, Editor, EditorKind, Grid, GridSource, HeaderModel,
     MAX_CHARS, Page, SortAvail, Value, aligns_right, band_cols, cmp_values, copy_cols,
     copy_in_list, copy_ranges, csv, display_widths, editor_kind, format_cell, grouped,
-    gutter_digits, gutter_width, header_height, header_model, inspect_text, is_numeric_type, json,
-    markdown, mock, move_col, nav, page_count, parse_tsv, parse_value, paste_targets, pick,
-    prefix_sums, pretty_json, px, ranges_in_order, row_height, selection_after_drop,
-    sort_availability, sql_in_list, sql_insert, timestamp_value, tsv, visible_cols, wall_time,
+    gutter_digits, gutter_width, header_model, inspect_text, is_numeric_type, json, markdown, mock,
+    move_col, nav, page_count, parse_tsv, parse_value, paste_targets, pick, prefix_sums,
+    pretty_json, px, ranges_in_order, row_height, selection_after_drop, sort_availability,
+    sql_in_list, sql_insert, timestamp_value, tsv, type_icon, visible_cols, wall_time,
 };
 
 mod add_delete;

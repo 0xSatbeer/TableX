@@ -14,8 +14,9 @@ pub use user_themes::*;
 
 const DARK: &str = include_str!("../assets/themes/queryx-dark.json");
 const LIGHT: &str = include_str!("../assets/themes/queryx-light.json");
-/// Names of the themes in DARK and LIGHT; user themes may not reuse them.
-const BUILT_IN: [&str; 2] = ["QueryX Dark", "QueryX Light"];
+const DARCULA: &str = include_str!("../assets/themes/darcula.json");
+/// Names of the themes in DARK, LIGHT and DARCULA; user themes may not reuse them.
+const BUILT_IN: [&str; 3] = ["QueryX Dark", "QueryX Light", "Darcula"];
 
 // Type scale. MONO matches `mono_font.size`.
 //
@@ -49,7 +50,9 @@ const TREE_ROW: Pixels = px(24.);
 const LIST_ROW: Pixels = px(28.);
 /// Line height inside badges, so a badge sits inside a row instead of filling it.
 const BADGE_LINE: Pixels = px(16.);
-pub const GRID_ROW: Pixels = px(26.);
+/// Data grids read denser than the editor: a size up, rows tight around it.
+pub const GRID_MONO: Pixels = px(13.);
+pub const GRID_ROW: Pixels = px(22.);
 const TAB: Pixels = px(34.);
 /// Connection-color rule on tabs.
 const STRIPE: Pixels = px(2.);
@@ -165,7 +168,7 @@ pub fn init(cx: &mut App) {
 /// Loads the built-in themes and starts on QueryX Dark.
 fn init_themes(cx: &mut App) {
     let registry = ThemeRegistry::global_mut(cx);
-    for json in [DARK, LIGHT] {
+    for json in [DARK, LIGHT, DARCULA] {
         registry
             .load_themes_from_str(json)
             .expect("embedded theme is valid JSON");

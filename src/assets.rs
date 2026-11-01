@@ -8,16 +8,22 @@ icon_assets!(
     [
         ArrowDownWideNarrow,
         ArrowRightToLine,
+        Binary,
         Braces,
+        Brackets,
+        CalendarClock,
         ChevronFirst,
         ChevronLast,
         ClipboardPaste,
+        Clock,
         Code,
         Columns3,
         Database,
+        FingerprintPattern,
         FolderInput,
         Funnel,
         GitCommitHorizontal,
+        Hash,
         KeyRound,
         Layers,
         List,
@@ -33,7 +39,9 @@ icon_assets!(
         SquarePen,
         SquareX,
         Table,
+        ToggleLeft,
         Trash,
+        Type,
         Unplug
     ]
 );
@@ -124,6 +132,20 @@ mod tests {
             Lucide::FolderOpen,
             Lucide::PanelLeft,
             Lucide::PanelBottom,
+            // Grid header: key icons and the column type icons.
+            Lucide::KeyRound,
+            Lucide::Hash,
+            Lucide::Type,
+            Lucide::ToggleLeft,
+            Lucide::CalendarClock,
+            Lucide::Calendar,
+            Lucide::Clock,
+            Lucide::Braces,
+            Lucide::Binary,
+            Lucide::FingerprintPattern,
+            Lucide::Network,
+            Lucide::Brackets,
+            Lucide::List,
         ];
         let objects = crate::model::ObjectKind::ALL
             .into_iter()

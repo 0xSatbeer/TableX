@@ -1,4 +1,4 @@
-//! Header cells: name, type, sort control, and column dragging.
+//! Header cells: name (type in its tooltip), key icon, sort control, and column dragging.
 
 use super::*;
 
@@ -11,19 +11,49 @@ pub(super) struct HeaderModel {
     pub(super) name: String,
     pub(super) data_type: String,
     pub(super) pk: bool,
+    pub(super) fk: bool,
 }
 
-pub(super) fn header_model(c: &ColumnMeta) -> HeaderModel {
+/// `key` and `fks` name a table tab's primary and foreign key columns; result sets pass none.
+pub(super) fn header_model(c: &ColumnMeta, key: &[String], fks: &[String]) -> HeaderModel {
+    let named = |cols: &[String]| cols.iter().any(|k| **k == *c.name);
     HeaderModel {
         name: c.name.to_string(),
         data_type: c.data_type.to_string(),
-        pk: c.is_pk,
+        pk: c.is_pk || named(key),
+        fk: named(fks),
     }
 }
 
-/// Header height: two lines (name, type) plus vertical padding.
-pub(super) fn header_height(line: Pixels, pad: Pixels) -> Pixels {
-    line * 2. + pad
+/// The header icon of a column that is no key: what kind of value it holds.
+pub(super) fn type_icon(c: &ColumnMeta) -> Lucide {
+    let ty = c.data_type.to_lowercase();
+    let has = |p: &[&str]| p.iter().any(|p| ty.starts_with(p));
+    if ty.ends_with("[]") || ty.starts_with('_') {
+        Lucide::Brackets
+    } else if !c.enum_values.is_empty() {
+        Lucide::List
+    } else if has(&["json"]) {
+        Lucide::Braces
+    } else if is_numeric_type(&ty) || has(&["serial", "bigserial", "smallserial", "oid"]) {
+        Lucide::Hash
+    } else if has(&["bool"]) {
+        Lucide::ToggleLeft
+    } else if has(&["timestamp", "datetime"]) {
+        Lucide::CalendarClock
+    } else if has(&["date"]) {
+        Lucide::Calendar
+    } else if has(&["time", "interval"]) {
+        Lucide::Clock
+    } else if has(&["bytea", "blob", "binary", "varbinary"]) {
+        Lucide::Binary
+    } else if has(&["uuid"]) {
+        Lucide::FingerprintPattern
+    } else if has(&["inet", "cidr", "macaddr"]) {
+        Lucide::Network
+    } else {
+        Lucide::Type
+    }
 }
 
 /// Whether the header sort control works for a source of this size.
@@ -33,8 +63,10 @@ pub(super) enum SortAvail {
     Disabled(&'static str),
 }
 
-pub(super) fn sort_availability(rows: usize) -> SortAvail {
-    if rows <= CLIENT_SORT_MAX {
+pub(super) fn sort_availability(rows: usize, data_type: &str) -> SortAvail {
+    if data_type.to_lowercase().starts_with("json") {
+        SortAvail::Disabled("JSON columns can't be sorted")
+    } else if rows <= CLIENT_SORT_MAX {
         SortAvail::Enabled
     } else {
         SortAvail::Disabled("Too many rows to sort here; use ORDER BY")
@@ -66,6 +98,13 @@ impl Render for DragColumn {
 }
 
 impl Grid {
+    /// A table tab's primary and foreign key columns; none for a result set.
+    pub(super) fn key_columns(&self) -> (&[String], &[String]) {
+        self.live.as_ref().map_or((&[], &[]), |l| {
+            (l.key.as_deref().unwrap_or_default(), &l.fks)
+        })
+    }
+
     /// Header sort button: ascending, descending, off.
     pub(super) fn cycle_sort(&mut self, c: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.sort = match self.sort {
@@ -102,10 +141,12 @@ impl Grid {
         let (scroll_x, view) = self.viewport(window);
         let cols = visible_cols(&offsets, scroll_x, view, OVERSCAN);
         let columns = self.source.columns();
+        let (key, fks) = self.key_columns();
         div()
             .relative()
             .flex_none()
-            .h(header_height(theme::badge_line(), theme::space_8()))
+            // One row tall, like the rows under it.
+            .h(self.row_h())
             .w_full()
             .overflow_hidden()
             .bg(theme.table_head)
@@ -169,19 +210,46 @@ impl Grid {
                                         MouseButton::Right,
                                         cx.listener(move |this, _, _, _| this.menu_col = s),
                                     )
-                                    .px(theme::space_8())
+                                    .px(theme::space_6())
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .child({
-                                        let m = header_model(&columns[s]);
+                                        let m = header_model(&columns[s], key, fks);
+                                        let tip = SharedString::from(m.data_type);
                                         h_flex()
+                                            .id(("header-tip", s))
+                                            .debug_selector(|| format!("header-tip-{s}"))
+                                            .tooltip(move |window, cx| {
+                                                let tip = tip.clone();
+                                                Tooltip::element(move |_, _| {
+                                                    div()
+                                                        .debug_selector(|| "type-tip".into())
+                                                        .child(tip.clone())
+                                                })
+                                                .build(window, cx)
+                                            })
                                             .gap(theme::space_4())
-                                            .h(theme::badge_line())
-                                            .text_size(theme::ui_sm())
+                                            .font_family(theme.mono_font_family.clone())
+                                            .text_size(self.mono_px())
                                             .text_color(theme.foreground)
+                                            // Every column has an icon; keys get theirs instead of the type's.
                                             .when(m.pk, |d| {
                                                 d.child(
                                                     Icon::new(IconName::KeyRound)
+                                                        .size_3()
+                                                        .text_color(theme.warning),
+                                                )
+                                            })
+                                            .when(m.fk, |d| {
+                                                d.child(
+                                                    Icon::new(IconName::KeyRound)
+                                                        .size_3()
+                                                        .text_color(theme.info),
+                                                )
+                                            })
+                                            .when(!m.pk && !m.fk, |d| {
+                                                d.child(
+                                                    Icon::new(type_icon(&columns[s]))
                                                         .size_3()
                                                         .text_color(theme.muted_foreground),
                                                 )
@@ -199,25 +267,6 @@ impl Grid {
                                                     ))
                                             })
                                     })
-                                    .child(
-                                        div()
-                                            .debug_selector(|| format!("header-type-{s}"))
-                                            .h(theme::badge_line())
-                                            .font_family(theme.mono_font_family.clone())
-                                            .text_size(theme::ui_sm())
-                                            .text_color(theme.muted_foreground)
-                                            .truncate()
-                                            .child({
-                                                let data_type = SharedString::from(
-                                                    header_model(&columns[s]).data_type,
-                                                );
-                                                theme::truncating(
-                                                    ("header-type", s),
-                                                    StyledText::new(data_type.clone()),
-                                                    data_type,
-                                                )
-                                            }),
-                                    )
                                     .context_menu({
                                         let focus = self.focus.clone();
                                         move |menu, _, _| {
@@ -237,7 +286,10 @@ impl Grid {
                                     }),
                             )
                             .child({
-                                let avail = sort_availability(self.source.row_count());
+                                let avail = sort_availability(
+                                    self.source.row_count(),
+                                    &columns[s].data_type,
+                                );
                                 let glyph = match self.sort {
                                     Some((sc, true)) if sc == s => "↑",
                                     Some((sc, false)) if sc == s => "↓",
@@ -270,7 +322,11 @@ impl Grid {
                                                 this.cycle_sort(s, window, cx)
                                             })),
                                         SortAvail::Disabled(why) => d
-                                            .text_color(theme::text_disabled(theme))
+                                            .text_color(transparent_black())
+                                            .group_hover(
+                                                SharedString::from(format!("col-{s}")),
+                                                |d| d.text_color(theme::text_disabled(theme)),
+                                            )
                                             .tooltip(move |window, cx| {
                                                 Tooltip::new(why).build(window, cx)
                                             }),

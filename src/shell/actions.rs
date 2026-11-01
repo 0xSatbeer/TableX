@@ -9,8 +9,9 @@ use crate::ui::{cheat_sheet, palette, quick_open};
 use crate::{
     AddConnection, CheatSheet, CloseAllTabs, CloseOtherTabs, CloseTab, CloseTabsToRight,
     CommandPalette, CopyTabName, CycleTheme, DeleteConnection, EditConnection, FocusExplorer,
-    MaximizeEditor, MaximizePanel, NewConsole, NextTab, PrevTab, QuickOpen, ReopenTab,
-    RestorePanel, RevealTab, ToggleBottomPanel, ToggleExplorer, ToggleGallery, TogglePinTab,
+    MaximizeEditor, MaximizePanel, NewConsole, NextTab, OpenSettings, PrevTab, QuickOpen,
+    ReopenTab, RestorePanel, RevealTab, ToggleBottomPanel, ToggleExplorer, ToggleGallery,
+    TogglePinTab,
 };
 
 use super::{Mode, Shell};
@@ -126,12 +127,12 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
             .update(cx, |explorer, cx| explorer.focus_field(window, cx));
         cx.notify();
     }))
-    .on_action(cx.listener(|this, _: &CycleTheme, window, cx| {
-        this.theme = this.theme.next();
-        this.theme.apply(&this.user_themes, window, cx);
-        this.save_config(window, cx);
-        cx.notify();
-    }))
+    .on_action(
+        cx.listener(|this, _: &CycleTheme, window, cx| {
+            this.set_theme(this.theme.next(), window, cx)
+        }),
+    )
+    .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
     .on_action(cx.listener(|this, _: &ToggleGallery, _, cx| {
         if this.mode != Mode::Demo {
             return;

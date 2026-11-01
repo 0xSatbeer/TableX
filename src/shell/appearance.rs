@@ -1,13 +1,21 @@
+use std::rc::Rc;
+
 use gpui_kit::component::{
-    IconName, Sizable as _,
+    IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
-    menu::{DropdownMenu as _, PopupMenuItem},
+    h_flex,
+    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
 };
 use gpui_kit::*;
 
 use crate::{persist, theme};
 
 use super::Shell;
+
+const THEME_HELP: &str = "Colors for the whole window. System follows the OS light or dark mode; \
+    themes in the themes folder next to config.toml are listed after the built-ins.";
+const FONT_HELP: &str =
+    "The console editor's font size in pixels, before UI scale. Ctrl+= and Ctrl+- change it too.";
 
 impl Shell {
     /// The size the console editor is given: its zoom at the current UI scale.
@@ -127,57 +135,218 @@ impl Shell {
         cx.notify();
     }
 
-    /// ⚙ in the titlebar. Holds the theme and UI scale until there is a settings view (QX-020);
-    /// `Ctrl+K Ctrl+T` still cycles the theme from the keyboard.
-    pub(super) fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let shell = cx.entity().downgrade();
-        let current = self.theme.clone();
-        // User themes from the user theme dir (`<ConfigDir>/themes`), under the built-ins.
-        let user = self
-            .user_themes
-            .iter()
-            .map(|t| theme::ThemeChoice::User(t.name.clone()));
-        let choices: Vec<_> = theme::ThemeChoice::ALL.into_iter().chain(user).collect();
+    /// Switches to `choice` and saves it.
+    pub(super) fn set_theme(
+        &mut self,
+        choice: theme::ThemeChoice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.theme = choice;
+        self.theme.apply(&self.user_themes, window, cx);
+        self.save_config(window, cx);
+        cx.notify();
+    }
+
+    /// ⚙ in the titlebar: opens Settings.
+    pub(super) fn settings_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         Button::new("settings")
+            .debug_selector(|| "settings".into())
             .ghost()
             .small()
             .icon(IconName::Settings)
             .tooltip("Settings")
-            .dropdown_menu(move |mut menu, _, _| {
-                menu = menu.label("Theme");
-                for (ix, choice) in choices.iter().cloned().enumerate() {
-                    if ix == theme::ThemeChoice::ALL.len() {
-                        menu = menu.separator();
-                    }
-                    let shell = shell.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(choice.label())
-                            .checked(choice == current)
-                            .on_click(move |_, window, cx| {
-                                _ = shell.update(cx, |this, cx| {
-                                    this.theme = choice.clone();
-                                    this.theme.apply(&this.user_themes, window, cx);
-                                    this.save_config(window, cx);
-                                    cx.notify();
-                                });
+            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
+    }
+
+    /// Sets the UI scale (one of `theme::UI_SCALES`) and saves it.
+    pub(super) fn set_ui_scale(
+        &mut self,
+        percent: u16,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        theme::set_ui_scale(percent, cx);
+        self.save_config(window, cx);
+        window.refresh();
+    }
+
+    /// Sets the console's mono size (before UI scale) and saves it.
+    pub(super) fn set_console_font(
+        &mut self,
+        size: Pixels,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.console_mono = size;
+        self.save_config(window, cx);
+        cx.notify();
+    }
+
+    /// The Settings dialog: a sidebar of pages with searchable rows. Every change applies and
+    /// saves at once, so there is no Save button.
+    pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shell = cx.entity();
+        let handle = window.window_handle();
+        // Setting fields only get `App`; the change runs once the window is free again.
+        let update =
+            move |cx: &mut App, f: Rc<dyn Fn(&mut Shell, &mut Window, &mut Context<Shell>)>| {
+                let shell = shell.downgrade();
+                cx.defer(move |cx| {
+                    _ = handle.update(cx, |_, window, cx| {
+                        shell.update(cx, |this, cx| f(this, window, cx))
+                    });
+                });
+            };
+        let config = self
+            .config_root
+            .as_ref()
+            .map(|root| root.join("config.toml"));
+        let shell = cx.entity();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            // User themes from the user theme dir (`<ConfigDir>/themes`), after the built-ins.
+            let choices: Vec<_> = theme::ThemeChoice::ALL
+                .into_iter()
+                .chain(
+                    shell
+                        .read(cx)
+                        .user_themes
+                        .iter()
+                        .map(|t| theme::ThemeChoice::User(t.name.clone())),
+                )
+                .collect();
+            let options = choices
+                .iter()
+                .enumerate()
+                .map(|(ix, c)| (ix.to_string().into(), c.label().to_string().into()))
+                .collect();
+            let theme_field = {
+                let (shell, set) = (shell.clone(), update.clone());
+                let current = choices.clone();
+                SettingField::scrollable_dropdown(
+                    options,
+                    move |cx| {
+                        let theme = &shell.read(cx).theme;
+                        let ix = current.iter().position(|c| c == theme).unwrap_or(0);
+                        ix.to_string().into()
+                    },
+                    move |ix: SharedString, cx| {
+                        let Some(choice) = ix.parse().ok().and_then(|ix: usize| choices.get(ix))
+                        else {
+                            return;
+                        };
+                        let choice = choice.clone();
+                        set(
+                            cx,
+                            Rc::new(move |this, window, cx| {
+                                this.set_theme(choice.clone(), window, cx)
                             }),
-                    );
-                }
-                menu = menu.separator().label("UI scale");
-                for percent in theme::UI_SCALES {
-                    let shell = shell.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(format!("{percent}%"))
-                            .checked(percent == theme::ui_scale())
-                            .on_click(move |_, window, cx| {
-                                theme::set_ui_scale(percent, cx);
-                                _ = shell.update(cx, |this, cx| this.save_config(window, cx));
-                                window.refresh();
+                        );
+                    },
+                )
+                .default_value("0")
+            };
+            let scale_field = {
+                let set = update.clone();
+                SettingField::dropdown(
+                    theme::UI_SCALES
+                        .into_iter()
+                        .map(|p| (p.to_string().into(), format!("{p}%").into()))
+                        .collect(),
+                    |_| theme::ui_scale().to_string().into(),
+                    move |percent: SharedString, cx| {
+                        let Ok(percent) = percent.parse() else {
+                            return;
+                        };
+                        set(
+                            cx,
+                            Rc::new(move |this, window, cx| this.set_ui_scale(percent, window, cx)),
+                        );
+                    },
+                )
+                .default_value(theme::DEFAULT_UI_SCALE.to_string())
+            };
+            let font_field = {
+                let (shell, set) = (shell.clone(), update.clone());
+                SettingField::number_input(
+                    // The zoom range (`theme::zoom`).
+                    NumberFieldOptions {
+                        min: 9.,
+                        max: 24.,
+                        step: 1.,
+                    },
+                    move |cx| f32::from(shell.read(cx).console_mono) as f64,
+                    move |size: f64, cx| {
+                        let size = px(size as f32);
+                        set(
+                            cx,
+                            Rc::new(move |this, window, cx| {
+                                this.set_console_font(size, window, cx)
                             }),
-                    );
-                }
-                menu
-            })
-            .anchor(Anchor::TopRight)
+                        );
+                    },
+                )
+                .default_value(f32::from(theme::MONO) as f64)
+            };
+            let settings = Settings::new("settings")
+                .sidebar_width(px(200.))
+                .page(
+                    SettingPage::new("Appearance")
+                        .resettable(true)
+                        .group(
+                            SettingGroup::new().title("Theme").item(
+                                SettingItem::new("Theme", theme_field)
+                                    .description(THEME_HELP)
+                                    .keywords(["color", "dark", "light"]),
+                            ),
+                        )
+                        .group(
+                            SettingGroup::new().title("Scale").item(
+                                SettingItem::new("UI scale", scale_field)
+                                    .description("Size of all text and controls.")
+                                    .keywords(["zoom", "size"]),
+                            ),
+                        ),
+                )
+                .page(
+                    SettingPage::new("Console").resettable(true).group(
+                        SettingGroup::new().title("Editor").item(
+                            SettingItem::new("Font size", font_field)
+                                .description(FONT_HELP)
+                                .keywords(["zoom", "text"]),
+                        ),
+                    ),
+                );
+            // With p_0 the close button sits in the corner; a title row keeps it off the page's
+            // Reset button.
+            let dialog = dialog
+                .w(px(820.))
+                .p_0()
+                .title(
+                    div()
+                        .px(theme::space_16())
+                        .pt(theme::space_12())
+                        .child("Settings"),
+                )
+                .child(
+                div()
+                    .debug_selector(|| "settings".into())
+                    .h(px(520.))
+                    .child(settings),
+            );
+            match config.clone() {
+                None => dialog,
+                Some(path) => dialog.footer(
+                    h_flex().px(theme::space_16()).pb(theme::space_16()).child(
+                        Button::new("settings-open-config")
+                            .ghost()
+                            .small()
+                            .icon(IconName::ExternalLink)
+                            .label("Open config.toml")
+                            .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                    ),
+                ),
+            }
+        });
     }
 }

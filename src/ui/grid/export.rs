@@ -308,8 +308,8 @@ impl Grid {
                 .ghost()
                 .small()
                 .icon(IconName::Download)
-                .label("Export…")
-                .tooltip("Export to a file")
+                .tooltip("Export to a file…")
+                .accessibility_label("Export to a file")
                 .on_click(cx.listener(|this, _, window, cx| this.open_export(window, cx)))
                 .into_any_element();
         };

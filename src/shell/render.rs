@@ -122,7 +122,7 @@ impl Render for Shell {
                             h_flex()
                                 .gap(theme::space_4())
                                 .child(self.workspace_menu(cx))
-                                .child(self.settings_menu(cx)),
+                                .child(self.settings_button(cx)),
                         ),
                 ),
             )

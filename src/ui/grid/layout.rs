@@ -45,9 +45,9 @@ pub(super) fn visible_cols(
     start.saturating_sub(overscan)..(end + overscan).min(n)
 }
 
-/// Grid row height for a pane's mono font size: GRID_ROW at MONO, in proportion otherwise.
+/// Grid row height for a pane's mono font size: GRID_ROW at GRID_MONO, in proportion otherwise.
 pub(super) fn row_height(mono: Pixels) -> Pixels {
-    theme::GRID_ROW * (mono / theme::MONO)
+    theme::GRID_ROW * (mono / theme::GRID_MONO)
 }
 
 /// Width of the row-number gutter: monospace digits plus padding.
@@ -72,15 +72,11 @@ impl Grid {
             .unwrap_or(0);
         // shortcut: advance estimated as 0.6em (mono); Inter headers can be under-sized, measure with the text system if that shows
         let advance = self.mono_px() * 0.6;
-        // The key icon sits before the name; the sort control sits beside both header lines.
-        let key = if meta.is_pk {
-            theme::space_16()
-        } else {
-            Pixels::ZERO
-        };
-        let header = (advance * meta.name.chars().count() as f32 + key)
-            .max(advance * meta.data_type.chars().count() as f32)
-            + theme::space_16();
+        // Key icons sit before the name; the sort control sits beside it.
+        let (key, fks) = self.key_columns();
+        let m = super::header::header_model(meta, key, fks);
+        let icons = theme::space_16() * (m.pk && m.fk) as u8 as f32 + theme::space_16();
+        let header = advance * meta.name.chars().count() as f32 + icons + theme::space_16();
         self.widths[c] =
             ((advance * cell_chars as f32).max(header) + theme::space_16() + theme::space_4())
                 .max(MIN_WIDTH);
@@ -144,7 +140,10 @@ impl Grid {
     }
 
     pub(super) fn zoom(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {
-        self.mono = theme::zoom(self.mono, step);
+        self.mono = match step {
+            theme::Zoom::Reset => theme::GRID_MONO,
+            step => theme::zoom(self.mono, step),
+        };
         cx.notify();
     }
 }

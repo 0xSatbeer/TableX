@@ -186,7 +186,7 @@ impl Grid {
             hidden: vec![false; n],
             col_order: (0..n).collect(),
             menu_col: 0,
-            mono: theme::MONO,
+            mono: theme::GRID_MONO,
             copy_csv: false,
             filter: None,
             where_share: 0.6,

@@ -42,6 +42,7 @@ actions!(
         CopyTabName,
         RevealTab,
         CycleTheme,
+        OpenSettings,
         AddConnection,
         EditConnection,
         DeleteConnection,

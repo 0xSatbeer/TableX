@@ -205,3 +205,49 @@ fn double_click_edits_in_the_cell_and_fills_the_selection(cx: &mut gpui_kit::Tes
         "the clicked cell is untouched"
     );
 }
+
+#[gpui_kit::test]
+fn setting_a_cell_back_to_its_loaded_value_drops_the_edit(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::AppContext as _;
+    cx.update(gpui_kit::init);
+    let (window, grid) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |_, cx| {
+            cx.new(|cx| super::Grid::new(std::rc::Rc::new(mock::wide_table(20)), cx))
+        })
+        .expect("open test window")
+    });
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    grid.update(&mut cx, |g, cx| {
+        let was = g.row(0)[0].clone();
+        g.set_values(vec![((0, 0), Value::Int(-1))], cx);
+        assert_eq!(g.edits.len(), 1, "a changed value is an edit");
+        g.set_values(vec![((0, 0), was)], cx);
+        assert!(g.edits.is_empty(), "the loaded value again is no edit");
+        // A new row's NULL is typed, not the column default its blank cell stands for.
+        g.add_row(cx);
+        g.set_values(vec![((0, 0), Value::Null)], cx);
+        assert_eq!(g.edits.len(), 1, "a new row keeps it");
+    });
+}
+
+#[test]
+fn unchanged_matches_numeric_text_to_its_float() {
+    let t = |s: &str| Value::Text(s.into());
+    assert!(super::super::paste::unchanged(
+        &t("12.50"),
+        &Value::Float(12.5)
+    ));
+    assert!(super::super::paste::unchanged(
+        &Value::Int(3),
+        &Value::Int(3)
+    ));
+    assert!(!super::super::paste::unchanged(
+        &t("12.51"),
+        &Value::Float(12.5)
+    ));
+    assert!(!super::super::paste::unchanged(
+        &t("abc"),
+        &Value::Float(0.)
+    ));
+    assert!(!super::super::paste::unchanged(&t(""), &Value::Null));
+}

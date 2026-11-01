@@ -194,3 +194,38 @@ fn the_saved_settings_apply_at_start_and_a_theme_change_writes_config_toml(
     );
     crate::theme::set_ui_scale(crate::theme::DEFAULT_UI_SCALE, &mut vcx.app.borrow_mut());
 }
+
+/// Ctrl+, opens Settings, and each setter its rows call applies and saves.
+#[gpui_kit::test]
+fn the_settings_dialog_opens_and_its_setters_save(cx: &mut gpui_kit::TestAppContext) {
+    let dir = crate::theme::tests::test_dir("settings-dialog");
+    cx.update(gpui_kit::init);
+    let (window, shell) = cx
+        .update(|cx| {
+            crate::shell::open_shell(
+                crate::shell::Mode::Normal,
+                Default::default(),
+                None,
+                Some(dir.clone()),
+                cx,
+            )
+        })
+        .expect("open test window");
+    let mut vcx = gpui_kit::VisualTestContext::from_window(window, cx);
+    vcx.run_until_parked();
+    vcx.dispatch_action(crate::OpenSettings);
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("settings").is_some(), "dialog drawn");
+
+    shell.update_in(&mut vcx, |this, window, cx| {
+        this.set_theme(crate::theme::ThemeChoice::Light, window, cx);
+        this.set_ui_scale(120, window, cx);
+        this.set_console_font(gpui_kit::px(15.), window, cx);
+    });
+    vcx.run_until_parked();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.toml")).unwrap(),
+        "version = 1\ntheme = \"light\"\nui_scale = 120\nconsole_font_px = 15.0\n"
+    );
+    crate::theme::set_ui_scale(crate::theme::DEFAULT_UI_SCALE, &mut vcx.app.borrow_mut());
+}

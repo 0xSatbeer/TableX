@@ -84,6 +84,8 @@ fn open_users_with(
     vcx.run_until_parked();
     fake.resolve("columns app_db/public/users", Ok(columns));
     vcx.run_until_parked();
+    fake.resolve::<crate::model::TableDef>("table_def app_db/public/users", Err("no keys".into()));
+    vcx.run_until_parked();
     (fake, window, shell)
 }
 

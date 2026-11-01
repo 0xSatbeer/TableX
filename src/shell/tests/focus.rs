@@ -25,13 +25,13 @@ fn zoom_keys_change_only_the_focused_grid_or_editor(cx: &mut gpui_kit::TestAppCo
         shell.read_with(cx, |this, cx| (grid.read(cx).mono(), this.console_mono))
     };
     let steps: [(&str, &str, (f32, f32)); 7] = [
-        ("grid", "ctrl-=", (13.5, 12.5)),
-        ("grid", "ctrl-0", (12.5, 12.5)),
-        ("grid", "ctrl--", (11.5, 12.5)),
-        ("editor", "ctrl-=", (11.5, 13.5)),
-        ("editor", "ctrl-0", (11.5, 12.5)),
-        ("explorer", "ctrl-=", (11.5, 12.5)),
-        ("nothing", "ctrl-=", (11.5, 12.5)),
+        ("grid", "ctrl-=", (14., 12.5)),
+        ("grid", "ctrl-0", (13., 12.5)),
+        ("grid", "ctrl--", (12., 12.5)),
+        ("editor", "ctrl-=", (12., 13.5)),
+        ("editor", "ctrl-0", (12., 12.5)),
+        ("explorer", "ctrl-=", (12., 12.5)),
+        ("nothing", "ctrl-=", (12., 12.5)),
     ];
     for (focus, keys, (grid_mono, console_mono)) in steps {
         if focus == "editor" {

@@ -33,6 +33,8 @@ fn two_tabs(
     cx.run_until_parked();
     fake.resolve("columns app_db/public/orders", Ok(vec![column("id", true)]));
     cx.run_until_parked();
+    fake.resolve::<crate::model::TableDef>("table_def app_db/public/orders", Err("no keys".into()));
+    cx.run_until_parked();
     assert_eq!(fake.pending(), ["query app_db"]);
     (fake, cx, shell)
 }

@@ -69,7 +69,7 @@ fn text_tokens_meet_contrast_targets() {
                 .map(move |b| (format!("{s}.foreground"), *b))
         }))
         .collect();
-    for (name, theme) in [("dark", DARK), ("light", LIGHT)] {
+    for (name, theme) in [("dark", DARK), ("light", LIGHT), ("darcula", DARCULA)] {
         for (fg, bg) in &text {
             let r = ratio(color(theme, fg), color(theme, bg));
             assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1, needs 4.5:1");
@@ -93,7 +93,7 @@ fn drawn_status_and_null_text_meet_contrast() {
         ("danger.background", "sidebar.background"),
         ("danger.background", "muted.background"),
     ];
-    for (name, theme) in [("dark", DARK), ("light", LIGHT)] {
+    for (name, theme) in [("dark", DARK), ("light", LIGHT), ("darcula", DARCULA)] {
         for (fg, bg) in pairs {
             let r = ratio(color(theme, fg), color(theme, bg));
             assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1, needs 4.5:1");
@@ -103,7 +103,7 @@ fn drawn_status_and_null_text_meet_contrast() {
 
 #[test]
 fn grid_null_text_meets_contrast() {
-    for (name, theme) in [("dark", DARK), ("light", LIGHT)] {
+    for (name, theme) in [("dark", DARK), ("light", LIGHT), ("darcula", DARCULA)] {
         for bg in ["table.background", "table.even.background"] {
             let r = ratio(color(theme, "muted.foreground"), color(theme, bg));
             assert!(
@@ -121,6 +121,7 @@ fn connection_colors_read_on_their_theme() {
     for (name, theme, set) in [
         ("dark", DARK, CONNECTION_COLORS),
         ("light", LIGHT, CONNECTION_COLORS_LIGHT),
+        ("darcula", DARCULA, CONNECTION_COLORS),
     ] {
         for bg in [
             "background",
@@ -142,7 +143,7 @@ fn connection_colors_read_on_their_theme() {
 
 #[test]
 fn themes_define_every_syntax_token() {
-    for theme in [DARK, LIGHT] {
+    for theme in [DARK, LIGHT, DARCULA] {
         let syntax = theme
             .split("\"syntax\"")
             .nth(1)
@@ -167,6 +168,7 @@ fn light_theme_has_the_dark_key_set() {
             .collect::<Vec<_>>()
     };
     assert_eq!(keys(DARK), keys(LIGHT));
+    assert_eq!(keys(DARK), keys(DARCULA));
 }
 
 /// Library `text_sm` must land on UI_SM (see the type scale note); mono on MONO.
@@ -183,7 +185,7 @@ fn theme_font_sizes_match_the_type_scale() {
             .parse()
             .unwrap()
     };
-    for theme in [DARK, LIGHT] {
+    for theme in [DARK, LIGHT, DARCULA] {
         assert!(
             (num(theme, "font.size") * 0.875 - f32::from(super::UI_SM)).abs() < 0.01,
             "font.size * 0.875 != UI_SM"

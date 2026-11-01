@@ -232,15 +232,16 @@ fn choosing_a_user_theme_applies_it_immediately(cx: &mut gpui_kit::TestAppContex
 }
 
 #[test]
-fn theme_choice_cycles_through_all_three() {
+fn theme_choice_cycles_through_all_four() {
     use super::ThemeChoice::*;
     assert_eq!(
         [
             Dark.next(),
             Light.next(),
             System.next(),
+            Darcula.next(),
             User("Nord".into()).next()
         ],
-        [Light, System, Dark, Dark]
+        [Light, System, Darcula, Dark, Dark]
     );
 }

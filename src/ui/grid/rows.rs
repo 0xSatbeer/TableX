@@ -49,7 +49,7 @@ impl Grid {
                             .left(self.gutter() + offsets[c])
                             .w(self.widths[s])
                             .h_full()
-                            .px(theme::space_8())
+                            .px(theme::space_6())
                             .flex()
                             .items_center()
                             .overflow_hidden()
