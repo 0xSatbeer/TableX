@@ -263,6 +263,9 @@ impl Grid {
 
     /// The toolbar note on a table tab that can't be edited.
     pub(super) fn read_only(&self) -> Option<&'static str> {
+        if self.results {
+            return Some("Query results are read-only");
+        }
         let live = self.live.as_ref()?;
         let key = live.key.as_ref()?;
         read_only_note(live.table.view, live.table.sqlite_table, key)

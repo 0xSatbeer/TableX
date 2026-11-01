@@ -232,3 +232,29 @@ fn query_returns_the_whole_result_set() {
     assert_eq!(ints(&rs.rows), [1, 2, 3]);
     assert_eq!(rs.rows[2][1], Value::Text("3".into()));
 }
+
+#[test]
+fn result_columns_read_from_a_table_carry_its_key_marks() {
+    let Some(pg) = test_pg() else { return };
+    let session = session(&pg);
+    let driver = Postgres::default();
+    for ddl in [
+        "CREATE TEMP TABLE qx_parent (id int PRIMARY KEY)",
+        "CREATE TEMP TABLE qx_child (id int PRIMARY KEY, parent int REFERENCES qx_parent, note text)",
+    ] {
+        block_on(driver.open(&session, ddl.into(), true)).expect(ddl);
+    }
+    let opened = block_on(driver.open(
+        &session,
+        "SELECT id, parent, note, id + 1 AS computed FROM qx_child".into(),
+        true,
+    ));
+    let Ok(Opened::Rows(columns)) = opened else {
+        panic!("{opened:?}")
+    };
+    let marks: Vec<_> = columns.iter().map(|c| (c.is_pk, c.is_fk)).collect();
+    assert_eq!(
+        marks,
+        [(true, false), (false, true), (false, false), (false, false)]
+    );
+}

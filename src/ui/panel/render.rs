@@ -276,9 +276,11 @@ fn results(console: &Entity<Console>, cx: &App) -> impl IntoElement {
             .into_any_element(),
         None => active.grid.clone().into_any_element(),
     };
+    // The strip only fetches past the first page of rows; the grid's own pager handles the rest.
+    let more = active.can_prev() || active.can_next() || active.next_tip().is_some();
     v_flex()
         .size_full()
-        .child(strip)
+        .when(more, |d| d.child(strip))
         .child(div().flex_1().min_h_0().child(body))
 }
 

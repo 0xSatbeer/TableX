@@ -11,6 +11,7 @@ fn columns(names: &[&str]) -> Vec<ColumnMeta> {
             name: (*n).into(),
             data_type: "text".into(),
             is_pk: false,
+            is_fk: false,
             enum_values: Arc::new([]),
         })
         .collect()

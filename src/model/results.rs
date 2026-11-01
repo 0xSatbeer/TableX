@@ -5,6 +5,8 @@ pub struct ColumnMeta {
     pub name: Arc<str>,
     pub data_type: Arc<str>,
     pub is_pk: bool,
+    /// Part of a foreign key on the table the value came from.
+    pub is_fk: bool,
     /// The labels of an enum column, in declared order; empty for every other type.
     pub enum_values: Arc<[Arc<str>]>,
 }

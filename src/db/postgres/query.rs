@@ -45,7 +45,7 @@ impl PgSession {
                 return Err(err);
             }
         };
-        let columns = statement.columns().iter().map(meta).collect();
+        let columns = with_keys(client, &statement).await;
         *open = Some(Open {
             portal,
             statement,
@@ -98,7 +98,7 @@ impl PgSession {
             let statement = conn.client.prepare(sql).await?;
             let rows = conn.client.query(&statement, &[]).await?;
             Ok(ResultSet {
-                columns: statement.columns().iter().map(meta).collect(),
+                columns: with_keys(&conn.client, &statement).await,
                 rows: decode(&conn.client, &statement, &rows).await?,
             })
         };
@@ -168,16 +168,48 @@ async fn finish(client: &Client, open: Option<Open>, commit: bool) -> Result<(),
     }
 }
 
+/// `statement`'s columns, those read straight from a table column marked as its PK or FK parts,
+/// so a result's headers show the key icons that table's tab does.
+async fn with_keys(client: &Client, statement: &Statement) -> Vec<ColumnMeta> {
+    let mut columns: Vec<ColumnMeta> = statement.columns().iter().map(meta).collect();
+    let tables: Vec<u32> = statement
+        .columns()
+        .iter()
+        .filter_map(|c| c.table_oid())
+        .collect();
+    if tables.is_empty() {
+        return columns;
+    }
+    let sql = "SELECT conrelid, k, contype = 'p' FROM pg_constraint, unnest(conkey) k \
+               WHERE contype IN ('p', 'f') AND conrelid = ANY($1)";
+    // Only icons ride on this, so a failed read just leaves them off.
+    let keys = client.query(sql, &[&tables]).await.unwrap_or_default();
+    for (meta, col) in columns.iter_mut().zip(statement.columns()) {
+        let at = (col.table_oid(), col.column_id());
+        for key in keys
+            .iter()
+            .filter(|r| at == (Some(r.get(0)), Some(r.get(1))))
+        {
+            if key.get(2) {
+                meta.is_pk = true;
+            } else {
+                meta.is_fk = true;
+            }
+        }
+    }
+    columns
+}
+
 fn meta(column: &tokio_postgres::Column) -> ColumnMeta {
     let ty = column.type_();
     ColumnMeta {
         name: column.name().into(),
         data_type: ty.name().into(),
-        is_pk: false,
         enum_values: match ty.kind() {
             Kind::Enum(labels) => labels.iter().map(|l| l.as_str().into()).collect(),
             _ => Default::default(),
         },
+        ..Default::default()
     }
 }
 

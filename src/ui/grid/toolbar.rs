@@ -34,15 +34,6 @@ impl Grid {
                 grouped(self.all.row_count())
             )
         };
-        let pending = |id: &'static str, icon: IconName, tip: &'static str| {
-            Button::new(id)
-                .ghost()
-                .small()
-                .icon(icon)
-                .tooltip(format!("{tip} (needs a live connection)"))
-                .accessibility_label(tip)
-                .disabled(true)
-        };
         let divider = || {
             div()
                 .flex_none()
@@ -90,24 +81,8 @@ impl Grid {
                         last,
                     )),
             })
-            .child(divider())
-            .child(if self.is_live() {
-                Button::new("grid-refresh")
-                    .ghost()
-                    .small()
-                    .icon(IconName::RefreshCw)
-                    .tooltip("Refresh (F5)")
-                    .accessibility_label("Refresh")
-                    .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
-            } else {
-                pending("grid-refresh", IconName::RefreshCw, "Refresh")
-            })
-            // A live grid has no stop yet; showing a dead button there would claim it needs a connection.
-            .when(!self.is_live(), |d| {
-                d.child(pending("grid-stop", IconName::Square, "Stop query"))
-            })
-            .child(divider())
-            .children(if self.is_live() {
+            // Query results only page and copy; editing and the filter bar are for table tabs.
+            .when(self.is_live(), |d| {
                 let read_only = self.read_only().is_some();
                 let row_button =
                     |id: &'static str,
@@ -124,63 +99,66 @@ impl Grid {
                             .disabled(read_only)
                             .on_click(cx.listener(move |this, _, _, cx| run(this, cx)))
                     };
-                [
-                    row_button(
-                        "grid-add-row",
-                        IconName::Plus,
-                        "Add row",
-                        "Alt+Insert",
-                        Self::add_row,
-                    ),
-                    row_button(
-                        "grid-delete-row",
-                        IconName::Minus,
-                        "Delete row",
-                        "Ctrl+Delete",
-                        Self::delete_rows,
-                    ),
-                ]
-            } else {
-                [
-                    pending("grid-add-row", IconName::Plus, "Add row"),
-                    pending("grid-delete-row", IconName::Minus, "Delete row"),
-                ]
-            })
-            .child(if self.is_live() {
                 let idle = !self.has_changes();
-                h_flex()
-                    .gap(theme::space_2())
+                d.child(divider())
                     .child(
-                        div().debug_selector(|| "grid-submit".into()).child(
-                            Button::new("grid-submit")
-                                .ghost()
-                                .small()
-                                .icon(IconName::ArrowUp)
-                                .tooltip("Submit changes (Ctrl+Enter)")
-                                .accessibility_label("Submit changes")
-                                .disabled(idle)
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.submit(window, cx)),
+                        Button::new("grid-refresh")
+                            .ghost()
+                            .small()
+                            .icon(IconName::RefreshCw)
+                            .tooltip("Refresh (F5)")
+                            .accessibility_label("Refresh")
+                            .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+                    )
+                    .child(divider())
+                    .children([
+                        row_button(
+                            "grid-add-row",
+                            IconName::Plus,
+                            "Add row",
+                            "Alt+Insert",
+                            Self::add_row,
+                        ),
+                        row_button(
+                            "grid-delete-row",
+                            IconName::Minus,
+                            "Delete row",
+                            "Ctrl+Delete",
+                            Self::delete_rows,
+                        ),
+                    ])
+                    .child(
+                        h_flex()
+                            .gap(theme::space_2())
+                            .child(
+                                div().debug_selector(|| "grid-submit".into()).child(
+                                    Button::new("grid-submit")
+                                        .ghost()
+                                        .small()
+                                        .icon(IconName::ArrowUp)
+                                        .tooltip("Submit changes (Ctrl+Enter)")
+                                        .accessibility_label("Submit changes")
+                                        .disabled(idle)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.submit(window, cx)
+                                        })),
                                 ),
-                        ),
+                            )
+                            .child(
+                                div().debug_selector(|| "grid-revert".into()).child(
+                                    Button::new("grid-revert")
+                                        .ghost()
+                                        .small()
+                                        .icon(IconName::Undo2)
+                                        .tooltip("Revert changes")
+                                        .accessibility_label("Revert changes")
+                                        .disabled(idle)
+                                        .on_click(cx.listener(|this, _, _, cx| this.revert(cx))),
+                                ),
+                            ),
                     )
-                    .child(
-                        div().debug_selector(|| "grid-revert".into()).child(
-                            Button::new("grid-revert")
-                                .ghost()
-                                .small()
-                                .icon(IconName::Undo2)
-                                .tooltip("Revert changes")
-                                .accessibility_label("Revert changes")
-                                .disabled(idle)
-                                .on_click(cx.listener(|this, _, _, cx| this.revert(cx))),
-                        ),
-                    )
-                    .into_any_element()
-            } else {
-                pending("grid-submit", IconName::ArrowUp, "Submit changes").into_any_element()
             })
-            .children(self.read_only().map(|note| {
+            .children(self.read_only().filter(|_| self.is_live()).map(|note| {
                 div()
                     .debug_selector(move || format!("grid-read-only:{note}"))
                     .px(theme::space_4())
@@ -228,7 +206,10 @@ impl Grid {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> Option<impl IntoElement> {
+        if !self.is_live() {
+            return None;
+        }
         if self.filter.is_none() {
             let (where_input, order_input) = (
                 filter_input("WHERE", window, cx),
@@ -254,32 +235,34 @@ impl Grid {
             cx,
         );
         let theme = cx.theme();
-        h_flex()
-            .flex_none()
-            .items_stretch()
-            .bg(theme.table)
-            .border_b_1()
-            .border_color(theme.border)
-            .text_size(theme::ui())
-            .child(where_box.w(relative(self.where_share)))
-            .child(
-                div()
-                    .id("filter-split")
-                    .flex_none()
-                    .w(theme::space_8())
-                    .cursor_col_resize()
-                    .flex()
-                    .justify_center()
-                    .child(div().w(px(1.)).h_full().bg(theme.border))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, ev: &MouseDownEvent, _, cx| {
-                            this.filter_drag = Some((ev.position.x, this.where_share));
-                            cx.stop_propagation();
-                        }),
-                    ),
-            )
-            .child(order_box.flex_1())
+        Some(
+            h_flex()
+                .flex_none()
+                .items_stretch()
+                .bg(theme.table)
+                .border_b_1()
+                .border_color(theme.border)
+                .text_size(theme::ui())
+                .child(where_box.w(relative(self.where_share)))
+                .child(
+                    div()
+                        .id("filter-split")
+                        .flex_none()
+                        .w(theme::space_8())
+                        .cursor_col_resize()
+                        .flex()
+                        .justify_center()
+                        .child(div().w(px(1.)).h_full().bg(theme.border))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                                this.filter_drag = Some((ev.position.x, this.where_share));
+                                cx.stop_propagation();
+                            }),
+                        ),
+                )
+                .child(order_box.flex_1()),
+        )
     }
 }
 

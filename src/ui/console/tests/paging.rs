@@ -213,3 +213,12 @@ fn paging_keeps_one_grid_so_its_column_widths_stay(cx: &mut gpui_kit::TestAppCon
     assert_eq!(grid(&cx), first);
     assert_eq!(shown(&console, &cx), "500 rows");
 }
+
+#[gpui_kit::test]
+fn results_are_read_only(cx: &mut gpui_kit::TestAppContext) {
+    let grid = cx.update(|cx| super::super::grid(crate::mock::wide_table(3), None, cx));
+    grid.update(cx, |g, cx| {
+        g.set_cell((0, 0), Value::Null, cx);
+        assert_eq!(g.pending_edits(), 0, "a console result took an edit");
+    });
+}

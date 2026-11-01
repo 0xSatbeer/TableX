@@ -126,6 +126,8 @@ pub struct Grid {
     live: Option<live::Live>,
     /// A console result's statement, for Export's All rows.
     pub rerun: Option<Rerun>,
+    /// A console result: shown, copied and exported, never edited.
+    pub results: bool,
     /// The Export dialog's last picks, and the All rows export underway.
     export_format: crate::export::Format,
     export_all: bool,
@@ -199,6 +201,7 @@ impl Grid {
             drag_selecting: false,
             live: None,
             rerun: None,
+            results: false,
             export_format: crate::export::Format::Csv,
             export_all: false,
             exporting: None,
@@ -298,7 +301,7 @@ impl Render for Grid {
             // Re-render on scroll so the header and column window follow the offset.
             .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
             .child(self.render_toolbar(cx))
-            .child(self.render_filter_bar(window, cx))
+            .children(self.render_filter_bar(window, cx))
             .children(self.render_filter_error(cx))
             .children(self.render_submit_error(cx))
             .when(!self.record, |d| d.child(self.render_header(window, cx)))

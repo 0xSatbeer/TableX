@@ -883,6 +883,7 @@ fn grid(rs: ResultSet, rerun: Option<grid::Rerun>, cx: &mut App) -> Entity<grid:
     cx.new(|cx| {
         let mut grid = grid::Grid::new(Rc::new(rs), cx);
         grid.rerun = rerun;
+        grid.results = true;
         grid
     })
 }

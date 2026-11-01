@@ -21,7 +21,7 @@ pub(super) fn header_model(c: &ColumnMeta, key: &[String], fks: &[String]) -> He
         name: c.name.to_string(),
         data_type: c.data_type.to_string(),
         pk: c.is_pk || named(key),
-        fk: named(fks),
+        fk: c.is_fk || named(fks),
     }
 }
 
