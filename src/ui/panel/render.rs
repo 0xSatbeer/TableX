@@ -196,7 +196,7 @@ impl Render for BottomPanel {
             .size_full()
             .track_focus(&self.focus)
             .child(header)
-            .child(div().flex_1().min_h_0().child(body))
+            .child(div().flex_1().min_h_0().bg(theme.table).child(body))
     }
 }
 

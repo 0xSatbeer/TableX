@@ -310,6 +310,7 @@ impl Render for Grid {
                     div()
                         .id("grid-body")
                         .debug_selector(|| "grid-body".into())
+                        .bg(cx.theme().table)
                         .relative()
                         .flex_1()
                         .min_h_0()

@@ -126,6 +126,13 @@ impl Grid {
                     .h(self.row_h())
                     .font_family(theme.mono_font_family.clone())
                     .text_size(self.mono_px())
+                    .text_color(
+                        theme
+                            .highlight_theme
+                            .style
+                            .editor_foreground
+                            .unwrap_or(theme.foreground),
+                    )
                     .bg(if r % 2 == 1 {
                         theme.table_even
                     } else {

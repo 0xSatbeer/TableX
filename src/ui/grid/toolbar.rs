@@ -248,6 +248,7 @@ impl Grid {
         h_flex()
             .flex_none()
             .items_stretch()
+            .bg(theme.table)
             .border_b_1()
             .border_color(theme.border)
             .text_size(theme::ui())

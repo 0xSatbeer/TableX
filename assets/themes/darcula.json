@@ -13,8 +13,8 @@
       "radius.lg": 10,
       "shadow": false,
       "colors": {
-        "background": "#2B2B2B",
-        "foreground": "#CCCCCC",
+        "background": "#3C3F41",
+        "foreground": "#BBBBBB",
         "border": "#323232",
         "ring": "#4A88C7",
         "caret": "#BBBBBB",
@@ -63,7 +63,7 @@
         "scrollbar.thumb.background": "#5A5D5FB3",
         "scrollbar.thumb.hover.background": "#6E7173",
 
-        "title_bar.background": "#2B2B2B",
+        "title_bar.background": "#3C3F41",
         "title_bar.border": "#1E1E1E",
         "status_bar.background": "#3C3F41",
         "status_bar.border": "#323232",
@@ -92,12 +92,12 @@
 
         "table.background": "#2B2B2B",
         "table.even.background": "#2B2B2B",
-        "table.head.background": "#3C3F41",
+        "table.head.background": "#3B3B3B",
         "table.head.foreground": "#BBBBBB",
         "table.hover.background": "#323232",
         "table.active.background": "#214283",
         "table.active.border": "#4A88C7",
-        "table.row.border": "#323232",
+        "table.row.border": "#373737",
 
         "group_box.background": "#313335",
         "group_box.foreground": "#CCCCCC",
