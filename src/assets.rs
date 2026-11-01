@@ -11,6 +11,7 @@ icon_assets!(
         Binary,
         Braces,
         Brackets,
+        Briefcase,
         CalendarClock,
         ChevronFirst,
         ChevronLast,
@@ -129,6 +130,7 @@ mod tests {
             Lucide::FolderOpen,
             Lucide::PanelLeft,
             Lucide::PanelBottom,
+            Lucide::Briefcase,
             // Grid header: key icons and the column type icons.
             Lucide::KeyRound,
             Lucide::Hash,

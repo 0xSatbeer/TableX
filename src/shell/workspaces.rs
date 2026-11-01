@@ -15,7 +15,7 @@ use crate::ui::workspace_dialog::{NameDialog, Named};
 use super::{Shell, TabContent};
 
 impl Shell {
-    /// `◉ <workspace> ▾`: every workspace (the active one checked), then New, Rename, Delete.
+    /// `<icon> <workspace> ▾`: every workspace (the active one checked), then New, Rename, Delete.
     pub(super) fn workspace_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity().downgrade();
         let active = self.workspace.read(cx);
@@ -25,7 +25,9 @@ impl Shell {
         Button::new("workspace")
             .ghost()
             .small()
-            .label(format!("◉ {name} ▾"))
+            .icon(Icon::new(Lucide::Briefcase))
+            .label(name)
+            .dropdown_caret(true)
             .tooltip("Switch workspace")
             .dropdown_menu(move |mut menu, _, _| {
                 for (id, name) in list.iter().cloned() {
