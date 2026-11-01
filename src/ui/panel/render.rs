@@ -13,7 +13,6 @@ use crate::ui::console::Console;
 use crate::{MaximizePanel, ToggleBottomPanel, theme};
 
 use super::filter::empty_message;
-use super::row::log_header;
 use super::{BottomPanel, LOGS, LogFilter, RESULTS, TABS};
 
 impl Render for BottomPanel {
@@ -151,23 +150,16 @@ impl Render for BottomPanel {
                         })),
                 )
                 .into_any_element(),
-            // Newest first: during an incident the last query is the one you want.
-            LOGS => v_flex()
-                .size_full()
-                .child(log_header(theme))
-                .child(
-                    list(
-                        self.list.clone(),
-                        cx.processor(|this, ix: usize, _, cx| {
-                            this.log_row(this.rows[this.rows.len() - 1 - ix], cx)
-                                .into_any_element()
-                        }),
-                    )
-                    .flex_1()
-                    .w_full(),
-                )
-                .into_any_element(),
-            RESULTS => match &self.console {
+            // Oldest first like a console; `refilter` scrolls the newest into view.
+            LOGS => list(
+                self.list.clone(),
+                cx.processor(|this, ix: usize, _, cx| {
+                    this.log_row(this.rows[ix], cx).into_any_element()
+                }),
+            )
+            .size_full()
+            .into_any_element(),
+            _ => match &self.console {
                 Some(console) if !console.read(cx).results.is_empty() => {
                     results(console, cx).into_any_element()
                 }
@@ -198,20 +190,6 @@ impl Render for BottomPanel {
                     .child(run_again(console))
                     .into_any_element(),
                 _ => empty("Console results will show here").into_any_element(),
-            },
-            _ => match self
-                .console
-                .as_ref()
-                .filter(|c| !c.read(cx).messages.is_empty())
-            {
-                Some(console) => v_flex()
-                    .size_full()
-                    .p(theme::space_8())
-                    .gap(theme::space_4())
-                    .font_family(theme.mono_font_family.clone())
-                    .children(console.read(cx).messages.clone())
-                    .into_any_element(),
-                None => empty("No messages").into_any_element(),
             },
         };
         v_flex()

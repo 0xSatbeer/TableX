@@ -196,6 +196,21 @@ impl<C> Tabs<C> {
         std::mem::replace(&mut self.closed, kept)
     }
 
+    /// The tab's title, plus `[connection]` when another open tab from a different connection
+    /// has the same title, so `users` from two databases can be told apart.
+    pub fn label(&self, ix: usize) -> SharedString {
+        let t = &self.tabs[ix];
+        let conn = |t: &EditorTab<C>| t.origin.as_ref().map(|o| o.connection);
+        let clash = self
+            .tabs
+            .iter()
+            .any(|o| o.title == t.title && conn(o) != conn(t));
+        match t.origin.as_ref().filter(|_| clash) {
+            Some(o) => format!("{} [{}]", t.title, o.name()).into(),
+            None => t.title.clone(),
+        }
+    }
+
     pub fn activate(&mut self, ix: usize) {
         if ix < self.tabs.len() {
             self.active = ix;

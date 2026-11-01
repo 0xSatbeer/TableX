@@ -270,3 +270,41 @@ fn dropping_a_connection_keeps_a_full_reopen_history_of_other_connections() {
         "every other connection's closed tab is still reopenable"
     );
 }
+
+#[test]
+fn same_title_from_different_connections_gets_the_connection_name() {
+    use crate::model::ConnectionId;
+    let on = |key: &'static str, title: &'static str, conn: Option<(u32, &str)>| EditorTab {
+        title: title.into(),
+        origin: conn.map(|(id, name)| Origin {
+            connection: ConnectionId(id),
+            color: 0,
+            production: false,
+            path: crate::ui::tabs::join_path(name, "app › public"),
+            tail: "app › public".into(),
+        }),
+        ..tab(key, false)
+    };
+    let t = Tabs::new(vec![
+        on("1", "users", Some((1, "prod"))),
+        on("2", "users", Some((2, "local"))),
+        on("3", "orders", Some((1, "prod"))),
+        on("4", "orders", Some((1, "prod"))),
+        on("5", "items", None),
+        on("6", "items", Some((1, "prod"))),
+    ]);
+    let labels: Vec<_> = (0..t.tabs.len())
+        .map(|ix| t.label(ix).to_string())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "users [prod]",
+            "users [local]",
+            "orders",
+            "orders",
+            "items",
+            "items [prod]"
+        ]
+    );
+}

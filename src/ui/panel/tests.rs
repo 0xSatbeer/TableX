@@ -1,11 +1,8 @@
 use std::time::Duration;
 
-use std::collections::BTreeSet;
-
 use super::filter::{LogFilter, StatusKind, empty_message, filter_rows};
-use super::row::{RowDetail, format_duration, header_labels, row_detail, toggle_expanded};
+use super::row::{format_duration, outcome, stamp};
 use super::sql::sql_spans;
-use super::{BottomPanel, LOG_CAP};
 use crate::model::{ConnectionId, QueryLogEntry, QuerySource, QueryStatus};
 
 mod filter;

@@ -198,7 +198,9 @@ impl Shell {
             .collect();
         let theme = cx.theme();
         let shell = cx.entity().downgrade();
-        let titles: Vec<SharedString> = self.tabs.tabs.iter().map(|t| t.title.clone()).collect();
+        let titles: Vec<SharedString> = (0..self.tabs.tabs.len())
+            .map(|ix| self.tabs.label(ix))
+            .collect();
         let active_ix = self.tabs.active;
         h_flex()
             .flex_none()
@@ -277,7 +279,7 @@ impl Shell {
         let empty = tabs::empty_state(&self.tabs.tabs, &query);
         let rows: Vec<_> = tabs::match_tabs(&self.tabs.tabs, &query)
             .into_iter()
-            .map(|ix| (ix, self.tabs.tabs[ix].title.clone()))
+            .map(|ix| (ix, self.tabs.label(ix)))
             .collect();
         let active_ix = self.tabs.active;
         Popover::new("all-tabs-popover")

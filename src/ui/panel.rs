@@ -1,11 +1,11 @@
-//! Bottom panel (QX-014): Results / Logs / Messages.
+//! Bottom panel (QX-014): Results / Logs.
 
 mod filter;
 mod render;
 mod row;
 pub(crate) mod sql;
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::VecDeque;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -16,17 +16,14 @@ use crate::ui::console::Console;
 pub use filter::LogFilter;
 use filter::filter_rows;
 
-const TABS: [&str; 3] = ["Results", "Logs", "Messages"];
+const TABS: [&str; 2] = ["Results", "Logs"];
 const RESULTS: usize = 0;
 const LOGS: usize = 1;
-const MESSAGES: usize = 2;
-/// Time column width in `SPACE_8` units; wide enough for the "Time (UTC)" header.
-const TIME_W: f32 = 10.;
 
 pub struct BottomPanel {
     /// Set by the shell: the panel covers the editor area, so the header offers restore.
     pub maximized: bool,
-    /// Set by the shell: the active console, whose results and messages show here; other tabs hide Results.
+    /// Set by the shell: the active console, whose results show here; other tabs hide Results.
     pub console: Option<Entity<Console>>,
     tab: usize,
     log: VecDeque<QueryLogEntry>,
@@ -35,8 +32,6 @@ pub struct BottomPanel {
     /// Indexes into `log` that pass the filters.
     rows: Vec<usize>,
     list: ListState,
-    /// Log indexes of rows shown expanded.
-    expanded: BTreeSet<usize>,
     /// The shared workspace, for each log row's connection name, color and production flag.
     workspace: Entity<Workspace>,
     focus: FocusHandle,
@@ -73,7 +68,6 @@ impl BottomPanel {
             let stale_log = this.log.iter().any(|e| !ids.contains(&e.connection_id));
             if stale_log {
                 this.log.retain(|e| ids.contains(&e.connection_id));
-                this.expanded.clear();
             }
             if stale_log || this.filter.connections.len() != filtered {
                 this.refilter(cx);
@@ -96,7 +90,6 @@ impl BottomPanel {
             search,
             list: ListState::new(rows.len(), ListAlignment::Top, px(240.)),
             rows,
-            expanded: BTreeSet::new(),
             workspace,
             focus: cx.focus_handle(),
         }
@@ -121,9 +114,9 @@ impl BottomPanel {
         cx.notify();
     }
 
-    /// Shows what a console run left: Results when it returned rows, else Messages.
+    /// Shows what a console run left: Results when it returned rows, else Logs.
     pub fn show_run(&mut self, results: bool, cx: &mut Context<Self>) {
-        self.tab = if results { RESULTS } else { MESSAGES };
+        self.tab = if results { RESULTS } else { LOGS };
         cx.notify();
     }
 
@@ -167,6 +160,10 @@ impl BottomPanel {
         self.filter.text = self.search.read(cx).value().to_string();
         self.rows = filter_rows(&self.log, &self.filter);
         self.list.reset(self.rows.len());
+        // Oldest first, so the newest entry is the one to keep in view.
+        if let Some(last) = self.rows.len().checked_sub(1) {
+            self.list.scroll_to_reveal_item(last);
+        }
     }
 
     /// The connection filter's button label: "All connections", the one chosen name, or "<n> connections".

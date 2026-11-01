@@ -29,6 +29,16 @@ impl Origin {
             tail,
         }
     }
+
+    /// The connection name: `path` is always `join_path(name, tail)`.
+    pub fn name(&self) -> &str {
+        let cut = if self.tail.is_empty() {
+            0
+        } else {
+            self.tail.len() + " › ".len()
+        };
+        &self.path[..self.path.len() - cut]
+    }
 }
 
 /// `name › tail`, or just `name` when there is no tail.

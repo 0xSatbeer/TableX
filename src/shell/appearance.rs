@@ -329,11 +329,11 @@ impl Shell {
                         .child("Settings"),
                 )
                 .child(
-                div()
-                    .debug_selector(|| "settings".into())
-                    .h(px(520.))
-                    .child(settings),
-            );
+                    div()
+                        .debug_selector(|| "settings".into())
+                        .h(px(520.))
+                        .child(settings),
+                );
             match config.clone() {
                 None => dialog,
                 Some(path) => dialog.footer(

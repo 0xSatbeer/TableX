@@ -514,7 +514,7 @@ fn grid_tab_of(
 }
 
 /// A console tab keyed `key` on `target`, with its own SQL editor holding `text`. Its runs go
-/// to the bottom panel: statements to Logs, and the panel shows Results or Messages when done.
+/// to the bottom panel: statements to Logs, and the panel shows Results or Logs when done.
 pub(super) fn console_tab(
     key: impl Into<SharedString>,
     title: impl Into<SharedString>,

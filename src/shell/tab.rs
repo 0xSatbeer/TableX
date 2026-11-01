@@ -150,27 +150,31 @@ impl Shell {
             })
             .child(icon.small())
             .when(!pinned, |d| {
-                d.child(div().when(t.preview, |d| d.italic()).child(t.title.clone()))
-                    // Text, not only the red wash, so production reads without color vision.
-                    .when(production, |d| d.child(theme::prod_badge(theme)))
-                    .child(
-                        div()
-                            .id(("close-tab", ix))
-                            .rounded(theme::radius_sm())
-                            .p(theme::space_2())
-                            .text_color(if active {
-                                theme.muted_foreground
-                            } else {
-                                transparent_black()
-                            })
-                            .group_hover(group, |d| d.text_color(theme.muted_foreground))
-                            .hover(|d| d.bg(theme.secondary_hover).text_color(theme.foreground))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.close_tabs(vec![ix], window, cx);
-                            }))
-                            .child(Icon::new(IconName::Close).xsmall()),
-                    )
+                d.child(
+                    div()
+                        .when(t.preview, |d| d.italic())
+                        .child(self.tabs.label(ix)),
+                )
+                // Text, not only the red wash, so production reads without color vision.
+                .when(production, |d| d.child(theme::prod_badge(theme)))
+                .child(
+                    div()
+                        .id(("close-tab", ix))
+                        .rounded(theme::radius_sm())
+                        .p(theme::space_2())
+                        .text_color(if active {
+                            theme.muted_foreground
+                        } else {
+                            transparent_black()
+                        })
+                        .group_hover(group, |d| d.text_color(theme.muted_foreground))
+                        .hover(|d| d.bg(theme.secondary_hover).text_color(theme.foreground))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.close_tabs(vec![ix], window, cx);
+                        }))
+                        .child(Icon::new(IconName::Close).xsmall()),
+                )
             })
             .into_any_element()
     }
