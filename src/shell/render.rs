@@ -55,6 +55,7 @@ impl Render for Shell {
             console.update(cx, |console, _| console.text_size = text_size);
         }
         let theme = cx.theme();
+        let viewer_bg = theme.table;
         let content = match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Grid(_, Some(s))) => s.clone().into_any_element(),
             Some(TabContent::Grid(grid, None)) => grid.clone().into_any_element(),
@@ -81,8 +82,8 @@ impl Render for Shell {
                 .justify_center()
                 .gap(theme::space_8())
                 .text_size(theme::ui_sm())
-                .text_color(theme.muted_foreground)
-                .child(div().text_size(theme::ui()).text_color(theme::text_secondary(theme)).child("Nothing open."))
+                .text_color(theme::text_secondary(theme))
+                .child(div().text_size(theme::ui()).text_color(theme.foreground).child("Nothing open."))
                 // With no connections there is no table to pick yet: point at the first step instead.
                 .child(if self.workspace.read(cx).connections.is_empty() {
                     "Add a connection in the explorer to get started"
@@ -155,7 +156,7 @@ impl Render for Shell {
                                                 v_flex()
                                                     .size_full()
                                                     .child(tabs)
-                                                    .child(div().flex_1().min_h_0().child(content)),
+                                                    .child(div().flex_1().min_h_0().bg(viewer_bg).child(content)),
                                             ),
                                         )
                                     })
