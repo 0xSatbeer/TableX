@@ -127,11 +127,11 @@ fn focus_ring_follows_the_focused_pane(cx: &mut gpui_kit::TestAppContext) {
             _ => panic!("launch opens on a grid"),
         }
     });
-    // Tree, then Tab over to the grid, the console and the panel list; then nothing.
+    // Only the panel list gets a ring; the explorer and the content pane never do.
     for (focus, pane) in [
-        ("explorer", Some("pane-explorer")),
-        ("grid", Some("pane-content")),
-        ("console", Some("pane-content")),
+        ("explorer", None),
+        ("grid", None),
+        ("console", None),
         ("panel", Some("pane-panel")),
         ("nothing", None),
     ] {
@@ -176,7 +176,7 @@ fn focus_ring_follows_the_focused_pane(cx: &mut gpui_kit::TestAppContext) {
                     );
                 }
             }
-            None => assert_eq!(ring, None, "nothing focused: no ring"),
+            None => assert_eq!(ring, None, "{focus} focused: no ring"),
         }
     }
 }

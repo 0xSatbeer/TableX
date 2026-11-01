@@ -169,8 +169,13 @@ pub(super) fn filter_rows<'a>(
 }
 
 const NO_MATCHES: &str = "No log entries match these filters";
+const NO_QUERIES: &str = "Queries you run will show up here";
 
-/// Message shown instead of the log list when the filters leave no rows.
-pub(super) fn empty_message(rows: &[usize]) -> Option<&'static str> {
-    rows.is_empty().then_some(NO_MATCHES)
+/// Message shown instead of the log list when there are no rows, and whether the filters hid them.
+pub(super) fn empty_message(rows: &[usize], log_len: usize) -> Option<(&'static str, bool)> {
+    match (rows.is_empty(), log_len) {
+        (false, _) => None,
+        (true, 0) => Some((NO_QUERIES, false)),
+        (true, _) => Some((NO_MATCHES, true)),
+    }
 }

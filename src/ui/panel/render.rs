@@ -130,26 +130,30 @@ impl Render for BottomPanel {
                 .child(text)
         };
         let body = match tab {
-            LOGS if let Some(message) = empty_message(&self.rows) => v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap(theme::space_8())
-                .text_color(theme.muted_foreground)
-                .child(message)
-                .child(
-                    Button::new("reset-filters")
-                        .small()
-                        .label("Reset filters")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.filter = LogFilter::default();
-                            this.search
-                                .update(cx, |search, cx| search.set_value("", window, cx));
-                            this.refilter(cx);
-                            cx.notify();
-                        })),
-                )
-                .into_any_element(),
+            LOGS if let Some((message, filtered)) = empty_message(&self.rows, self.log.len()) => {
+                v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap(theme::space_8())
+                    .text_color(theme.muted_foreground)
+                    .child(message)
+                    .when(filtered, |d| {
+                        d.child(
+                            Button::new("reset-filters")
+                                .small()
+                                .label("Reset filters")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.filter = LogFilter::default();
+                                    this.search
+                                        .update(cx, |search, cx| search.set_value("", window, cx));
+                                    this.refilter(cx);
+                                    cx.notify();
+                                })),
+                        )
+                    })
+                    .into_any_element()
+            }
             // Oldest first like a console; `refilter` scrolls the newest into view.
             LOGS => list(
                 self.list.clone(),

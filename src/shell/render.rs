@@ -49,7 +49,6 @@ impl Render for Shell {
             };
         self.status_bar
             .update(cx, |bar, cx| bar.set_grid_focused(grid_focused, cx));
-        let explorer_focused = focused(Some(self.explorer.focus_handle(cx)), cx);
         let panel_focused = focused(Some(self.bottom_panel.focus_handle(cx)), cx);
         if let Some(TabContent::Console(console)) = self.tabs.active().map(|t| &t.content) {
             let text_size = self.console_text_size();
@@ -84,7 +83,12 @@ impl Render for Shell {
                 .text_size(theme::ui_sm())
                 .text_color(theme.muted_foreground)
                 .child(div().text_size(theme::ui()).text_color(theme::text_secondary(theme)).child("Nothing open."))
-                .child("Pick a table in the explorer (Ctrl+Alt+F) · Ctrl+Shift+T brings the last tab back")
+                // With no connections there is no table to pick yet: point at the first step instead.
+                .child(if self.workspace.read(cx).connections.is_empty() {
+                    "Add a connection in the explorer to get started"
+                } else {
+                    "Pick a table in the explorer (Ctrl+Alt+F) · Ctrl+Shift+T brings the last tab back"
+                })
                 .into_any_element(),
         };
 
@@ -146,7 +150,7 @@ impl Render for Shell {
                             .relative()
                             .size_full()
                             .when(self.layout.explorer_visible, |d| {
-                                // The last 1px column is the splitter line's own, so it never paints over the ring.
+                                // The last 1px column is the splitter line's own.
                                 let pane = div()
                                     .flex_none()
                                     .h_full()
@@ -154,12 +158,7 @@ impl Render for Shell {
                                     .mr(px(1.))
                                     .overflow_hidden()
                                     .child(self.explorer.clone());
-                                d.child(theme::focus_ring(
-                                    "pane-explorer",
-                                    pane,
-                                    explorer_focused,
-                                    cx.theme(),
-                                ))
+                                d.child(pane)
                             })
                             .child(
                                 v_flex()
@@ -169,14 +168,10 @@ impl Render for Shell {
                                     .h_full()
                                     .when(!maximized, |d| {
                                         d.child(div().flex_1().min_h_0().overflow_hidden().child(
-                                            v_flex().size_full().child(tabs).child(
-                                                theme::focus_ring(
-                                                    "pane-content",
-                                                    div().flex_1().min_h_0().child(content),
-                                                    content_focused,
-                                                    cx.theme(),
-                                                ),
-                                            ),
+                                            v_flex()
+                                                .size_full()
+                                                .child(tabs)
+                                                .child(div().flex_1().min_h_0().child(content)),
                                         ))
                                     })
                                     .when(self.layout.bottom_visible, |d| {

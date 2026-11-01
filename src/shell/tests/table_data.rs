@@ -586,3 +586,21 @@ fn a_filter_box_stays_on_one_line(cx: &mut gpui_kit::TestAppContext) {
     let scrolled = where_input.read_with(&cx, |input, _| input.scroll_offset().y);
     assert_eq!(scrolled, gpui_kit::px(0.), "the box doesn't scroll down");
 }
+
+#[gpui_kit::test]
+fn the_clear_button_empties_the_box_and_reads_page_one_again(cx: &mut gpui_kit::TestAppContext) {
+    let (fake, window, shell) = open_users(cx);
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    answer(&fake, Ok(rows(2)), &mut cx);
+    assert!(
+        cx.debug_bounds("grid-filter-where-clear").is_none(),
+        "no clear button on an empty box"
+    );
+    apply_filter(&shell, "id > 5", "", &mut cx);
+    answer(&fake, Ok(rows(2)), &mut cx);
+    click(&mut cx, "grid-filter-where-clear");
+    let (where_input, _) = filter_inputs(&shell, &cx);
+    assert_eq!(where_input.read_with(&cx, |i, _| i.value().to_string()), "");
+    assert_eq!(fake.queried().last().map(String::as_str), Some(PAGE_1));
+    assert!(cx.debug_bounds("grid-filter-where-clear").is_none());
+}

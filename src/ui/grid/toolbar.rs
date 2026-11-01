@@ -243,8 +243,17 @@ impl Grid {
             self.filter = Some((where_input, order_input));
         }
         let (where_input, order_input) = self.filter.clone().expect("made above");
+        let muted = cx.theme().muted_foreground;
+        let icon = |name: IconName| Icon::new(name).xsmall().text_color(muted);
+        let where_box = filter_box("where", "WHERE", &where_input, icon(IconName::Funnel), cx);
+        let order_box = filter_box(
+            "order",
+            "ORDER BY",
+            &order_input,
+            icon(IconName::ArrowDownWideNarrow),
+            cx,
+        );
         let theme = cx.theme();
-        let icon = |name: IconName| Icon::new(name).xsmall().text_color(theme.muted_foreground);
         h_flex()
             .flex_none()
             .items_stretch()
@@ -252,10 +261,7 @@ impl Grid {
             .border_b_1()
             .border_color(theme.border)
             .text_size(theme::ui())
-            .child(
-                filter_box("where", &where_input, icon(IconName::Funnel))
-                    .w(relative(self.where_share)),
-            )
+            .child(where_box.w(relative(self.where_share)))
             .child(
                 div()
                     .id("filter-split")
@@ -273,13 +279,13 @@ impl Grid {
                         }),
                     ),
             )
-            .child(filter_box("order", &order_input, icon(IconName::ArrowDownWideNarrow)).flex_1())
+            .child(order_box.flex_1())
     }
 }
 
 /// A filter bar box: one line of highlighted, completed SQL; Enter in it applies both boxes.
 fn filter_input(
-    placeholder: &'static str,
+    clause: &'static str,
     window: &mut Window,
     cx: &mut Context<Grid>,
 ) -> Entity<EditorState> {
@@ -287,18 +293,19 @@ fn filter_input(
         EditorState::new(window, cx)
             .language("sql")
             .line_number(false)
+            // One line never folds; the fold gutter would only push the text away from the icon.
+            .folding(false)
             .soft_wrap(false)
             .scroll_beyond_last_line(Some(0))
             .submit_on_enter(true)
-            .placeholder(placeholder)
     });
     let provider = Rc::new(completion::Provider {
         grid: cx.weak_entity(),
-        clause: placeholder,
+        clause,
     });
     input.update(cx, |e, cx| {
         e.lsp_mut().completion_provider = Some(provider);
-        e.set_highlighter_factory(completion::highlighter(placeholder), cx);
+        e.set_highlighter_factory(completion::highlighter(clause), cx);
     });
     cx.subscribe_in(
         &input,
@@ -306,17 +313,11 @@ fn filter_input(
         |this, input, ev: &InputEvent, window, cx| {
             if let InputEvent::Change = ev {
                 input.update(cx, |input, cx| one_line(input, window, cx));
+                // The clear button shows only while the box has text.
+                cx.notify();
             }
             if let InputEvent::PressEnter { .. } = ev {
-                // A typed ORDER BY replaces the header's sort.
-                let order_by = this
-                    .filter
-                    .as_ref()
-                    .map(|(_, o)| o.read(cx).value().trim().to_string());
-                if order_by.is_some_and(|o| o != this.sort_order_by()) {
-                    this.sort = None;
-                }
-                this.apply_filter(cx);
+                this.submit_filter(cx);
             }
         },
     )
@@ -338,20 +339,84 @@ fn one_line(input: &mut EditorState, window: &mut Window, cx: &mut Context<Edito
     input.set_cursor_position(at, window, cx);
 }
 
-fn filter_box(name: &'static str, state: &Entity<EditorState>, icon: Icon) -> Div {
+impl Grid {
+    /// Applies both boxes (Enter, the clear button). A typed ORDER BY replaces the header's sort.
+    fn submit_filter(&mut self, cx: &mut Context<Self>) {
+        let order_by = self
+            .filter
+            .as_ref()
+            .map(|(_, o)| o.read(cx).value().trim().to_string());
+        if order_by.is_some_and(|o| o != self.sort_order_by()) {
+            self.sort = None;
+        }
+        self.apply_filter(cx);
+    }
+}
+
+/// A filter bar box: icon, the clause as a keyword label, the editor, and a clear button while it has text.
+fn filter_box(
+    name: &'static str,
+    clause: &'static str,
+    state: &Entity<EditorState>,
+    icon: Icon,
+    cx: &mut Context<Grid>,
+) -> Div {
+    // The editor pads its line with Medium's input_py above and below, which a 28px box cannot
+    // hold: give it its full height and center it in a clipped 28px box, so the line sits mid-row.
+    let pad = gpui_kit::component::Size::Medium.input_py();
+    let theme = cx.theme();
+    let editor_h = theme.mono_font_size * 1.5 + pad * 2.;
+    let keyword = theme
+        .highlight_theme
+        .style("keyword")
+        .and_then(|s| s.color)
+        .unwrap_or(theme.foreground);
+    let label = div()
+        .flex_none()
+        .ml(theme::space_4())
+        .font_family(theme.mono_font_family.clone())
+        .text_size(theme.mono_font_size)
+        .text_color(keyword)
+        .child(clause);
+    let has_text = !state.read(cx).value().is_empty();
+    let state_for_clear = state.clone();
+    let clear = Button::new(SharedString::from(format!("grid-filter-{name}-clear")))
+        .ghost()
+        .xsmall()
+        .icon(IconName::Close)
+        .tooltip("Clear")
+        .accessibility_label("Clear")
+        .on_click(cx.listener(move |this, _, window, cx| {
+            state_for_clear.update(cx, |s, cx| s.set_value("", window, cx));
+            this.submit_filter(cx);
+        }));
     h_flex()
         .debug_selector(move || format!("grid-filter-{name}"))
         .min_w_0()
+        .h(px(28.))
+        .overflow_hidden()
         .items_center()
         .pl(theme::space_8())
-        .gap(theme::space_4())
+        .pr(theme::space_4())
         .child(icon)
+        .child(label)
         .child(
+            // No background or border of its own: the bar's shows, and the pulled-left editor leaves the icon visible.
             gpui_kit::component::input::Editor::new(state)
-                .bordered(false)
-                .h(px(28.))
+                .appearance(false)
+                .h(editor_h)
+                // The code editor insets its text 12px (6px padding + 6px gutter margin) and offers
+                // no way to change it: pull it left so the text sits one mono space after the label.
+                .ml(theme::space_8() - px(12.))
                 .flex_1(),
         )
+        .when(has_text, |d| {
+            d.child(
+                div()
+                    .debug_selector(move || format!("grid-filter-{name}-clear"))
+                    .child(clear),
+            )
+        })
 }
 
 /// The row range, which opens the rows-per-page menu of a result in memory.

@@ -90,7 +90,12 @@ fn main() {
             theme::init(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),
+                // Restore size is the 1280x800 centered window when unmaximized.
+                window_bounds: Some(WindowBounds::Maximized(Bounds::centered(
+                    None,
+                    size(px(1280.), px(800.)),
+                    cx,
+                ))),
                 window_min_size: Some(size(px(900.), px(600.))),
                 // Matches io.github._0xSatbeer.QueryX.desktop so Linux docks show the app icon.
                 app_id: Some("io.github._0xSatbeer.QueryX".into()),

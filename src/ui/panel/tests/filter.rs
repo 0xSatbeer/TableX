@@ -3,10 +3,14 @@ use super::*;
 #[test]
 fn empty_state_message() {
     assert_eq!(
-        super::empty_message(&[]),
-        Some("No log entries match these filters")
+        super::empty_message(&[], 4),
+        Some(("No log entries match these filters", true))
     );
-    assert_eq!(super::empty_message(&[3, 1]), None);
+    assert_eq!(
+        super::empty_message(&[], 0),
+        Some(("Queries you run will show up here", false))
+    );
+    assert_eq!(super::empty_message(&[3, 1], 4), None);
 }
 
 #[test]
