@@ -1,4 +1,4 @@
-use gpui_kit::component::{ActiveTheme as _, TitleBar, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -104,32 +104,15 @@ impl Render for Shell {
             .text_size(theme::ui())
             .text_color(theme.foreground)
             .map(|root| super::actions::on_actions(root, cx))
-            .child(
-                TitleBar::new().h(theme::titlebar()).child(
-                    h_flex()
-                        .w_full()
-                        .pr(theme::space_8())
-                        .justify_between()
-                        .child(
-                            h_flex()
-                                .items_center()
-                                .gap(theme::space_4())
-                                .child(img(crate::assets::APP_ICON).size(theme::space_16()))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_size(theme::ui())
-                                        .child("QueryX"),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .gap(theme::space_4())
-                                .child(self.workspace_menu(cx))
-                                .child(self.settings_button(cx)),
-                        ),
-                ),
-            )
+            .child(super::titlebar::Titlebar::new(
+                self.window_title(cx),
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .gap(theme::space_4())
+                    .child(self.workspace_menu(cx))
+                    .child(self.settings_button(cx)),
+            ))
             .child(div().flex_1().min_h_0().map(|main| {
                 if self.gallery_visible {
                     main.child(gallery::gallery(cx))
@@ -167,12 +150,14 @@ impl Render for Shell {
                                     .min_w_0()
                                     .h_full()
                                     .when(!maximized, |d| {
-                                        d.child(div().flex_1().min_h_0().overflow_hidden().child(
-                                            v_flex()
-                                                .size_full()
-                                                .child(tabs)
-                                                .child(div().flex_1().min_h_0().child(content)),
-                                        ))
+                                        d.child(
+                                            div().flex_1().min_h_0().overflow_hidden().child(
+                                                v_flex()
+                                                    .size_full()
+                                                    .child(tabs)
+                                                    .child(div().flex_1().min_h_0().child(content)),
+                                            ),
+                                        )
                                     })
                                     .when(self.layout.bottom_visible, |d| {
                                         let panel = div()
@@ -249,5 +234,25 @@ impl Render for Shell {
                         ),
                 )
             })
+    }
+}
+
+impl Shell {
+    /// What you are looking at, qualified, in one line.
+    fn window_title(&self, cx: &App) -> AnyElement {
+        let tab = self.tabs.active();
+        let text = crate::ui::tabs::window_title(
+            &self.workspace.read(cx).name,
+            tab.map(|t| (t.title.as_ref(), t.origin.as_ref())),
+            tab.is_some_and(|t| matches!(t.content, TabContent::Grid(..))),
+        );
+        div()
+            .max_w(px(640.))
+            .truncate()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_size(theme::ui())
+            .text_color(cx.theme().muted_foreground)
+            .child(text)
+            .into_any_element()
     }
 }

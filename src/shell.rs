@@ -13,6 +13,7 @@ mod session;
 mod start;
 mod tab;
 mod tab_bar;
+mod titlebar;
 mod workspaces;
 
 use layout::LayoutState;

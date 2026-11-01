@@ -6,7 +6,7 @@ use gpui_kit::SharedString;
 mod origin;
 mod search;
 
-pub use origin::{Origin, join_path, tooltip_text};
+pub use origin::{Origin, join_path, tooltip_text, window_title};
 pub use search::{empty_state, first_match, match_tabs, show_search};
 
 pub struct EditorTab<C> {

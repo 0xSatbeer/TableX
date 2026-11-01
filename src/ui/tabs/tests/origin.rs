@@ -308,3 +308,41 @@ fn same_title_from_different_connections_gets_the_connection_name() {
         ]
     );
 }
+
+#[test]
+fn window_title_qualifies_tables_and_names_the_connection() {
+    let o = Origin {
+        connection: crate::model::ConnectionId(0),
+        color: 0,
+        production: false,
+        path: "fastor dev › brainey-agents › public".into(),
+        tail: "brainey-agents › public".into(),
+    };
+    let bare = Origin {
+        tail: "".into(),
+        path: "fastor dev".into(),
+        ..o.clone()
+    };
+    let cases = [
+        (
+            Some(("agent", Some(&o))),
+            true,
+            "Work – brainey-agents.public.agent [fastor dev]",
+        ),
+        (
+            Some(("brainey-agents — console", Some(&o))),
+            false,
+            "Work – brainey-agents — console [fastor dev]",
+        ),
+        (
+            Some(("agent", Some(&bare))),
+            true,
+            "Work – agent [fastor dev]",
+        ),
+        (Some(("big_events", None)), true, "Work – big_events"),
+        (None, false, "Work"),
+    ];
+    for (tab, object, want) in cases {
+        assert_eq!(window_title("Work", tab, object), want);
+    }
+}

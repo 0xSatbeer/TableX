@@ -99,6 +99,11 @@ fn main() {
                 window_min_size: Some(size(px(900.), px(600.))),
                 // Matches io.github._0xSatbeer.QueryX.desktop so Linux docks show the app icon.
                 app_id: Some("io.github._0xSatbeer.QueryX".into()),
+                // The OS title (overview, Alt+Tab, taskbar); the bar itself shows no name, like GNOME apps.
+                titlebar: Some(TitlebarOptions {
+                    title: Some("QueryX".into()),
+                    ..TitleBar::title_bar_options()
+                }),
                 ..TitleBar::window_options()
             };
             let keychain: std::sync::Arc<dyn persist::Keychain> = match bench {

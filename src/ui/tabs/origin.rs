@@ -55,3 +55,20 @@ pub fn tooltip_text(title: &str, origin: Option<&Origin>) -> String {
     let path = origin.map_or("Sample data · not from a connection", |o| o.path.as_ref());
     format!("{title}\n{path}")
 }
+
+/// Titlebar text, DataGrip style: `workspace – db.schema.table [connection]`. Consoles have no
+/// object, so they show their own title in place of the qualified name.
+pub fn window_title(workspace: &str, tab: Option<(&str, Option<&Origin>)>, object: bool) -> String {
+    let Some((title, origin)) = tab else {
+        return workspace.to_string();
+    };
+    let Some(o) = origin else {
+        return format!("{workspace} – {title}");
+    };
+    let name = if object && !o.tail.is_empty() {
+        format!("{}.{title}", o.tail.replace(" › ", "."))
+    } else {
+        title.to_string()
+    };
+    format!("{workspace} – {name} [{}]", o.name())
+}

@@ -1,6 +1,6 @@
 use super::{
     CLOSED_HISTORY, EditorTab, Origin, Tabs, empty_state, first_match, match_tabs, show_search,
-    tooltip_text,
+    tooltip_text, window_title,
 };
 
 mod list;
