@@ -66,6 +66,11 @@ jobs:
           mkdir dist
           if [ '${{ runner.os }}' = Windows ]; then
             7z a "dist/queryx-$os.zip" ./target/release/queryx.exe
+          elif [ '${{ runner.os }}' = Linux ]; then
+            # desktop file and icons ride along for scripts/install.sh
+            tar czf "dist/queryx-$os.tar.gz" -C target/release queryx \
+              -C "$PWD/assets/icons/app" io.github._0xSatbeer.QueryX.desktop queryx.png queryx-64.png
+            cp scripts/install.sh dist/
           else
             tar czf "dist/queryx-$os.tar.gz" -C target/release queryx
           fi

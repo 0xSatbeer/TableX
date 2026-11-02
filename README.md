@@ -24,7 +24,13 @@ QueryX is early (0.1.0). Expect breaking changes, and keep backups before pointi
 
 ## Install
 
-No release builds yet, so you'll have to build it. You need [rustup](https://rustup.rs/). The project pins Rust 1.99.0 in `rust-toolchain.toml`, and rustup downloads it on the first build. That first build takes a while.
+On Linux (x86_64), this installs the latest release to `~/.local` with a desktop entry and icons:
+
+```sh
+curl -fsSL https://github.com/0xSatbeer/QueryX/releases/latest/download/install.sh | sh
+```
+
+To build from source instead, you need [rustup](https://rustup.rs/). The project pins Rust 1.99.0 in `rust-toolchain.toml`, and rustup downloads it on the first build. That first build takes a while.
 
 ```sh
 git clone https://github.com/0xSatbeer/QueryX.git
