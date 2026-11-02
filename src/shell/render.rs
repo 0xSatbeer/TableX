@@ -153,10 +153,13 @@ impl Render for Shell {
                                     .when(!maximized, |d| {
                                         d.child(
                                             div().flex_1().min_h_0().overflow_hidden().child(
-                                                v_flex()
-                                                    .size_full()
-                                                    .child(tabs)
-                                                    .child(div().flex_1().min_h_0().bg(viewer_bg).child(content)),
+                                                v_flex().size_full().child(tabs).child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_h_0()
+                                                        .bg(viewer_bg)
+                                                        .child(content),
+                                                ),
                                             ),
                                         )
                                     })
