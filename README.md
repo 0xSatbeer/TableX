@@ -4,7 +4,7 @@ QueryX is a desktop SQL client for PostgreSQL and SQLite. It's written in Rust o
 
 It uses about 30 MB of RAM and sits at 0% CPU when you're not touching it. Run it with `--demo` to try it on a built-in sample workspace without any database.
 
-QueryX is early (0.1.0). Expect breaking changes, and keep backups before pointing it at anything you care about. It's developed and tested on Linux. macOS and Windows builds pass CI but get much less use.
+QueryX is early (0.1.2). Expect breaking changes, and keep backups before pointing it at anything you care about. It's developed and tested on Linux. macOS and Windows builds pass CI but get much less use.
 
 ![QueryX showing a 1M-row table, the explorer and the query log](.github/screenshot.png)
 
