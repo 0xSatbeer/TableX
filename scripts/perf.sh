@@ -1,5 +1,6 @@
 #!/bin/sh
-# Release build + local perf budgets: cold start, idle memory and frames, a 100k-row result, binary size.
+# Release build + local perf budgets: cold start, idle memory and frames, a 100k-row result, grid
+# scroll frame rate, binary size. Keep the window unobscured: a hidden window gets no frames.
 # Needs podman-compose (Postgres from compose.yaml), sqlite3, jq and a display. Exit 1 on any FAIL.
 set -e
 cd "$(dirname "$0")/.."
@@ -65,6 +66,7 @@ spawned=$(date +%s%3N)
 startup=$(scenario startup)
 idle=$(scenario idle)
 big=$(scenario big_result)
+scroll=$(scenario grid_scroll)
 
 failed=0
 # row <metric> <value> <budget text> <jq test on .v>
@@ -79,5 +81,7 @@ row "idle rss_anon_mb" "$(echo "$idle" | jq .rss_anon_mb)" "< 40" '$v < 40'
 row "idle_frames" "$(echo "$idle" | jq .idle_frames)" "== 0" '$v == 0'
 row "big_result rss_anon_mb" "$(echo "$big" | jq .rss_anon_mb)" "< 120" '$v < 120'
 row "big_result rows" "$(echo "$big" | jq .rows)" "== 100000" '$v == 100000'
+row "grid_scroll fps" "$(echo "$scroll" | jq .frames.fps)" ">= 55" '$v >= 55'
+row "grid_scroll p95 ms" "$(echo "$scroll" | jq .frames.p95_ms)" "< 25" '$v < 25'
 row "binary bytes" "$(stat -c %s "$bin")" "< 35 MiB" '$v < 35 * 1024 * 1024'
 exit "$failed"

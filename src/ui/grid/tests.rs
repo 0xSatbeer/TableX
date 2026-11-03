@@ -18,6 +18,7 @@ mod export;
 mod format;
 mod header;
 mod live_pages;
+mod perf;
 mod submit;
 mod table_page;
 mod values;

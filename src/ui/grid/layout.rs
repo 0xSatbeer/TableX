@@ -82,6 +82,21 @@ impl Grid {
                 .max(MIN_WIDTH);
     }
 
+    /// `grid_scroll` bench: one frame of scrolling down and right, wrapping at each end.
+    pub fn bench_step(&mut self, cx: &mut Context<Self>) {
+        let base = self.scroll.0.borrow().base_handle.clone();
+        let (o, max) = (base.offset(), base.max_offset());
+        let next = |v: Pixels, step: Pixels, max: Pixels| {
+            if step - v > max {
+                Pixels::ZERO
+            } else {
+                v - step
+            }
+        };
+        base.set_offset(point(next(o.x, px(7.), max.x), next(o.y, px(37.), max.y)));
+        cx.notify();
+    }
+
     pub(super) fn gutter(&self) -> Pixels {
         gutter_width(self.all.row_count(), self.mono_px())
     }

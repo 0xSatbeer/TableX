@@ -232,6 +232,10 @@ impl Shell {
             cx,
         );
         let tabs = match mode {
+            Mode::Bench(Scenario::GridScroll) => vec![
+                grid_tab("big_events", Rc::new(grid::BigEvents::new()), cx),
+                console,
+            ],
             Mode::Normal | Mode::Bench(_) => vec![console],
             Mode::Demo => vec![
                 grid_tab("big_events", Rc::new(grid::BigEvents::new()), cx),
@@ -328,6 +332,14 @@ impl Shell {
             self.tabs
                 .open(table_tab(key.into(), grid, table, explorer, cx));
         }
+    }
+
+    /// `grid_scroll`'s big_events grid.
+    pub(crate) fn bench_grid(&self) -> Option<Entity<grid::Grid>> {
+        self.tabs.tabs.iter().find_map(|t| match &t.content {
+            TabContent::Grid(g, _) => Some(g.clone()),
+            _ => None,
+        })
     }
 
     /// Rows the first console holds once no tab is running or loading; `None` before.

@@ -133,7 +133,7 @@ fn main() {
                 shell::open_shell(mode, options, themes, config.map(|c| c.root), cx)
                     .expect("open window");
             if let Some(scenario) = bench {
-                bench::run(scenario, shell, cx);
+                bench::run(scenario, window, shell, cx);
             }
             if let Some(notice) = notice {
                 let _ = window.update(cx, |_, window, cx| ui::toast::error(notice, window, cx));

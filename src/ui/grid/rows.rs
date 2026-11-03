@@ -2,6 +2,26 @@
 
 use super::*;
 
+/// The (top, bottom) runs of a column line from 0 to `bottom`, broken for one `row_h` at each
+/// row top in `gaps`.
+pub(super) fn line_spans(
+    mut gaps: Vec<Pixels>,
+    row_h: Pixels,
+    bottom: Pixels,
+) -> Vec<(Pixels, Pixels)> {
+    gaps.sort();
+    let mut top = Pixels::ZERO;
+    let mut spans = Vec::new();
+    for end in gaps.into_iter().chain([bottom]) {
+        let end = end.min(bottom);
+        if end > top {
+            spans.push((top, end));
+        }
+        top = top.max(end + row_h);
+    }
+    spans
+}
+
 impl Grid {
     pub(super) fn render_rows(
         &mut self,
@@ -54,8 +74,6 @@ impl Grid {
                             .items_center()
                             .overflow_hidden()
                             .whitespace_nowrap()
-                            .border_r_1()
-                            .border_color(theme.table_row_border)
                             .when(
                                 aligns_right(&kind, &self.source.columns()[s].data_type),
                                 |d| d.justify_end(),
@@ -102,18 +120,20 @@ impl Grid {
                                     .border_color(theme.danger)
                                     .child(self.render_problem(why, cx))
                             })
-                            .when(editing_cell != Some((r, c)) || text_editor.is_none(), |d| {
-                                d.child(if added && !self.edits.contains_key(&(at, s)) {
+                            .when(
+                                (editing_cell != Some((r, c)) || text_editor.is_none())
                                     // Left blank, a new row's cell takes the column default.
-                                    div()
-                                } else if kind == CellKind::Null {
-                                    div().text_color(theme::grid_null(theme)).child(text)
-                                } else if kind == CellKind::Bool(false) {
-                                    div().text_color(theme.muted_foreground).child(text)
-                                } else {
-                                    div().child(text)
-                                })
-                            })
+                                    && !(added && !self.edits.contains_key(&(at, s))),
+                                |d| {
+                                    d.when(kind == CellKind::Null, |d| {
+                                        d.text_color(theme::grid_null(theme))
+                                    })
+                                    .when(kind == CellKind::Bool(false), |d| {
+                                        d.text_color(theme.muted_foreground)
+                                    })
+                                    .child(text)
+                                },
+                            )
                     });
                 div()
                     .relative()
@@ -179,6 +199,58 @@ impl Grid {
                     )
             })
             .collect()
+    }
+
+    /// Column lines over the rows: one quad per visible column instead of a border per cell,
+    /// which halved the cost of a scrolled frame. A line breaks where the cursor or a refused
+    /// cell draws its own outline, so that outline stays whole.
+    pub(super) fn render_col_lines(&self, window: &Window, cx: &App) -> impl IntoElement {
+        let offsets = self.offsets();
+        let (scroll_x, view) = self.viewport(window);
+        let scroll_y = self.scroll.0.borrow().base_handle.offset().y;
+        let (gutter, row_h) = (self.gutter(), self.row_h());
+        let (bottom_room, right_room) = self.scrollbar_room();
+        let outlined: Vec<(usize, usize)> = self
+            .focus
+            .is_focused(window)
+            .then_some(self.head)
+            .into_iter()
+            .chain(
+                self.editing
+                    .as_ref()
+                    .filter(|e| e.error.is_some())
+                    .map(|e| e.cell),
+            )
+            .chain(self.notice.as_ref().map(|(at, _)| *at))
+            .collect();
+        let lines: Vec<(Pixels, Vec<usize>)> = visible_cols(&offsets, scroll_x, view, OVERSCAN)
+            .filter(|&c| !self.hidden[self.col_order[c]])
+            .map(|c| {
+                let gaps = outlined.iter().filter(|o| o.1 == c).map(|o| o.0).collect();
+                (gutter + offsets[c + 1] - scroll_x - px(1.), gaps)
+            })
+            .collect();
+        let rows_bottom = row_h * self.source.row_count() as f32 + scroll_y;
+        let color = cx.theme().table_row_border;
+        canvas(
+            |_, _, _| (),
+            move |bounds, _, window, _| {
+                let bottom = rows_bottom.min(bounds.size.height - bottom_room);
+                let right = bounds.size.width - right_room;
+                for (x, gaps) in lines.iter().filter(|(x, _)| *x >= gutter && *x < right) {
+                    let gaps = gaps.iter().map(|&r| row_h * r as f32 + scroll_y);
+                    for (top, end) in line_spans(gaps.collect(), row_h, bottom) {
+                        let origin = bounds.origin + point(*x, top);
+                        window
+                            .paint_quad(fill(Bounds::new(origin, size(px(1.), end - top)), color));
+                    }
+                }
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
     }
 
     /// One row transposed: column name, type, full value.

@@ -340,6 +340,7 @@ impl Render for Grid {
                             .pr(right_room)
                             .size_full(),
                         )
+                        .child(self.render_col_lines(window, cx))
                         // Always shown: where you are in the rows and columns is worth seeing at rest.
                         .child(
                             Scrollbar::new(&self.scroll)

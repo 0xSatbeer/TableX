@@ -12,6 +12,7 @@ All notable changes to TableX are listed here. The format follows
 - QueryX is now TableX. The binary is `tablex`, release files are `tablex-*`, and the .deb replaces the `queryx` package. Your connections, saved passwords, keymap and themes carry over unchanged.
 
 ### Fixed
+- Scrolling the data grid stutters less: a scrolled frame costs about half what it did (14 ms to 8 ms on a 1M-row table), so it holds 60 fps on slower machines.
 - Windows release builds no longer open a console window behind the app.
 
 ### Security

@@ -88,7 +88,7 @@ export QUERYX_TEST_PG=postgres://queryx:queryx@localhost:55432/queryx
 cargo test
 ```
 
-`scripts/perf.sh` checks the performance budgets: cold start, idle memory, a 100k-row result and binary size. It needs `podman-compose` (not Docker), `sqlite3`, `jq` and a display. Terms used in the code are defined in [`GLOSSARY.md`](GLOSSARY.md).
+`scripts/perf.sh` checks the performance budgets: cold start, idle memory, a 100k-row result, grid scroll frame rate and binary size. It needs `podman-compose` (not Docker), `sqlite3`, `jq` and a display. Terms used in the code are defined in [`GLOSSARY.md`](GLOSSARY.md).
 
 ## Releasing
 
