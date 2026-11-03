@@ -248,3 +248,51 @@ fn unchanged_matches_numeric_text_to_its_float() {
     ));
     assert!(!super::super::paste::unchanged(&t(""), &Value::Null));
 }
+
+#[gpui_kit::test]
+fn typing_on_the_selection_replaces_it_and_space_opens_it(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::AppContext as _;
+    cx.update(gpui_kit::init);
+    let (window, grid) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |_, cx| {
+            cx.new(|cx| super::Grid::new(std::rc::Rc::new(mock::wide_table(20)), cx))
+        })
+        .expect("open test window")
+    });
+    let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+    let cell = |cx: &mut gpui_kit::VisualTestContext, r: usize, c: usize| {
+        grid.read_with(cx, |g, _| g.row(r)[c].clone())
+    };
+    let typed = |cx: &mut gpui_kit::VisualTestContext| {
+        grid.read_with(cx, |g, cx| text_input(g).read(cx).value().to_string())
+    };
+    grid.update_in(&mut cx, |g, window, cx| {
+        window.focus(&g.focus, cx);
+        (g.anchor, g.head) = ((0, 0), (1, 1));
+    });
+    cx.simulate_keystrokes("7");
+    assert_eq!(
+        typed(&mut cx),
+        "7",
+        "the key replaces the value, typed once"
+    );
+    cx.simulate_input("2");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(
+        [0, 1].map(|r| [0, 1].map(|c| cell(&mut cx, r, c))),
+        [
+            [Value::Int(72), Value::Int(72)],
+            [Value::Int(72), Value::Int(72)]
+        ],
+        "and fills every selected cell"
+    );
+
+    let original = cell(&mut cx, 3, 3);
+    grid.update(&mut cx, |g, _| (g.anchor, g.head) = ((3, 3), (3, 3)));
+    cx.simulate_keystrokes("space");
+    assert_eq!(
+        typed(&mut cx),
+        original.to_string(),
+        "Space opens the cell with its value"
+    );
+}

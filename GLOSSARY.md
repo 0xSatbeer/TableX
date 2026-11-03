@@ -1,4 +1,4 @@
-# QueryX
+# TableX
 
 A desktop SQL client for Postgres and SQLite. These terms name the things a user manages and sees.
 
@@ -31,5 +31,5 @@ Re-reading one tree node's subtree from the database, so changes made elsewhere 
 _Avoid_: reload, sync
 
 **Demo mode**:
-Starting QueryX with `--demo`, which shows the built-in sample workspace, sample tabs and simulated latency instead of the user's own connections.
+Starting TableX with `--demo`, which shows the built-in sample workspace, sample tabs and simulated latency instead of the user's own connections.
 _Avoid_: mock mode, sample mode

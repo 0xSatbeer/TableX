@@ -196,3 +196,42 @@ fn select_row_skips_hidden_columns() {
         );
     }
 }
+
+#[gpui_kit::test]
+fn scrollbar_room_only_on_axes_that_overflow(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::AppContext as _;
+    cx.update(gpui_kit::init);
+    let room = |cx: &mut gpui_kit::TestAppContext, rows: usize, one_col: bool| {
+        let (window, grid) = cx.update(|cx| {
+            gpui_kit::open_window(Default::default(), cx, |_, cx| {
+                cx.new(|cx| super::Grid::new(std::rc::Rc::new(mock::wide_table(rows)), cx))
+            })
+            .expect("open test window")
+        });
+        let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
+        grid.update(&mut cx, |g, cx| {
+            if one_col {
+                g.hidden.iter_mut().skip(1).for_each(|h| *h = true);
+            }
+            cx.notify()
+        });
+        cx.run_until_parked();
+        grid.read_with(&cx, |g, _| g.scrollbar_room())
+    };
+    let (bar, none) = (
+        gpui_kit::component::scroll::Scrollbar::width(),
+        gpui_kit::Pixels::ZERO,
+    );
+    assert_eq!(room(cx, 3, true), (none, none), "fits both ways: no room");
+    assert_eq!(
+        room(cx, 3, false),
+        (bar, none),
+        "wide only: room at the bottom"
+    );
+    assert_eq!(
+        room(cx, 2000, true),
+        (none, bar),
+        "tall only: room on the right"
+    );
+    assert_eq!(room(cx, 2000, false), (bar, bar), "both");
+}

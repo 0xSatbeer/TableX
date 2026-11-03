@@ -31,9 +31,12 @@ pub(super) fn editor_kind(meta: &ColumnMeta) -> EditorKind {
 
 impl Grid {
     /// Opens the editor for display cell `cell`'s type, showing its value; it writes to every selected cell.
+    /// `typed` is a key typed on the cell: it replaces a text value, or picks the first list option
+    /// it starts.
     pub(super) fn start_editing(
         &mut self,
         cell: (usize, usize),
+        typed: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -49,9 +52,9 @@ impl Grid {
         };
         let editor = match editor_kind(meta) {
             EditorKind::Text => {
-                let input = cx.new(|cx| InputState::new(window, cx).placeholder("NULL"));
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("<null>"));
                 input.update(cx, |input, cx| {
-                    input.set_value(text, window, cx);
+                    input.set_value(typed.map_or(text, str::to_string), window, cx);
                     input.focus(window, cx);
                 });
                 cx.subscribe_in(
@@ -85,8 +88,11 @@ impl Grid {
             }
             EditorKind::Options(values) => {
                 let current = values.iter().position(|v| **v == *text);
+                let starts = typed
+                    .map(str::to_lowercase)
+                    .and_then(|t| values.iter().position(|v| v.to_lowercase().starts_with(&t)));
                 Editor::Options {
-                    highlighted: current.unwrap_or(0),
+                    highlighted: starts.or(current).unwrap_or(0),
                     current,
                     values,
                 }

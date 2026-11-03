@@ -64,10 +64,10 @@ pub fn read_or_backup<T, E>(
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     match std::fs::rename(path, with_suffix(path, ".bak")) {
         Ok(()) => Err(format!(
-            "{name} could not be read; it was saved as {name}.bak and QueryX started empty."
+            "{name} could not be read; it was saved as {name}.bak and TableX started empty."
         )),
         Err(e) => Err(format!(
-            "{name} could not be read, nor saved as {name}.bak ({e}); QueryX started empty."
+            "{name} could not be read, nor saved as {name}.bak ({e}); TableX started empty."
         )),
     }
 }

@@ -133,7 +133,7 @@ fn gutter_width_is_digits_plus_padding() {
 
 #[test]
 fn cells_format_by_type() {
-    assert_eq!(format_cell(&Value::Null), ("NULL".into(), CellKind::Null));
+    assert_eq!(format_cell(&Value::Null), ("<null>".into(), CellKind::Null));
     assert_eq!(
         format_cell(&Value::Int(-5)),
         ("-5".into(), CellKind::Number)

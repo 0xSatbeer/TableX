@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Screenshot the running app on GNOME Wayland through the screenshot portal (needs the one-time
-# permission). The portal captures the whole screen, so the QueryX window must be visible:
+# permission). The portal captures the whole screen, so the TableX window must be visible:
 # GNOME opens it behind the focused window when launched from a terminal.
 # Usage: scripts/shot.sh OUT.png [SECONDS_BEFORE_SHOT] [ENV=VALUE ...]
 set -euo pipefail
@@ -9,7 +9,7 @@ exec 9>/tmp/queryx-shot.lock; flock 9
 # a cold debug build takes well over 4s to show its window
 out=$1; wait=${2:-15}; shift $(( $# > 1 ? 2 : 1 ))
 bin=$(mktemp /tmp/queryx-shot.XXXXXX)
-install -m 755 target/debug/queryx "$bin"   # a copy, so a concurrent cargo build can relink freely (mktemp makes it 600)
+install -m 755 target/debug/tablex "$bin"   # a copy, so a concurrent cargo build can relink freely (mktemp makes it 600)
 env "$@" "$bin" >/dev/null &   # keep stderr: a launch failure must be visible
 app=$!
 trap 'kill $app 2>/dev/null || true; rm -f "$bin"' EXIT

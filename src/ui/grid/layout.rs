@@ -125,6 +125,21 @@ impl Grid {
         (-base.offset().x, width - self.gutter())
     }
 
+    /// Padding (bottom, right) that keeps the last row and column clear of the scrollbars. A bar
+    /// shows only when its axis overflows, so an axis that fits gets none.
+    pub(super) fn scrollbar_room(&self) -> (Pixels, Pixels) {
+        // shortcut: reads last frame's bounds, so the frame right after a resize can be off; measure in prepaint if it shows.
+        let size = self.scroll.0.borrow().base_handle.bounds().size;
+        let bar = Scrollbar::width();
+        let wide_by = self.gutter() + *self.offsets().last().unwrap_or(&Pixels::ZERO) - size.width;
+        let tall_by = self.row_h() * self.source.row_count() as f32 - size.height;
+        // Each bar's room eats into the other axis, so one overflow can tip the other.
+        let wide = wide_by > Pixels::ZERO || (tall_by > Pixels::ZERO && wide_by > -bar);
+        let tall = tall_by > Pixels::ZERO || (wide && tall_by > -bar);
+        let room = |on: bool| if on { bar } else { Pixels::ZERO };
+        (room(wide), room(tall))
+    }
+
     #[cfg(test)]
     pub fn mono(&self) -> Pixels {
         self.mono

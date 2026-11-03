@@ -94,7 +94,7 @@ impl Render for PasswordPrompt {
                     .text_size(theme::ui_sm())
                     .text_color(theme::text_secondary(cx.theme()))
                     .child(format!(
-                        "{} has no saved password. It is kept until QueryX quits.",
+                        "{} has no saved password. It is kept until TableX quits.",
                         self.name
                     )),
             )

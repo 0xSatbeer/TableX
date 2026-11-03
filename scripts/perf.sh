@@ -4,7 +4,7 @@
 set -e
 cd "$(dirname "$0")/.."
 perf=target/perf
-bin=target/release/queryx
+bin=target/release/tablex
 
 cargo build --release
 

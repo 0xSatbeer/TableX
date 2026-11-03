@@ -1,9 +1,9 @@
 {
-  "name": "QueryX",
-  "author": "QueryX",
+  "name": "TableX",
+  "author": "TableX",
   "themes": [
     {
-      "name": "QueryX Light",
+      "name": "TableX Light",
       "mode": "light",
       "font.family": "Inter",
       "font.size": 13.714285,

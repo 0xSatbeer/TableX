@@ -79,14 +79,14 @@ jobs:
           os=$(echo '${{ runner.os }}' | tr '[:upper:]' '[:lower:]')-$(echo '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')
           mkdir dist
           if [ '${{ runner.os }}' = Windows ]; then
-            7z a "dist/queryx-$os.zip" ./target/release/queryx.exe
+            7z a "dist/tablex-$os.zip" ./target/release/tablex.exe
           elif [ '${{ runner.os }}' = Linux ]; then
             # desktop file and icons ride along for scripts/install.sh
-            tar czf "dist/queryx-$os.tar.gz" -C target/release queryx \
+            tar czf "dist/tablex-$os.tar.gz" -C target/release tablex \
               -C "$PWD/assets/icons/app" io.github._0xSatbeer.QueryX.desktop queryx.png queryx-64.png
             cp scripts/install.sh dist/
           else
-            tar czf "dist/queryx-$os.tar.gz" -C target/release queryx
+            tar czf "dist/tablex-$os.tar.gz" -C target/release tablex
           fi
       - uses: taiki-e/install-action@v2
         if: runner.os == 'Linux'
@@ -103,9 +103,9 @@ jobs:
           install -Dm644 assets/icons/app/io.github._0xSatbeer.QueryX.metainfo.xml AppDir/usr/share/metainfo/io.github._0xSatbeer.QueryX.metainfo.xml
           # runners have no FUSE, so linuxdeploy (itself an AppImage) must extract to run
           APPIMAGE_EXTRACT_AND_RUN=1 LINUXDEPLOY_OUTPUT_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2) \
-            ./linuxdeploy --appdir AppDir -e target/release/queryx \
+            ./linuxdeploy --appdir AppDir -e target/release/tablex \
             -d assets/icons/app/io.github._0xSatbeer.QueryX.desktop -i io.github._0xSatbeer.QueryX.png --output appimage
-          mv QueryX-*.AppImage dist/
+          mv TableX-*.AppImage dist/
       - uses: actions/upload-artifact@v4
         with:
           name: queryx-${{ runner.os }}
@@ -139,4 +139,4 @@ jobs:
           awk -v h="## [$v]" 'index($0,h)==1{f=1;next} f&&(/^## /||/^\[/){exit} f' CHANGELOG.md > notes.md
           # a v1.2.0-rc.1 style tag is a prerelease and must not become "latest", which install.sh fetches
           case $v in *-*) pre=--prerelease ;; *) pre= ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* --title "QueryX $v" --notes-file notes.md --verify-tag $pre
+          gh release create "$GITHUB_REF_NAME" dist/* --title "TableX $v" --notes-file notes.md --verify-tag $pre

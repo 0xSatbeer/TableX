@@ -5368,28 +5368,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "queryx"
-version = "0.1.2"
-dependencies = [
- "bytes",
- "chrono",
- "futures",
- "gpui-kit",
- "keyring",
- "lsp-types",
- "rusqlite",
- "rustls",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-postgres",
- "tokio-rustls",
- "toml 1.1.6+spec-1.1.0",
- "winresource",
-]
-
-[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6895,6 +6873,28 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "tablex"
+version = "0.1.2"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "gpui-kit",
+ "keyring",
+ "lsp-types",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
+ "tokio-rustls",
+ "toml 1.1.6+spec-1.1.0",
+ "winresource",
 ]
 
 [[package]]

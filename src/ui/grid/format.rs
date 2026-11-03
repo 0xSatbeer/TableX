@@ -49,7 +49,7 @@ pub(super) fn human_size(n: usize) -> String {
 /// One-line display text for a cell.
 pub(super) fn format_cell(value: &Value) -> (String, CellKind) {
     match value {
-        Value::Null => ("NULL".into(), CellKind::Null),
+        Value::Null => ("<null>".into(), CellKind::Null),
         Value::Bool(b) => (
             (if *b { "true" } else { "false" }).into(),
             CellKind::Bool(*b),

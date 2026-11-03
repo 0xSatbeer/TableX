@@ -126,29 +126,29 @@ fn user_theme_named_like_a_built_in_is_skipped_and_reported() {
     let cases = [
         (
             "dark.json",
-            vec!["QueryX Dark"],
+            vec!["TableX Dark"],
             vec![],
-            vec![clash("QueryX Dark", "dark.json")],
+            vec![clash("TableX Dark", "dark.json")],
         ),
         (
             "light.json",
-            vec!["QueryX Light"],
+            vec!["TableX Light"],
             vec![],
-            vec![clash("QueryX Light", "light.json")],
+            vec![clash("TableX Light", "light.json")],
         ),
         (
             "mixed.json",
-            vec!["Nord", "QueryX Dark"],
+            vec!["Nord", "TableX Dark"],
             vec!["Nord"],
-            vec![clash("QueryX Dark", "mixed.json")],
+            vec![clash("TableX Dark", "mixed.json")],
         ), // the rest of the file loads
         (
             "both.json",
-            vec!["QueryX Dark", "QueryX Light"],
+            vec!["TableX Dark", "TableX Light"],
             vec![],
             vec![
-                clash("QueryX Dark", "both.json"),
-                clash("QueryX Light", "both.json"),
+                clash("TableX Dark", "both.json"),
+                clash("TableX Light", "both.json"),
             ],
         ),
         (
@@ -195,7 +195,7 @@ fn choosing_a_user_theme_applies_it_immediately(cx: &mut gpui_kit::TestAppContex
             true,
             Some(0x2E3440),
         ),
-        (ThemeChoice::Light, "QueryX Light", false, None),
+        (ThemeChoice::Light, "TableX Light", false, None),
         (
             ThemeChoice::User("Paper".into()),
             "Paper",
@@ -208,8 +208,8 @@ fn choosing_a_user_theme_applies_it_immediately(cx: &mut gpui_kit::TestAppContex
             true,
             Some(0x2E3440),
         ), // light -> user dark
-        (ThemeChoice::Dark, "QueryX Dark", true, None), // same mode, back to the built-in
-        (ThemeChoice::User("Gone".into()), "QueryX Dark", true, None), // removed theme falls back to Dark
+        (ThemeChoice::Dark, "TableX Dark", true, None), // same mode, back to the built-in
+        (ThemeChoice::User("Gone".into()), "TableX Dark", true, None), // removed theme falls back to Dark
     ];
     for (choice, name, dark, bg) in cases {
         let (got, is_dark, background) = cx.update(|window, cx| {

@@ -104,7 +104,7 @@ fn main() {
                 app_id: Some("io.github._0xSatbeer.QueryX".into()),
                 // The OS title (overview, Alt+Tab, taskbar); the bar itself shows no name, like GNOME apps.
                 titlebar: Some(TitlebarOptions {
-                    title: Some("QueryX".into()),
+                    title: Some("TableX".into()),
                     ..TitleBar::title_bar_options()
                 }),
                 ..TitleBar::window_options()

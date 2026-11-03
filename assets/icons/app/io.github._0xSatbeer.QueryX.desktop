@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=QueryX
+Name=TableX
 GenericName=Database Client
 Comment=Database client for PostgreSQL and SQLite
-Exec=queryx
+Exec=tablex
 Icon=io.github._0xSatbeer.QueryX
 Terminal=false
 Categories=Development;Database;

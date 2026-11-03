@@ -16,7 +16,7 @@ const DARK: &str = include_str!("../assets/themes/queryx-dark.json");
 const LIGHT: &str = include_str!("../assets/themes/queryx-light.json");
 const DARCULA: &str = include_str!("../assets/themes/darcula.json");
 /// Names of the themes in DARK, LIGHT and DARCULA; user themes may not reuse them.
-const BUILT_IN: [&str; 3] = ["QueryX Dark", "QueryX Light", "Darcula"];
+const BUILT_IN: [&str; 3] = ["TableX Dark", "TableX Light", "Darcula"];
 
 // Type scale. MONO matches `mono_font.size`.
 //
@@ -165,7 +165,7 @@ pub fn init(cx: &mut App) {
     init_themes(cx);
 }
 
-/// Loads the built-in themes and starts on QueryX Dark.
+/// Loads the built-in themes and starts on TableX Dark.
 fn init_themes(cx: &mut App) {
     let registry = ThemeRegistry::global_mut(cx);
     for json in [DARK, LIGHT, DARCULA] {
@@ -174,8 +174,8 @@ fn init_themes(cx: &mut App) {
             .expect("embedded theme is valid JSON");
     }
     let (dark, light) = (
-        registry.themes()["QueryX Dark"].clone(),
-        registry.themes()["QueryX Light"].clone(),
+        registry.themes()["TableX Dark"].clone(),
+        registry.themes()["TableX Light"].clone(),
     );
     // `Theme::change` loads whichever of these two matches the mode it is given.
     Theme::update(cx, |theme| {

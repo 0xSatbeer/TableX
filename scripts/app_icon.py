@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the QueryX desktop icons from the artwork PNG.
+"""Generate the TableX desktop icons from the artwork PNG.
 
 Run from the repo root: python3 scripts/app_icon.py <artwork.png>
 The artwork is a rounded square on opaque black; the corners are cut to transparent here.

@@ -133,7 +133,7 @@ fn a_corrupt_file_moves_to_bak_and_loads_empty_with_a_notice() {
     assert_eq!(
         notice.as_deref(),
         Some(
-            "workspaces.toml could not be read; it was saved as workspaces.toml.bak and QueryX started empty."
+            "workspaces.toml could not be read; it was saved as workspaces.toml.bak and TableX started empty."
         )
     );
     assert!(file.all.list.is_empty());

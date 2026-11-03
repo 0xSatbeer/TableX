@@ -107,12 +107,7 @@ impl Grid {
                                     // Left blank, a new row's cell takes the column default.
                                     div()
                                 } else if kind == CellKind::Null {
-                                    div()
-                                        .px(theme::space_4())
-                                        .rounded(theme::radius_sm())
-                                        .bg(theme.muted)
-                                        .text_color(theme::grid_null(theme))
-                                        .child(text)
+                                    div().text_color(theme::grid_null(theme)).child(text)
                                 } else if kind == CellKind::Bool(false) {
                                     div().text_color(theme.muted_foreground).child(text)
                                 } else {

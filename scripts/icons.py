@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate QueryX object icons: one item glyph per kind, plus a "stack" variant for its group.
+"""Generate TableX object icons: one item glyph per kind, plus a "stack" variant for its group.
 
 Run from the repo root: python3 scripts/icons.py
 Writes assets/icons/queryx/<kind>.svg and <kind>s.svg. GPUI renders SVGs as single-color

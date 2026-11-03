@@ -1,10 +1,13 @@
 # Changelog
 
-All notable changes to QueryX are listed here. The format follows
+All notable changes to TableX are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/). Each release's GitHub notes are its section below.
 
 ## [Unreleased]
+
+### Changed
+- QueryX is now TableX. The binary is `tablex`, release files are `tablex-*`, and the .deb replaces the `queryx` package. Your connections, saved passwords, keymap and themes carry over unchanged.
 
 ### Fixed
 - Windows release builds no longer open a console window behind the app.

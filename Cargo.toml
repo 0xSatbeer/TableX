@@ -1,5 +1,5 @@
 [package]
-name = "queryx"
+name = "tablex"
 version = "0.1.2"
 edition = "2024"
 license = "GPL-3.0-or-later"
@@ -39,7 +39,7 @@ gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "test-support"] 
 
 # macOS .app bundle (cargo bundle).
 [package.metadata.bundle]
-name = "QueryX"
+name = "TableX"
 identifier = "dev.queryx.QueryX"
 icon = ["assets/icons/app/queryx.icns"]
 
@@ -47,8 +47,11 @@ icon = ["assets/icons/app/queryx.icns"]
 [package.metadata.deb]
 maintainer = "Satbeer Singh <32334303+0xSatbeer@users.noreply.github.com>"
 section = "database"
+# renamed from queryx; same desktop file and icons, so the old package must make way
+conflicts = "queryx"
+replaces = "queryx"
 assets = [
-    ["target/release/queryx", "usr/bin/", "755"],
+    ["target/release/tablex", "usr/bin/", "755"],
     ["assets/icons/app/io.github._0xSatbeer.QueryX.desktop", "usr/share/applications/", "644"],
     ["assets/icons/app/io.github._0xSatbeer.QueryX.metainfo.xml", "usr/share/metainfo/", "644"],
     ["assets/icons/app/queryx.png", "usr/share/icons/hicolor/512x512/apps/io.github._0xSatbeer.QueryX.png", "644"],

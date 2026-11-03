@@ -112,7 +112,7 @@ impl Grid {
         let plain = !ev.modifiers.secondary() && !ev.modifiers.shift;
         if ev.click_count == 2 && plain {
             window.prevent_default();
-            return self.start_editing(cell, window, cx);
+            return self.start_editing(cell, None, window, cx);
         }
         if ev.modifiers.secondary() {
             self.add_range(cell, cx);
@@ -242,13 +242,25 @@ impl Grid {
             "v" if m.secondary() => return self.paste(cx),
             "enter" if m.secondary() && self.is_live() => return self.submit(window, cx),
             "enter" | "f2" if !m.secondary() && !m.shift => {
-                return self.start_editing(self.head, window, cx);
+                return self.start_editing(self.head, None, window, cx);
             }
             "r" if m.secondary() && m.shift => {
                 self.record = !self.record;
                 return cx.notify();
             }
             _ => {}
+        }
+        // Typing on the selection edits it, as in a spreadsheet; Space opens it as it is.
+        if let Some(typed) = ev
+            .keystroke
+            .key_char
+            .as_deref()
+            .filter(|c| !m.control && !m.platform && !c.chars().any(char::is_control))
+            && self.read_only().is_none()
+        {
+            cx.stop_propagation();
+            let typed = (typed != " ").then_some(typed);
+            return self.start_editing(self.head, typed, window, cx);
         }
         let page =
             (self.scroll.0.borrow().base_handle.bounds().size.height / self.row_h()) as usize;

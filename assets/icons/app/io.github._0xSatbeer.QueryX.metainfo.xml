@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>io.github._0xSatbeer.QueryX</id>
-  <name>QueryX</name>
+  <name>TableX</name>
   <summary>Database client for PostgreSQL and SQLite</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
@@ -9,7 +9,7 @@
     <name>Satbeer Singh</name>
   </developer>
   <description>
-    <p>QueryX is a desktop database client. Connect to PostgreSQL and SQLite, browse schemas, write SQL with completion and edit table data.</p>
+    <p>TableX is a desktop database client. Connect to PostgreSQL and SQLite, browse schemas, write SQL with completion and edit table data.</p>
   </description>
   <launchable type="desktop-id">io.github._0xSatbeer.QueryX.desktop</launchable>
   <url type="homepage">https://github.com/0xSatbeer/QueryX</url>

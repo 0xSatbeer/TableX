@@ -1,17 +1,17 @@
-# QueryX
+# TableX
 
-QueryX is a desktop SQL client for PostgreSQL and SQLite. It's written in Rust on [GPUI](https://www.gpui.rs/).
+TableX is a desktop SQL client for PostgreSQL and SQLite. It's written in Rust on [GPUI](https://www.gpui.rs/).
 
 It uses about 30 MB of RAM and sits at 0% CPU when you're not touching it. Run it with `--demo` to try it on a built-in sample workspace without any database.
 
-QueryX is early (0.1.2). Expect breaking changes, and keep backups before pointing it at anything you care about. It's developed and tested on Linux. macOS and Windows builds pass CI but get much less use.
+TableX is early (0.1.2). Expect breaking changes, and keep backups before pointing it at anything you care about. It's developed and tested on Linux. macOS and Windows builds pass CI but get much less use.
 
-![QueryX showing a 1M-row table, the explorer and the query log](.github/screenshot.png)
+![TableX showing a 1M-row table, the explorer and the query log](.github/screenshot.png)
 
 ## What it does
 
 - The explorer on the left is a lazy tree of connections, databases, schemas and objects. You can filter it, refresh it, and right-click things to create, modify, drop or view DDL.
-- Every connection gets a color, and you'll see it on the tree dot, the tab stripe, the status bar and the grid header. Production connections are tinted and marked `PROD` everywhere, and QueryX asks before writing to them.
+- Every connection gets a color, and you'll see it on the tree dot, the tab stripe, the status bar and the grid header. Production connections are tinted and marked `PROD` everywhere, and TableX asks before writing to them.
 - The data grid virtualizes rows and columns, so 1M rows × 50 columns scrolls at full frame rate. You can select, copy, resize columns and edit cells inline, then apply the edits together.
 - Opening a table gives you data, structure and DDL tabs. The `WHERE` and `ORDER BY` boxes autocomplete SQL, and results are paged.
 - The query console uses tree-sitter for SQL. Run the statement under the cursor or the whole script, cancel long queries, and manage transactions yourself. A script can return several result sets, and completion uses the live schema.
@@ -36,8 +36,8 @@ To build from source instead, you need [rustup](https://rustup.rs/). The project
 git clone https://github.com/0xSatbeer/QueryX.git
 cd QueryX
 cargo build --release
-./target/release/queryx          # your connections
-./target/release/queryx --demo   # sample workspace, no database needed
+./target/release/tablex          # your connections
+./target/release/tablex --demo   # sample workspace, no database needed
 ```
 
 On Linux, GPUI needs some system libraries. On Debian/Ubuntu:

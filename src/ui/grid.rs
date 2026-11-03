@@ -244,6 +244,7 @@ impl Focusable for Grid {
 
 impl Render for Grid {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (bottom_room, right_room) = self.scrollbar_room();
         v_flex()
             .size_full()
             .track_focus(&self.focus)
@@ -273,7 +274,7 @@ impl Render for Grid {
             .on_action(cx.listener(|this, _: &CopySqlInList, _, cx| this.copy_in_list(cx)))
             .on_action(cx.listener(|this, _: &Paste, _, cx| this.paste(cx)))
             .on_action(cx.listener(|this, _: &SetValue, window, cx| {
-                this.start_editing(this.head, window, cx)
+                this.start_editing(this.head, None, window, cx)
             }))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
                 if let Some((c, start_x, start_w)) = this.resizing {
@@ -335,9 +336,8 @@ impl Render for Grid {
                             .with_horizontal_sizing_behavior(
                                 ListHorizontalSizingBehavior::Unconstrained,
                             )
-                            // The last row and column scroll clear of the scrollbars.
-                            .pb(Scrollbar::width())
-                            .pr(Scrollbar::width())
+                            .pb(bottom_room)
+                            .pr(right_room)
                             .size_full(),
                         )
                         // Always shown: where you are in the rows and columns is worth seeing at rest.
