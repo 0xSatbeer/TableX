@@ -6,6 +6,8 @@ All notable changes to TableX are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-03
+
 ### Changed
 - QueryX is now TableX. The binary is `tablex`, release files are `tablex-*`, and the .deb replaces the `queryx` package. Your connections, saved passwords, keymap and themes carry over unchanged.
 
@@ -43,7 +45,8 @@ All notable changes to TableX are listed here. The format follows
 
 First public release.
 
-[Unreleased]: https://github.com/0xSatbeer/QueryX/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/0xSatbeer/QueryX/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/0xSatbeer/QueryX/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/0xSatbeer/QueryX/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/0xSatbeer/QueryX/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/0xSatbeer/QueryX/releases/tag/v0.1.0
