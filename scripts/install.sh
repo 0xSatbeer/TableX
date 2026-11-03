@@ -12,7 +12,12 @@ ID=io.github._0xSatbeer.QueryX
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL https://github.com/0xSatbeer/QueryX/releases/latest/download/queryx-linux-x64.tar.gz | tar xz -C "$tmp"
+url=https://github.com/0xSatbeer/QueryX/releases/latest/download
+curl -fsSLo "$tmp/queryx-linux-x64.tar.gz" "$url/queryx-linux-x64.tar.gz"
+curl -fsSLo "$tmp/SHA256SUMS" "$url/SHA256SUMS"
+(cd "$tmp" && grep ' queryx-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c --quiet -) \
+  || { echo "checksum mismatch; download is corrupt or tampered" >&2; exit 1; }
+tar xzf "$tmp/queryx-linux-x64.tar.gz" -C "$tmp"
 
 install -Dm755 "$tmp/queryx" "$PREFIX/bin/queryx"
 install -Dm644 "$tmp/queryx.png" "$PREFIX/share/icons/hicolor/512x512/apps/$ID.png"

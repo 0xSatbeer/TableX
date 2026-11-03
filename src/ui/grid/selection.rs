@@ -80,8 +80,8 @@ pub(super) fn selection_after_drop(reset_col: Option<usize>, selection: Selectio
 pub(super) type Block = (Range<usize>, Range<usize>);
 
 impl Grid {
-    /// Cell mouse-down: click selects (or extends, or adds a range); a double-click edits, keeping
-    /// a multi-cell selection the first click collapsed when the cell was part of it.
+    /// Cell mouse-down: click selects (or extends, or adds a range); a double-click edits just that
+    /// cell (Enter or F2 edits a whole selection).
     pub(super) fn cell_down(
         &mut self,
         cell: (usize, usize),
@@ -111,14 +111,9 @@ impl Grid {
         window.focus(&self.focus, cx);
         let plain = !ev.modifiers.secondary() && !ev.modifiers.shift;
         if ev.click_count == 2 && plain {
-            if let Some((anchor, head, extra)) = self.before_click.take() {
-                (self.anchor, self.head, self.extra) = (anchor, head, extra);
-            }
             window.prevent_default();
             return self.start_editing(cell, window, cx);
         }
-        let multi = self.selected_cells().len() > 1 && self.is_selected(cell.0, cell.1);
-        self.before_click = (multi && plain).then(|| (self.anchor, self.head, self.extra.clone()));
         if ev.modifiers.secondary() {
             self.add_range(cell, cx);
         } else {

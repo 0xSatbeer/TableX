@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +21,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # a tag that disagrees with Cargo.toml or metainfo ships a binary reporting the wrong version
+      - name: Tag matches versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          grep -qx "version = \"$v\"" Cargo.toml || { echo "::error::Cargo.toml version is not $v"; exit 1; }
+          grep -q "<release version=\"$v\"" assets/icons/app/*.metainfo.xml || { echo "::error::metainfo has no <release version=\"$v\">"; exit 1; }
+          grep -q "^## \[$v\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no ## [$v] section"; exit 1; }
       - name: System libraries
         run: |
           sudo apt-get update
@@ -42,6 +55,7 @@ jobs:
           QUERYX_TEST_PG: postgres://queryx:queryx@localhost:55432/queryx
 
   build:
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -102,14 +116,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write      # build provenance
+      attestations: write
     steps:
+      - uses: actions/checkout@v4   # CHANGELOG.md for the notes
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+          v=${GITHUB_REF_NAME#v}
+          # the version's CHANGELOG section, up to the next ## heading or link refs
+          awk -v h="## [$v]" 'index($0,h)==1{f=1;next} f&&(/^## /||/^\[/){exit} f' CHANGELOG.md > notes.md
+          # a v1.2.0-rc.1 style tag is a prerelease and must not become "latest", which install.sh fetches
+          case $v in *-*) pre=--prerelease ;; *) pre= ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --title "QueryX $v" --notes-file notes.md --verify-tag $pre

@@ -114,7 +114,7 @@ fn dragging_across_cells_selects_the_rectangle(cx: &mut gpui_kit::TestAppContext
 }
 
 #[gpui_kit::test]
-fn double_click_edits_in_the_cell_and_fills_the_selection(cx: &mut gpui_kit::TestAppContext) {
+fn double_click_edits_only_the_clicked_cell(cx: &mut gpui_kit::TestAppContext) {
     use gpui_kit::AppContext as _;
     cx.update(gpui_kit::init);
     let (window, grid) = cx.update(|cx| {
@@ -165,20 +165,17 @@ fn double_click_edits_in_the_cell_and_fills_the_selection(cx: &mut gpui_kit::Tes
             g.selection(),
             g.editing.as_ref().map(|e| e.cell)
         )),
-        ((0..2, 0..2), Some((1, 0))),
-        "double-click inside keeps the selection and edits that cell"
+        ((1..2, 0..1), Some((1, 0))),
+        "double-click inside a selection collapses it to the clicked cell"
     );
     grid.update_in(&mut cx, |g, window, cx| {
         text_input(g).update(cx, |i, cx| i.set_value("5", window, cx))
     });
     cx.simulate_keystrokes("enter");
     assert_eq!(
-        [0, 1].map(|r| [0, 1].map(|c| cell(&mut cx, r, c))),
-        [
-            [Value::Int(5), Value::Int(5)],
-            [Value::Int(5), Value::Int(5)]
-        ],
-        "the typed value fills every selected cell"
+        [0, 1].map(|r| [0, 1].map(|c| cell(&mut cx, r, c) == Value::Int(5))),
+        [[false, false], [true, false]],
+        "the typed value goes only to the edited cell"
     );
 
     double_click(&mut cx, 3, 3);

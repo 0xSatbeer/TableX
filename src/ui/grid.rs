@@ -15,7 +15,7 @@ use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::time_field::{TimeField, TimeFieldState, TimePrecision};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     input::{EditorState, Input, InputEvent, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
@@ -118,8 +118,6 @@ pub struct Grid {
     editing: Option<Editing>,
     /// A refused paste: the cell that couldn't take its field, and why. Cleared by the next selection.
     notice: Option<((usize, usize), String)>,
-    /// The multi-cell selection a click on one of its cells collapsed, so a double-click can restore it.
-    before_click: Option<Selection>,
     /// A left button pressed on a cell is still down, so moving over cells extends the selection.
     drag_selecting: bool,
     /// A table tab's database reads; `None` for a result already in memory.
@@ -197,7 +195,6 @@ impl Grid {
             revision: 0,
             editing: None,
             notice: None,
-            before_click: None,
             drag_selecting: false,
             live: None,
             rerun: None,
@@ -317,6 +314,17 @@ impl Render for Grid {
                         .relative()
                         .flex_1()
                         .min_h_0()
+                        // The row-number gutter runs on under the last row, through the scrollbar gap.
+                        .child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .w(self.gutter())
+                                .h_full()
+                                .bg(cx.theme().table_head)
+                                .border_r_1()
+                                .border_color(cx.theme().border),
+                        )
                         .child(
                             uniform_list(
                                 "grid-rows",
@@ -327,6 +335,9 @@ impl Render for Grid {
                             .with_horizontal_sizing_behavior(
                                 ListHorizontalSizingBehavior::Unconstrained,
                             )
+                            // The last row and column scroll clear of the scrollbars.
+                            .pb(Scrollbar::width())
+                            .pr(Scrollbar::width())
                             .size_full(),
                         )
                         // Always shown: where you are in the rows and columns is worth seeing at rest.

@@ -90,6 +90,13 @@ cargo test
 
 `scripts/perf.sh` checks the performance budgets: cold start, idle memory, a 100k-row result and binary size. It needs `podman-compose` (not Docker), `sqlite3`, `jq` and a display. Terms used in the code are defined in [`GLOSSARY.md`](GLOSSARY.md).
 
+## Releasing
+
+1. Bump `version` in `Cargo.toml`, add a `<release>` to `assets/icons/app/io.github._0xSatbeer.QueryX.metainfo.xml`, and rename `## [Unreleased]` in `CHANGELOG.md` to the new version with today's date.
+2. Commit, then tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+
+CI refuses a tag that disagrees with any of the three, builds every platform, and publishes the release with the changelog section as its notes. A tag with a suffix such as `v0.2.0-rc.1` becomes a prerelease. Downloads can be checked with `sha256sum -c SHA256SUMS --ignore-missing` or `gh attestation verify <file> --repo 0xSatbeer/QueryX`.
+
 ## License
 
 GPL v3.0 or later, see [LICENSE](LICENSE). The bundled Inter and JetBrains Mono fonts are under the SIL Open Font License (see `assets/fonts/`).

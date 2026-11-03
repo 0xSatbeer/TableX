@@ -101,6 +101,14 @@ impl Grid {
                             .on_click(cx.listener(move |this, _, _, cx| run(this, cx)))
                     };
                 let idle = !self.has_changes();
+                // Half saturation, so submit stands out without shouting; hover washes in the same hue.
+                let tinted = |c: Hsla| {
+                    let c = Hsla { s: c.s * 0.5, ..c };
+                    ButtonCustomVariant::new(cx)
+                        .foreground(c)
+                        .hover(c.opacity(0.14))
+                        .active(c.opacity(0.24))
+                };
                 d.child(divider())
                     .child(
                         Button::new("grid-refresh")
@@ -134,7 +142,7 @@ impl Grid {
                             .child(
                                 div().debug_selector(|| "grid-submit".into()).child(
                                     Button::new("grid-submit")
-                                        .ghost()
+                                        .custom(tinted(theme.success))
                                         .small()
                                         .icon(IconName::ArrowUp)
                                         .tooltip("Submit changes (Ctrl+Enter)")
