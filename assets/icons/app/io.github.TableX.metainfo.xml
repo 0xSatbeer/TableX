@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github._0xSatbeer.QueryX</id>
+  <id>io.github.TableX</id>
   <name>TableX</name>
   <summary>Database client for PostgreSQL and SQLite</summary>
   <metadata_license>CC0-1.0</metadata_license>
@@ -11,12 +11,15 @@
   <description>
     <p>TableX is a desktop database client. Connect to PostgreSQL and SQLite, browse schemas, write SQL with completion and edit table data.</p>
   </description>
-  <launchable type="desktop-id">io.github._0xSatbeer.QueryX.desktop</launchable>
-  <url type="homepage">https://github.com/0xSatbeer/QueryX</url>
-  <url type="bugtracker">https://github.com/0xSatbeer/QueryX/issues</url>
+  <replaces>
+    <id>io.github._0xSatbeer.QueryX</id>
+  </replaces>
+  <launchable type="desktop-id">io.github.TableX.desktop</launchable>
+  <url type="homepage">https://github.com/0xSatbeer/TableX</url>
+  <url type="bugtracker">https://github.com/0xSatbeer/TableX/issues</url>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/0xSatbeer/QueryX/main/.github/screenshot.png</image>
+      <image>https://raw.githubusercontent.com/0xSatbeer/TableX/main/.github/screenshot.png</image>
     </screenshot>
   </screenshots>
   <content_rating type="oars-1.1"/>

@@ -53,7 +53,7 @@ fn bench_mode_needs_a_known_scenario_after_the_flag() {
 #[test]
 fn the_mock_latency_variable_applies_in_demo_mode_only() {
     use crate::shell::Mode::{self, *};
-    // (mode, QUERYX_MOCK_LATENCY_MS, latency in ms)
+    // (mode, TABLEX_MOCK_LATENCY_MS, latency in ms)
     let cases: [(Mode, Option<&str>, u64); 10] = [
         (Demo, Some("500"), 500),
         (Normal, Some("500"), 0),

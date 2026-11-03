@@ -3,18 +3,18 @@ use crate::model::{ConnectionParams, Secret, SslMode};
 
 /// The test server, or `None` after printing why the test is skipped.
 pub fn test_pg() -> Option<ConnectionParams> {
-    params_from(std::env::var("QUERYX_TEST_PG").ok().as_deref())
+    params_from(std::env::var("TABLEX_TEST_PG").ok().as_deref())
 }
 
 /// Params for the `postgres://user:pass@host:port/db` URL, or `None` when it is unset or empty.
 pub fn params_from(url: Option<&str>) -> Option<ConnectionParams> {
     let Some(url) = url.map(str::trim).filter(|url| !url.is_empty()) else {
-        println!("skipped: QUERYX_TEST_PG not set");
+        println!("skipped: TABLEX_TEST_PG not set");
         return None;
     };
-    let config: tokio_postgres::Config = url.parse().expect("QUERYX_TEST_PG is a postgres:// URL");
+    let config: tokio_postgres::Config = url.parse().expect("TABLEX_TEST_PG is a postgres:// URL");
     let tokio_postgres::config::Host::Tcp(host) = &config.get_hosts()[0] else {
-        panic!("QUERYX_TEST_PG needs a TCP host")
+        panic!("TABLEX_TEST_PG needs a TCP host")
     };
     Some(ConnectionParams::Postgres {
         host: host.clone(),
@@ -57,7 +57,7 @@ pub fn admin(pg: &ConnectionParams, sql: &str) -> Vec<String> {
         let (client, connection) = config
             .connect(tokio_postgres::NoTls)
             .await
-            .expect("connect to QUERYX_TEST_PG");
+            .expect("connect to TABLEX_TEST_PG");
         tokio::spawn(connection);
         let messages = client
             .simple_query(sql)
@@ -124,14 +124,14 @@ fn test_pg_skips_when_unset_and_each_test_gets_unique_names() {
             ssl: SslMode::Prefer,
         }
     };
-    // (QUERYX_TEST_PG, params)
+    // (TABLEX_TEST_PG, params)
     let cases = [
         (None, None),
         (Some(""), None),
         (Some("  "), None),
         (
-            Some("postgres://queryx:queryx@localhost:55432/queryx"),
-            Some(pg("localhost", 55432, "queryx", Some("queryx"), "queryx")),
+            Some("postgres://tablex:tablex@localhost:55432/tablex"),
+            Some(pg("localhost", 55432, "tablex", Some("tablex"), "tablex")),
         ),
         (
             Some("postgres://bob@db.local/app"),

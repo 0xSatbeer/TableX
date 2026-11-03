@@ -546,7 +546,7 @@ fn trigger_type(tgtype: i32) -> (String, String) {
     (timing.into(), events)
 }
 
-/// Helpers for tests against the compose Postgres (`QUERYX_TEST_PG`); T02's listing tests use them too.
+/// Helpers for tests against the compose Postgres (`TABLEX_TEST_PG`); T02's listing tests use them too.
 #[cfg(test)]
 pub(crate) mod testing;
 

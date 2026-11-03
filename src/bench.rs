@@ -124,13 +124,13 @@ fn rss_now() -> f64 {
 /// The `big_result` workspace: a Postgres connection on `pg` (a `postgres://` URL) and a SQLite
 /// one on the file at `sqlite`.
 pub(crate) fn workspace(pg: Option<String>, sqlite: Option<String>) -> Result<Workspace, String> {
-    let pg = pg.ok_or("QUERYX_BENCH_PG is not set")?;
-    let sqlite = sqlite.ok_or("QUERYX_BENCH_SQLITE is not set")?;
+    let pg = pg.ok_or("TABLEX_BENCH_PG is not set")?;
+    let sqlite = sqlite.ok_or("TABLEX_BENCH_SQLITE is not set")?;
     let config: tokio_postgres::Config = pg
         .parse()
-        .map_err(|e| format!("QUERYX_BENCH_PG is not a postgres URL: {e}"))?;
+        .map_err(|e| format!("TABLEX_BENCH_PG is not a postgres URL: {e}"))?;
     let Some(tokio_postgres::config::Host::Tcp(host)) = config.get_hosts().first() else {
-        return Err("QUERYX_BENCH_PG needs a TCP host".into());
+        return Err("TABLEX_BENCH_PG needs a TCP host".into());
     };
     let conn = |id, name: &str, params| Connection {
         id: ConnectionId(id),
@@ -328,7 +328,7 @@ mod tests {
         // (status text, MiB)
         let cases: [(&str, Option<f64>); 5] = [
             (
-                "Name:\tqueryx\nVmRSS:\t  90000 kB\nRssAnon:\t   40960 kB\nRssFile:\t 1 kB\n",
+                "Name:\ttablex\nVmRSS:\t  90000 kB\nRssAnon:\t   40960 kB\nRssFile:\t 1 kB\n",
                 Some(40.),
             ),
             ("RssAnon:\t512 kB\n", Some(0.5)),
@@ -353,7 +353,7 @@ mod tests {
                 "/data/bench.sqlite".to_string(),
             ])
         };
-        // (QUERYX_BENCH_PG, QUERYX_BENCH_SQLITE, the two connections or the error)
+        // (TABLEX_BENCH_PG, TABLEX_BENCH_SQLITE, the two connections or the error)
         let cases: [(Option<&str>, Option<&str>, Result<Vec<String>, &str>); 6] = [
             (
                 Some("postgres://u:p@h:1/db"),
@@ -365,16 +365,16 @@ mod tests {
                 Some("/data/bench.sqlite"),
                 pg("localhost", 5432, "u", None, "q"),
             ),
-            (None, Some("/x"), Err("QUERYX_BENCH_PG is not set")),
+            (None, Some("/x"), Err("TABLEX_BENCH_PG is not set")),
             (
                 Some("postgres://h/db"),
                 None,
-                Err("QUERYX_BENCH_SQLITE is not set"),
+                Err("TABLEX_BENCH_SQLITE is not set"),
             ),
             (
                 Some("postgres://u@%2Frun%2Fpg/db"),
                 Some("/x"),
-                Err("QUERYX_BENCH_PG needs a TCP host"),
+                Err("TABLEX_BENCH_PG needs a TCP host"),
             ),
             (
                 Some("postgres://h:notaport/db"),
@@ -406,7 +406,7 @@ mod tests {
                 (Ok(got), Ok(want)) => assert_eq!(got, want, "{pg_url:?}"),
                 (Err(got), Err("not a URL")) => {
                     assert!(
-                        got.starts_with("QUERYX_BENCH_PG is not a postgres URL"),
+                        got.starts_with("TABLEX_BENCH_PG is not a postgres URL"),
                         "{got}"
                     )
                 }

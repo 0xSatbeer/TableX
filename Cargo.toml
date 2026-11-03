@@ -40,7 +40,7 @@ gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "test-support"] 
 # macOS .app bundle (cargo bundle).
 [package.metadata.bundle]
 name = "TableX"
-identifier = "dev.queryx.QueryX"
+identifier = "dev.tablex.TableX"
 icon = ["assets/icons/app/tablex.icns"]
 
 # Debian package (cargo deb), built in CI.
@@ -52,10 +52,10 @@ conflicts = "queryx"
 replaces = "queryx"
 assets = [
     ["target/release/tablex", "usr/bin/", "755"],
-    ["assets/icons/app/io.github._0xSatbeer.QueryX.desktop", "usr/share/applications/", "644"],
-    ["assets/icons/app/io.github._0xSatbeer.QueryX.metainfo.xml", "usr/share/metainfo/", "644"],
-    ["assets/icons/app/tablex.png", "usr/share/icons/hicolor/512x512/apps/io.github._0xSatbeer.QueryX.png", "644"],
-    ["assets/icons/app/tablex-64.png", "usr/share/icons/hicolor/64x64/apps/io.github._0xSatbeer.QueryX.png", "644"],
+    ["assets/icons/app/io.github.TableX.desktop", "usr/share/applications/", "644"],
+    ["assets/icons/app/io.github.TableX.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["assets/icons/app/tablex.png", "usr/share/icons/hicolor/512x512/apps/io.github.TableX.png", "644"],
+    ["assets/icons/app/tablex-64.png", "usr/share/icons/hicolor/64x64/apps/io.github.TableX.png", "644"],
 ]
 
 [profile.release]

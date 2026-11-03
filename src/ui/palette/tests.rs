@@ -37,7 +37,7 @@ fn every_action_in_the_keymap_table_is_listed() {
 
 #[gpui_kit::test]
 fn every_app_action_has_a_palette_name(cx: &mut gpui_kit::TestAppContext) {
-    let ours = ["queryx::", "grid::", "console::", "theme::"];
+    let ours = ["tablex::", "grid::", "console::", "theme::"];
     let missing: Vec<_> = cx.update(|cx| {
         cx.all_action_names()
             .iter()
@@ -56,7 +56,7 @@ fn the_gallery_is_listed_only_in_demo_mode(cx: &mut gpui_kit::TestAppContext) {
         let commands = cx.update(|cx| super::Commands::new(demo, cx));
         let shown = (0..commands.shown.len()).filter_map(|row| commands.action(row));
         assert_eq!(
-            shown.into_iter().any(|a| a == "queryx::ToggleGallery"),
+            shown.into_iter().any(|a| a == "tablex::ToggleGallery"),
             listed,
             "demo: {demo}"
         );
@@ -66,7 +66,7 @@ fn the_gallery_is_listed_only_in_demo_mode(cx: &mut gpui_kit::TestAppContext) {
 #[test]
 fn an_empty_filter_lists_recent_first_then_by_name() {
     let all = commands();
-    let listed = names(&all, "", &["queryx::Quit", "grid::Paste"]);
+    let listed = names(&all, "", &["tablex::Quit", "grid::Paste"]);
     assert_eq!(listed[..2], ["Quit", "Paste"]);
     let rest = listed[2..].to_vec();
     let mut sorted = rest.clone();

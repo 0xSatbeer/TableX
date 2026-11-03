@@ -14,7 +14,7 @@ pub use keychain::*;
 pub use session::*;
 pub use workspaces::*;
 
-/// `queryx/` under the platform config dir; every config file lives below it.
+/// `tablex/` under the platform config dir; every config file lives below it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigDir {
     pub root: PathBuf,
@@ -33,7 +33,7 @@ impl ConfigDir {
             abs("XDG_CONFIG_HOME").or_else(|| abs("HOME").map(|h| h.join(".config")))
         };
         config.map(|c| Self {
-            root: c.join("queryx"),
+            root: c.join("tablex"),
         })
     }
 }

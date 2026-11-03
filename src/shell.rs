@@ -180,13 +180,13 @@ pub(crate) fn open_shell(
 }
 
 /// Sets the mock round-trip time for every connect and load from `value`
-/// (`QUERYX_MOCK_LATENCY_MS`), to see loading states.
+/// (`TABLEX_MOCK_LATENCY_MS`), to see loading states.
 pub(crate) fn apply_mock_latency(mode: Mode, value: Option<String>) {
     if let (Mode::Demo, Some(ms)) = (mode, value) {
         match ms.parse() {
             Ok(ms) => mock::set_latency(ms),
             Err(_) => eprintln!(
-                "QUERYX_MOCK_LATENCY_MS={ms:?} is not a whole number of milliseconds; using 0"
+                "TABLEX_MOCK_LATENCY_MS={ms:?} is not a whole number of milliseconds; using 0"
             ),
         }
     }

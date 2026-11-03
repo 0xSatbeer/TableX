@@ -27,14 +27,14 @@ TableX is early (0.1.3). Expect breaking changes, and keep backups before pointi
 On Linux (x86_64), this installs the latest release to `~/.local` with a desktop entry and icons:
 
 ```sh
-curl -fsSL https://github.com/0xSatbeer/QueryX/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/0xSatbeer/TableX/releases/latest/download/install.sh | sh
 ```
 
 To build from source instead, you need [rustup](https://rustup.rs/). The project pins Rust 1.99.0 in `rust-toolchain.toml`, and rustup downloads it on the first build. That first build takes a while.
 
 ```sh
-git clone https://github.com/0xSatbeer/QueryX.git
-cd QueryX
+git clone https://github.com/0xSatbeer/TableX.git
+cd TableX
 cargo build --release
 ./target/release/tablex          # your connections
 ./target/release/tablex --demo   # sample workspace, no database needed
@@ -65,7 +65,7 @@ To change any of these, edit `keymap.toml` in the config directory.
 
 ## Configuration
 
-The config directory is `$XDG_CONFIG_HOME/queryx` (usually `~/.config/queryx`) on Linux, `~/Library/Application Support/queryx` on macOS, and `%APPDATA%\queryx` on Windows. Inside it:
+The config directory is `$XDG_CONFIG_HOME/tablex` (usually `~/.config/tablex`) on Linux, `~/Library/Application Support/tablex` on macOS, and `%APPDATA%\tablex` on Windows. Inside it:
 
 - `config.toml` has settings, theme and layout
 - `workspaces.toml` has workspaces and connections, but not passwords
@@ -80,11 +80,11 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-These are the same checks CI runs. `cargo test` works without Postgres; the Postgres integration tests are skipped if `QUERYX_TEST_PG` isn't set. To run them, start the test server from `compose.yaml` (it listens on port 55432 so it won't clash with a local Postgres):
+These are the same checks CI runs. `cargo test` works without Postgres; the Postgres integration tests are skipped if `TABLEX_TEST_PG` isn't set. To run them, start the test server from `compose.yaml` (it listens on port 55432 so it won't clash with a local Postgres):
 
 ```sh
 podman-compose up -d                    # or: docker compose up -d
-export QUERYX_TEST_PG=postgres://queryx:queryx@localhost:55432/queryx
+export TABLEX_TEST_PG=postgres://tablex:tablex@localhost:55432/tablex
 cargo test
 ```
 
@@ -92,10 +92,10 @@ cargo test
 
 ## Releasing
 
-1. Bump `version` in `Cargo.toml`, add a `<release>` to `assets/icons/app/io.github._0xSatbeer.QueryX.metainfo.xml`, and rename `## [Unreleased]` in `CHANGELOG.md` to the new version with today's date.
+1. Bump `version` in `Cargo.toml`, add a `<release>` to `assets/icons/app/io.github.TableX.metainfo.xml`, and rename `## [Unreleased]` in `CHANGELOG.md` to the new version with today's date.
 2. Commit, then tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
 
-CI refuses a tag that disagrees with any of the three, builds every platform, and publishes the release with the changelog section as its notes. A tag with a suffix such as `v0.2.0-rc.1` becomes a prerelease. Downloads can be checked with `sha256sum -c SHA256SUMS --ignore-missing` or `gh attestation verify <file> --repo 0xSatbeer/QueryX`.
+CI refuses a tag that disagrees with any of the three, builds every platform, and publishes the release with the changelog section as its notes. A tag with a suffix such as `v0.2.0-rc.1` becomes a prerelease. Downloads can be checked with `sha256sum -c SHA256SUMS --ignore-missing` or `gh attestation verify <file> --repo 0xSatbeer/TableX`.
 
 ## License
 

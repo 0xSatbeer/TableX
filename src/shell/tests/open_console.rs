@@ -295,7 +295,7 @@ fn ctrl_shift_n_opens_another_console_on_the_same_schema_each_time(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     let (window, shell) = open_plain(cx);
-    cx.update(|cx| crate::keymap::bind_defaults(cx, |action, _| action == "queryx::NewConsole"));
+    cx.update(|cx| crate::keymap::bind_defaults(cx, |action, _| action == "tablex::NewConsole"));
     let mut cx = gpui_kit::VisualTestContext::from_window(window, cx);
     open_console(&mut cx, &shell, "1/app_db/public");
     let before = console_count(&shell, &cx);

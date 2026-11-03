@@ -64,29 +64,29 @@ macro_rules! own {
 const OWN: &[(&str, &[u8])] = &[
     own!("brand/postgresql.svg"),
     own!("brand/sqlite.svg"),
-    own!("queryx/table.svg"),
-    own!("queryx/tables.svg"),
-    own!("queryx/view.svg"),
-    own!("queryx/views.svg"),
-    own!("queryx/sequence.svg"),
-    own!("queryx/sequences.svg"),
-    own!("queryx/function.svg"),
-    own!("queryx/functions.svg"),
-    own!("queryx/matview.svg"),
-    own!("queryx/matviews.svg"),
-    own!("queryx/procedure.svg"),
-    own!("queryx/procedures.svg"),
-    own!("queryx/type.svg"),
-    own!("queryx/types.svg"),
-    own!("queryx/index.svg"),
-    own!("queryx/indexs.svg"),
-    own!("queryx/trigger.svg"),
-    own!("queryx/triggers.svg"),
+    own!("tablex/table.svg"),
+    own!("tablex/tables.svg"),
+    own!("tablex/view.svg"),
+    own!("tablex/views.svg"),
+    own!("tablex/sequence.svg"),
+    own!("tablex/sequences.svg"),
+    own!("tablex/function.svg"),
+    own!("tablex/functions.svg"),
+    own!("tablex/matview.svg"),
+    own!("tablex/matviews.svg"),
+    own!("tablex/procedure.svg"),
+    own!("tablex/procedures.svg"),
+    own!("tablex/type.svg"),
+    own!("tablex/types.svg"),
+    own!("tablex/index.svg"),
+    own!("tablex/indexs.svg"),
+    own!("tablex/trigger.svg"),
+    own!("tablex/triggers.svg"),
 ];
 
 /// Icon for a database object kind ("table", "view", ...); `group` gives the stacked variant.
 pub fn object_icon(kind: &str, group: bool) -> SharedString {
-    format!("icons/queryx/{kind}{}.svg", if group { "s" } else { "" }).into()
+    format!("icons/tablex/{kind}{}.svg", if group { "s" } else { "" }).into()
 }
 
 pub struct Assets;

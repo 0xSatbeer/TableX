@@ -6,7 +6,7 @@ fn a_rebound_close_tab_moves_to_its_new_keys(cx: &mut gpui_kit::TestAppContext) 
     cx.update(|cx| {
         gpui_kit::init(cx);
         cx.set_reduce_motion(true);
-        let overrides = [("queryx::CloseTab".to_string(), "ctrl-q".to_string())].into();
+        let overrides = [("tablex::CloseTab".to_string(), "ctrl-q".to_string())].into();
         assert!(crate::keymap::bind(cx, &overrides).is_empty());
     });
     let (window, shell) = cx.update(|cx| {

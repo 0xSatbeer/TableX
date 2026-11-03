@@ -49,7 +49,7 @@ fn connect_logs_in_with_the_password_and_reports_a_wrong_one() {
         (role.name.as_str(), None, Err("")),
         (role.name.as_str(), Some(""), Err("")),
         // compose.yaml's init script makes the server trust this role.
-        ("queryx_trust", None, Ok(())),
+        ("tablex_trust", None, Ok(())),
     ];
     for (user, password, want) in cases {
         let got = block_on(Postgres::default().connect(&as_user(&pg, user, password))).map(drop);

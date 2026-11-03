@@ -5,10 +5,10 @@
 # Usage: scripts/shot.sh OUT.png [SECONDS_BEFORE_SHOT] [ENV=VALUE ...]
 set -euo pipefail
 # one capture at a time: parallel runs would photograph each other's windows
-exec 9>/tmp/queryx-shot.lock; flock 9
+exec 9>/tmp/tablex-shot.lock; flock 9
 # a cold debug build takes well over 4s to show its window
 out=$1; wait=${2:-15}; shift $(( $# > 1 ? 2 : 1 ))
-bin=$(mktemp /tmp/queryx-shot.XXXXXX)
+bin=$(mktemp /tmp/tablex-shot.XXXXXX)
 install -m 755 target/debug/tablex "$bin"   # a copy, so a concurrent cargo build can relink freely (mktemp makes it 600)
 env "$@" "$bin" >/dev/null &   # keep stderr: a launch failure must be visible
 app=$!

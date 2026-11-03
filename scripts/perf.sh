@@ -11,7 +11,7 @@ cargo build --release
 
 podman-compose up -d >/dev/null
 container=$(podman-compose ps -q 2>/dev/null | head -n 1)
-psql() { podman exec -i "$container" psql -v ON_ERROR_STOP=1 -qAt -U queryx queryx "$@"; }
+psql() { podman exec -i "$container" psql -v ON_ERROR_STOP=1 -qAt -U tablex tablex "$@"; }
 tries=0
 until psql -c 'select 1' >/dev/null 2>&1; do
     tries=$((tries + 1))
@@ -53,8 +53,8 @@ fi
 export XDG_CONFIG_HOME="$PWD/$perf/config"
 rm -rf "$XDG_CONFIG_HOME"
 mkdir -p "$XDG_CONFIG_HOME"
-export QUERYX_BENCH_PG="${QUERYX_BENCH_PG:-postgres://queryx:queryx@localhost:55432/queryx}"
-export QUERYX_BENCH_SQLITE="$PWD/$db"
+export TABLEX_BENCH_PG="${TABLEX_BENCH_PG:-postgres://tablex:tablex@localhost:55432/tablex}"
+export TABLEX_BENCH_SQLITE="$PWD/$db"
 
 # Runs scenario $1 and prints its JSON report line; a failed run says so on stderr.
 scenario() {

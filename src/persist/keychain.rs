@@ -1,4 +1,4 @@
-//! Saved passwords in the OS keychain (C5): service `queryx`, account `connection-<id>`.
+//! Saved passwords in the OS keychain (C5): service `tablex`, account `connection-<id>`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,7 +20,7 @@ pub struct OsKeychain;
 
 impl OsKeychain {
     fn entry(id: ConnectionId) -> Result<keyring::Entry, String> {
-        keyring::Entry::new("queryx", &format!("connection-{}", id.0)).map_err(|e| e.to_string())
+        keyring::Entry::new("tablex", &format!("connection-{}", id.0)).map_err(|e| e.to_string())
     }
 }
 

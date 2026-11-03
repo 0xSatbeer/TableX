@@ -19,7 +19,7 @@ fn names(sheet: &Sheet) -> Vec<(&'static str, &'static str, String)> {
 
 #[test]
 fn a_user_override_shows_its_keystroke_not_the_default() {
-    let overrides = [("queryx::CloseTab".to_string(), "ctrl-alt-x".to_string())].into();
+    let overrides = [("tablex::CloseTab".to_string(), "ctrl-alt-x".to_string())].into();
     let sheet = Sheet::new(rows(&effective(&overrides), true), String::new());
     let close = names(&sheet)
         .into_iter()

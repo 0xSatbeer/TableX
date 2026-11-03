@@ -14,7 +14,7 @@ impl Shell {
         let (workspace, driver): (_, std::sync::Arc<dyn db::Driver>) = match mode {
             Mode::Bench(Scenario::BigResult) => {
                 let env = |k| std::env::var(k).ok();
-                match crate::bench::workspace(env("QUERYX_BENCH_PG"), env("QUERYX_BENCH_SQLITE")) {
+                match crate::bench::workspace(env("TABLEX_BENCH_PG"), env("TABLEX_BENCH_SQLITE")) {
                     Ok(workspace) => (workspace, std::sync::Arc::new(db::Live::default())),
                     Err(e) => {
                         eprintln!("{e}");

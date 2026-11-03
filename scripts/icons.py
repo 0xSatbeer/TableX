@@ -2,12 +2,12 @@
 """Generate TableX object icons: one item glyph per kind, plus a "stack" variant for its group.
 
 Run from the repo root: python3 scripts/icons.py
-Writes assets/icons/queryx/<kind>.svg and <kind>s.svg. GPUI renders SVGs as single-color
+Writes assets/icons/tablex/<kind>.svg and <kind>s.svg. GPUI renders SVGs as single-color
 masks, so only shape and alpha matter; color is applied at render time.
 """
 from pathlib import Path
 
-OUT = Path("assets/icons/queryx")
+OUT = Path("assets/icons/tablex")
 
 # A box with a solid header bar: the "this holds rows" family (table, view).
 HEADER = '<path d="M3 9V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v2Z" fill="#000"/>'

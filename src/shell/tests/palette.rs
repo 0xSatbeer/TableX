@@ -28,7 +28,7 @@ fn typing_cls_tab_then_enter_closes_the_tab(cx: &mut gpui_kit::TestAppContext) {
     let recent = cx.update(|_, cx| crate::ui::palette::Commands::new(false, cx).action(0));
     assert_eq!(
         recent,
-        Some("queryx::CloseTab"),
+        Some("tablex::CloseTab"),
         "most recent is listed first"
     );
 }

@@ -34,20 +34,20 @@ fn an_override_replaces_every_default_of_its_action_in_the_same_context() {
 
 #[test]
 fn an_empty_override_unbinds() {
-    let bindings = effective(&overrides(&[("queryx::CloseTab", "")]));
-    assert!(keys_of(&bindings, "queryx::CloseTab").is_empty());
+    let bindings = effective(&overrides(&[("tablex::CloseTab", "")]));
+    assert!(keys_of(&bindings, "tablex::CloseTab").is_empty());
     assert_eq!(bindings.len(), DEFAULTS.len() - 1);
 }
 
 #[test]
 fn reads_the_bindings_table() {
     let parsed = from_toml(
-        "version = 1\n[bindings]\n\"queryx::CloseTab\" = \"ctrl-q\"\n\"grid::CopyCsv\" = \"\"\n",
+        "version = 1\n[bindings]\n\"tablex::CloseTab\" = \"ctrl-q\"\n\"grid::CopyCsv\" = \"\"\n",
     )
     .unwrap();
     assert_eq!(
         parsed,
-        overrides(&[("queryx::CloseTab", "ctrl-q"), ("grid::CopyCsv", "")])
+        overrides(&[("tablex::CloseTab", "ctrl-q"), ("grid::CopyCsv", "")])
     );
 }
 
@@ -59,16 +59,16 @@ fn unknown_actions_and_bad_keystrokes_are_skipped_and_named(cx: &mut gpui_kit::T
             &overrides(&[
                 ("nope::Missing", "ctrl-x"),
                 ("nope::Gone", ""),
-                ("queryx::ReopenTab", "ctrl-foo-x"),
-                ("queryx::CloseTab", "ctrl-q"),
+                ("tablex::ReopenTab", "ctrl-foo-x"),
+                ("tablex::CloseTab", "ctrl-q"),
             ]),
         )
     });
     assert_eq!(skipped.len(), 3, "{skipped:?}");
     assert!(skipped.iter().any(|s| s.contains("nope::Missing")));
     assert!(skipped.iter().any(|s| s.contains("nope::Gone")));
-    assert!(skipped.iter().any(|s| s.contains("queryx::ReopenTab")));
+    assert!(skipped.iter().any(|s| s.contains("tablex::ReopenTab")));
     let bound = cx.update(|cx| cx.global::<Bindings>().0.clone());
-    assert_eq!(keys_of(&bound, "queryx::CloseTab"), ["ctrl-q"]);
-    assert_eq!(keys_of(&bound, "queryx::ReopenTab"), ["ctrl-shift-t"]);
+    assert_eq!(keys_of(&bound, "tablex::CloseTab"), ["ctrl-q"]);
+    assert_eq!(keys_of(&bound, "tablex::ReopenTab"), ["ctrl-shift-t"]);
 }

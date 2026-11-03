@@ -116,7 +116,7 @@ fn open(params: &ConnectionParams) -> Result<SqliteSession, String> {
     let interrupt = conn.get_interrupt_handle();
     let (jobs, rx) = mpsc::channel();
     std::thread::Builder::new()
-        .name("queryx-sqlite".into())
+        .name("tablex-sqlite".into())
         .spawn(move || worker::work(conn, rx))
         .map_err(|e| e.to_string())?;
     Ok(SqliteSession {

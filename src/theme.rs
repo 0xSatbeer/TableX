@@ -12,8 +12,8 @@ pub use colors::*;
 pub use elements::*;
 pub use user_themes::*;
 
-const DARK: &str = include_str!("../assets/themes/queryx-dark.json");
-const LIGHT: &str = include_str!("../assets/themes/queryx-light.json");
+const DARK: &str = include_str!("../assets/themes/tablex-dark.json");
+const LIGHT: &str = include_str!("../assets/themes/tablex-light.json");
 const DARCULA: &str = include_str!("../assets/themes/darcula.json");
 /// Names of the themes in DARK, LIGHT and DARCULA; user themes may not reuse them.
 const BUILT_IN: [&str; 3] = ["TableX Dark", "TableX Light", "Darcula"];

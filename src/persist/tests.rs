@@ -5,7 +5,7 @@ use crate::model::{
 };
 
 fn test_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("queryx-persist-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("tablex-persist-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -180,11 +180,11 @@ fn saving_unchanged_workspaces_writes_nothing() {
 fn config_dir_follows_xdg_then_home() {
     // (XDG_CONFIG_HOME, HOME, expected dir)
     let cases: [(Option<&str>, Option<&str>, Option<&str>); 7] = [
-        (Some("/x"), Some("/h"), Some("/x/queryx")),
-        (None, Some("/h"), Some("/h/.config/queryx")),
-        (Some(""), Some("/h"), Some("/h/.config/queryx")), // empty counts as unset (XDG spec)
-        (Some("rel"), Some("/h"), Some("/h/.config/queryx")), // relative is ignored (XDG spec)
-        (Some("/x"), None, Some("/x/queryx")),
+        (Some("/x"), Some("/h"), Some("/x/tablex")),
+        (None, Some("/h"), Some("/h/.config/tablex")),
+        (Some(""), Some("/h"), Some("/h/.config/tablex")), // empty counts as unset (XDG spec)
+        (Some("rel"), Some("/h"), Some("/h/.config/tablex")), // relative is ignored (XDG spec)
+        (Some("/x"), None, Some("/x/tablex")),
         (None, None, None),
         (None, Some(""), None),
     ];

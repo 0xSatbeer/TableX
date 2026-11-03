@@ -153,8 +153,8 @@ fn user_theme_named_like_a_built_in_is_skipped_and_reported() {
         ),
         (
             "case.json",
-            vec!["queryx dark"],
-            vec!["queryx dark"],
+            vec!["tablex dark"],
+            vec!["tablex dark"],
             vec![],
         ), // names match exactly
     ];

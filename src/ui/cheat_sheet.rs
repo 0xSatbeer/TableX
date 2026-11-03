@@ -86,7 +86,7 @@ impl Sheet {
             .map(|b| b.0.as_slice())
             .unwrap_or_default();
         let path = crate::persist::ConfigDir::resolve(|k| std::env::var_os(k)).map_or_else(
-            || "~/.config/queryx/keymap.toml".into(),
+            || "~/.config/tablex/keymap.toml".into(),
             |c| c.root.join("keymap.toml").display().to_string(),
         );
         Self::new(rows(bound, demo), path)

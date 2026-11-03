@@ -24,7 +24,7 @@ use gpui_kit::*;
 use shell::Mode;
 
 actions!(
-    queryx,
+    tablex,
     [
         Quit,
         ToggleExplorer,
@@ -89,7 +89,7 @@ fn main() {
         .with_assets(assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            shell::apply_mock_latency(mode, std::env::var("QUERYX_MOCK_LATENCY_MS").ok());
+            shell::apply_mock_latency(mode, std::env::var("TABLEX_MOCK_LATENCY_MS").ok());
             theme::init(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             let options = WindowOptions {
@@ -100,8 +100,8 @@ fn main() {
                     cx,
                 ))),
                 window_min_size: Some(size(px(900.), px(600.))),
-                // Matches io.github._0xSatbeer.QueryX.desktop so Linux docks show the app icon.
-                app_id: Some("io.github._0xSatbeer.QueryX".into()),
+                // Matches io.github.TableX.desktop so Linux docks show the app icon.
+                app_id: Some("io.github.TableX".into()),
                 // The OS title (overview, Alt+Tab, taskbar); the bar itself shows no name, like GNOME apps.
                 titlebar: Some(TitlebarOptions {
                     title: Some("TableX".into()),
