@@ -29,7 +29,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 # Saved passwords (C5): the OS keychain only, no bundled crypto or async runtime.
 keyring = { version = "3", default-features = false, features = ["sync-secret-service", "apple-native", "windows-native"] }
 
-# Embeds assets/icons/app/queryx.ico in the Windows exe (build.rs).
+# Embeds assets/icons/app/tablex.ico in the Windows exe (build.rs).
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
@@ -41,7 +41,7 @@ gpui-kit = { version = "=0.7.0", features = ["tree-sitter-sql", "test-support"] 
 [package.metadata.bundle]
 name = "TableX"
 identifier = "dev.queryx.QueryX"
-icon = ["assets/icons/app/queryx.icns"]
+icon = ["assets/icons/app/tablex.icns"]
 
 # Debian package (cargo deb), built in CI.
 [package.metadata.deb]
@@ -54,8 +54,8 @@ assets = [
     ["target/release/tablex", "usr/bin/", "755"],
     ["assets/icons/app/io.github._0xSatbeer.QueryX.desktop", "usr/share/applications/", "644"],
     ["assets/icons/app/io.github._0xSatbeer.QueryX.metainfo.xml", "usr/share/metainfo/", "644"],
-    ["assets/icons/app/queryx.png", "usr/share/icons/hicolor/512x512/apps/io.github._0xSatbeer.QueryX.png", "644"],
-    ["assets/icons/app/queryx-64.png", "usr/share/icons/hicolor/64x64/apps/io.github._0xSatbeer.QueryX.png", "644"],
+    ["assets/icons/app/tablex.png", "usr/share/icons/hicolor/512x512/apps/io.github._0xSatbeer.QueryX.png", "644"],
+    ["assets/icons/app/tablex-64.png", "usr/share/icons/hicolor/64x64/apps/io.github._0xSatbeer.QueryX.png", "644"],
 ]
 
 [profile.release]

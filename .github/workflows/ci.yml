@@ -83,7 +83,7 @@ jobs:
           elif [ '${{ runner.os }}' = Linux ]; then
             # desktop file and icons ride along for scripts/install.sh
             tar czf "dist/tablex-$os.tar.gz" -C target/release tablex \
-              -C "$PWD/assets/icons/app" io.github._0xSatbeer.QueryX.desktop queryx.png queryx-64.png
+              -C "$PWD/assets/icons/app" io.github._0xSatbeer.QueryX.desktop tablex.png tablex-64.png
             cp scripts/install.sh dist/
           else
             tar czf "dist/tablex-$os.tar.gz" -C target/release tablex
@@ -99,7 +99,7 @@ jobs:
           curl -fsSLo linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy
           # linuxdeploy takes the icon's file name as its name, and copies metainfo only from the AppDir
-          cp assets/icons/app/queryx.png io.github._0xSatbeer.QueryX.png
+          cp assets/icons/app/tablex.png io.github._0xSatbeer.QueryX.png
           install -Dm644 assets/icons/app/io.github._0xSatbeer.QueryX.metainfo.xml AppDir/usr/share/metainfo/io.github._0xSatbeer.QueryX.metainfo.xml
           # runners have no FUSE, so linuxdeploy (itself an AppImage) must extract to run
           APPIMAGE_EXTRACT_AND_RUN=1 LINUXDEPLOY_OUTPUT_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2) \

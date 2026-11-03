@@ -21,8 +21,8 @@ tar xzf "$tmp/tablex-linux-x64.tar.gz" -C "$tmp"
 
 install -Dm755 "$tmp/tablex" "$PREFIX/bin/tablex"
 rm -f "$PREFIX/bin/queryx"   # pre-rename binary; the desktop entry now points at tablex
-install -Dm644 "$tmp/queryx.png" "$PREFIX/share/icons/hicolor/512x512/apps/$ID.png"
-install -Dm644 "$tmp/queryx-64.png" "$PREFIX/share/icons/hicolor/64x64/apps/$ID.png"
+install -Dm644 "$tmp/tablex.png" "$PREFIX/share/icons/hicolor/512x512/apps/$ID.png"
+install -Dm644 "$tmp/tablex-64.png" "$PREFIX/share/icons/hicolor/64x64/apps/$ID.png"
 # absolute Exec: ~/.local/bin is often missing from the desktop session's PATH
 sed "s|^Exec=tablex|Exec=$PREFIX/bin/tablex|" "$tmp/$ID.desktop" > "$tmp/out.desktop"
 install -Dm644 "$tmp/out.desktop" "$PREFIX/share/applications/$ID.desktop"
