@@ -6,6 +6,8 @@ All notable changes to TableX are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-03
+
 ### Changed
 - The app id is now `io.github.TableX` and the repository moved to [0xSatbeer/TableX](https://github.com/0xSatbeer/TableX); old links redirect. `install.sh` removes the old QueryX desktop entry and icons.
 - Everything named `queryx` is now `tablex`: the config directory (`~/.config/tablex`), the keychain service, keymap actions (`tablex::CloseTab`) and the `TABLEX_*` environment variables. Nothing is carried over: re-add connections and passwords, or move `~/.config/queryx` to `~/.config/tablex` and rename `queryx::` to `tablex::` in `keymap.toml`.
@@ -50,7 +52,8 @@ All notable changes to TableX are listed here. The format follows
 
 First public release.
 
-[Unreleased]: https://github.com/0xSatbeer/TableX/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/0xSatbeer/TableX/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/0xSatbeer/TableX/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/0xSatbeer/TableX/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/0xSatbeer/TableX/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/0xSatbeer/TableX/compare/v0.1.0...v0.1.1
