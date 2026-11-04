@@ -133,7 +133,7 @@ impl ConnectionDialog {
     }
 
     /// Starts Test connection on the current fields, through the driver.
-    pub(super) fn run_test(&mut self, cx: &mut Context<Self>) {
+    pub fn run_test(&mut self, cx: &mut Context<Self>) {
         let Ok(params) = self.form(cx).params() else {
             return;
         };

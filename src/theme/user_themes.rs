@@ -99,8 +99,8 @@ impl ThemeChoice {
 
     pub fn label(&self) -> &str {
         match self {
-            Self::Dark => "Dark",
-            Self::Light => "Light",
+            Self::Dark => "Midnight",
+            Self::Light => "Daylight",
             Self::System => "System",
             Self::Darcula => "Darcula",
             Self::User(name) => name,

@@ -17,9 +17,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # main pushed together with a release tag: the tag run tests the same commit, so main skips
+  tagged:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      tagged: ${{ steps.t.outputs.tagged }}
+    steps:
+      # shortcut: misses a tag pushed after this runs, push both at once (git push --atomic origin main vX)
+      - id: t
+        run: |
+          git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY" 'v*' | grep -q "^$GITHUB_SHA" \
+            && echo tagged=true >> "$GITHUB_OUTPUT" || true
+
   linux:
-    # a tag points at a commit main already tested; rerunning it only duplicates work
-    if: github.ref_type != 'tag'
+    needs: tagged
+    # tagged is skipped off main; !cancelled() keeps that skip from skipping this job too
+    if: ${{ !cancelled() && needs.tagged.outputs.tagged != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -117,7 +131,7 @@ jobs:
           path: dist/*
 
   release:
-    needs: build
+    needs: [linux, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -14,6 +14,7 @@ mod start;
 mod tab;
 mod tab_bar;
 mod titlebar;
+mod welcome;
 mod workspaces;
 
 use layout::LayoutState;
@@ -128,6 +129,8 @@ pub(crate) struct Shell {
     cheat_sheet: Option<crate::ui::cheat_sheet::Open>,
     /// Quick open (Ctrl+P), while open.
     quick_open: Option<crate::ui::quick_open::Open>,
+    /// The welcome tour, while open: first run, or `Welcome` from the palette.
+    welcome: Option<welcome::Welcome>,
     _appearance: Subscription,
 }
 
@@ -156,16 +159,35 @@ pub(crate) fn bind_panel_keys(cx: &mut App) {
 /// mode loads and saves the workspaces and settings in `config` (the `ConfigDir` root), if any.
 pub(crate) fn open_shell(
     mode: Mode,
-    options: WindowOptions,
+    mut options: WindowOptions,
     user_themes: Option<std::path::PathBuf>,
     config: Option<std::path::PathBuf>,
     cx: &mut App,
 ) -> Result<(AnyWindowHandle, Entity<Shell>)> {
+    let settings = match (mode, &config) {
+        (Mode::Normal, Some(root)) => Some(crate::persist::load_config(root)),
+        _ => None,
+    };
+    // While the tour is still to run, the window opens at its size and grows when it closes.
+    // Only a caller that picked bounds (the app; not tests) gets this.
+    let tour_window =
+        options.window_bounds.is_some() && settings.as_ref().is_some_and(|(c, _)| !c.onboarded);
+    if tour_window {
+        options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            welcome::TOUR_WINDOW,
+            cx,
+        )));
+        options.window_min_size = Some(welcome::TOUR_WINDOW);
+    }
     gpui_kit::open_window(options, cx, |window, cx| {
         cx.new(|cx| {
             let mut shell = Shell::new(mode, window, cx);
-            if let (Mode::Normal, Some(root)) = (mode, config) {
-                shell.persist_config(&root, window, cx);
+            if let (Some(settings), Some(root)) = (settings, config) {
+                shell.persist_config(&root, settings, window, cx);
+                if let Some(welcome) = shell.welcome.as_mut() {
+                    welcome.grow_window = tour_window;
+                }
                 shell.persist_workspaces(&root, window, cx);
                 shell.persist_session(&root, window, cx);
                 // Logs live only in memory; drop the file older builds kept.

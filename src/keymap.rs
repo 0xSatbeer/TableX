@@ -67,6 +67,7 @@ pub const NAMES: &[(&str, &str, &str)] = &[
     ("tablex::CheatSheet", "Keyboard shortcuts", "General"),
     ("tablex::QuickOpen", "Go to object", "General"),
     ("tablex::OpenSettings", "Settings", "General"),
+    ("tablex::Welcome", "Welcome tour", "General"),
     ("tablex::Quit", "Quit", "General"),
     ("tablex::CycleTheme", "Cycle theme", "Appearance"),
     ("theme::ZoomIn", "Zoom in", "Appearance"),

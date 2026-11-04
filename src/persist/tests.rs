@@ -222,7 +222,15 @@ fn the_mem_keychain_keeps_one_password_per_connection_account() {
 fn each_theme_choice_a_scale_and_a_font_size_round_trip_through_config_toml() {
     use crate::theme::ThemeChoice;
     let dir = test_dir("config");
-    assert_eq!(load_config(&dir), (Config::default(), None), "absent file");
+    let fresh = Config {
+        onboarded: false,
+        ..Config::default()
+    };
+    assert_eq!(
+        load_config(&dir),
+        (fresh, None),
+        "absent file: the tour runs"
+    );
     for theme in [
         ThemeChoice::Dark,
         ThemeChoice::Light,
@@ -234,13 +242,14 @@ fn each_theme_choice_a_scale_and_a_font_size_round_trip_through_config_toml() {
             theme,
             ui_scale: 120,
             console_font_px: 14.5,
+            onboarded: false,
         };
         save_config(&dir, &config).unwrap();
         assert_eq!(load_config(&dir), (config, None));
     }
     assert_eq!(
         std::fs::read_to_string(dir.join("config.toml")).unwrap(),
-        "version = 1\ntheme = \"user:Nord\"\nui_scale = 120\nconsole_font_px = 14.5\n"
+        "version = 1\ntheme = \"user:Nord\"\nui_scale = 120\nconsole_font_px = 14.5\nonboarded = false\n"
     );
 }
 

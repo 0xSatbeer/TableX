@@ -65,7 +65,8 @@ actions!(
         DropObject,
         CommandPalette,
         CheatSheet,
-        QuickOpen
+        QuickOpen,
+        Welcome
     ]
 );
 

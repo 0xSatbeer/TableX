@@ -190,7 +190,7 @@ fn the_saved_settings_apply_at_start_and_a_theme_change_writes_config_toml(
     vcx.run_until_parked();
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "version = 1\ntheme = \"system\"\nui_scale = 110\nconsole_font_px = 15.0\n"
+        "version = 1\ntheme = \"system\"\nui_scale = 110\nconsole_font_px = 15.0\nonboarded = true\n"
     );
     crate::theme::set_ui_scale(crate::theme::DEFAULT_UI_SCALE, &mut vcx.app.borrow_mut());
 }
@@ -225,7 +225,8 @@ fn the_settings_dialog_opens_and_its_setters_save(cx: &mut gpui_kit::TestAppCont
     vcx.run_until_parked();
     assert_eq!(
         std::fs::read_to_string(dir.join("config.toml")).unwrap(),
-        "version = 1\ntheme = \"light\"\nui_scale = 120\nconsole_font_px = 15.0\n"
+        // No config.toml at start: the welcome tour is still open, so it stays to run.
+        "version = 1\ntheme = \"light\"\nui_scale = 120\nconsole_font_px = 15.0\nonboarded = false\n"
     );
     crate::theme::set_ui_scale(crate::theme::DEFAULT_UI_SCALE, &mut vcx.app.borrow_mut());
 }

@@ -55,6 +55,7 @@ pub struct ConnectionDialog {
     driver: Arc<dyn Driver>,
     /// The connection being edited; `None` adds a new one.
     editing: Option<ConnectionId>,
+    onboarding: bool,
     color: u8,
     is_production: bool,
     save_password: bool,
@@ -154,6 +155,23 @@ impl ConnectionDialog {
         view
     }
 
+    /// The Add form alone, name field focused, for a host that draws its own buttons (the
+    /// welcome tour's last step).
+    pub fn embedded(
+        workspace: Entity<Workspace>,
+        driver: Arc<dyn Driver>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        let view = cx.new(|cx| Self::new(workspace, driver, None, window, cx));
+        view.update(cx, |form, _| form.onboarding = true);
+        view.read(cx)
+            .name
+            .clone()
+            .update(cx, |name, cx| name.focus(window, cx));
+        view
+    }
+
     fn new(
         workspace: Entity<Workspace>,
         driver: Arc<dyn Driver>,
@@ -229,6 +247,7 @@ impl ConnectionDialog {
             workspace,
             driver,
             editing,
+            onboarding: false,
             color: form.color,
             is_production: form.is_production,
             save_password: form.save_password,

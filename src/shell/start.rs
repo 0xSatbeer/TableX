@@ -287,6 +287,7 @@ impl Shell {
             palette: None,
             cheat_sheet: None,
             quick_open: None,
+            welcome: None,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| {
                 this.theme.apply(&this.user_themes, window, cx)
             }),

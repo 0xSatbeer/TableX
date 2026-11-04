@@ -238,6 +238,13 @@ impl Render for Shell {
                         ),
                 )
             })
+            .when_some(self.welcome.as_ref(), |d, welcome| {
+                // Modal: focus stays inside so its keys work and nothing underneath takes them.
+                if !welcome.focus.contains_focused(window, cx) {
+                    window.focus(&welcome.focus, cx);
+                }
+                d.child(self.welcome_overlay(cx))
+            })
     }
 }
 

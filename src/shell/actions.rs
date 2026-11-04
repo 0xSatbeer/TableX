@@ -11,7 +11,7 @@ use crate::{
     CommandPalette, CopyTabName, CycleTheme, DeleteConnection, EditConnection, FocusExplorer,
     MaximizeEditor, MaximizePanel, NewConsole, NextTab, OpenSettings, PrevTab, QuickOpen,
     ReopenTab, RestorePanel, RevealTab, ToggleBottomPanel, ToggleExplorer, ToggleGallery,
-    TogglePinTab,
+    TogglePinTab, Welcome,
 };
 
 use super::{Mode, Shell};
@@ -151,6 +151,9 @@ pub(super) fn on_actions(root: Div, cx: &Context<Shell>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &QuickOpen, window, cx| {
         this.open_quick_open(window, cx);
+    }))
+    .on_action(cx.listener(|this, _: &Welcome, _, cx| {
+        this.open_welcome(cx);
     }))
 }
 

@@ -1,4 +1,4 @@
-//! `config.toml` (C7): theme, UI scale and console font size.
+//! `config.toml` (C7): theme, UI scale, console font size and whether the welcome tour ran.
 
 use std::path::Path;
 
@@ -14,6 +14,8 @@ pub struct Config {
     pub ui_scale: u16,
     /// The console's mono size after zoom, before UI scale.
     pub console_font_px: f32,
+    /// The welcome tour ran (finished or skipped); false only on a fresh install.
+    pub onboarded: bool,
 }
 
 impl Default for Config {
@@ -22,6 +24,7 @@ impl Default for Config {
             theme: ThemeChoice::default(),
             ui_scale: theme::DEFAULT_UI_SCALE,
             console_font_px: theme::MONO.into(),
+            onboarded: true,
         }
     }
 }
@@ -33,15 +36,22 @@ struct FileToml {
     theme: Option<String>,
     ui_scale: Option<u16>,
     console_font_px: Option<f32>,
+    onboarded: Option<bool>,
 }
 
 const USER: &str = "user:";
 
-/// Loads `<root>/config.toml`; defaults when absent. A corrupt file is moved to `.bak` and the
-/// notice says so.
+/// Loads `<root>/config.toml`; defaults when absent, with the welcome tour still to run. A corrupt
+/// file is moved to `.bak` and the notice says so.
 pub fn load_config(root: &Path) -> (Config, Option<String>) {
     match super::read_or_backup(&root.join("config.toml"), config_from_toml) {
-        Ok(config) => (config.unwrap_or_default(), None),
+        Ok(config) => (
+            config.unwrap_or(Config {
+                onboarded: false,
+                ..Config::default()
+            }),
+            None,
+        ),
         Err(notice) => (Config::default(), Some(notice)),
     }
 }
@@ -60,6 +70,7 @@ fn config_to_toml(config: &Config) -> String {
         theme: Some(theme),
         ui_scale: Some(config.ui_scale),
         console_font_px: Some(config.console_font_px),
+        onboarded: Some(config.onboarded),
     };
     toml::to_string(&file).expect("config serializes")
 }
@@ -88,5 +99,7 @@ fn config_from_toml(text: &str) -> Result<Config, toml::de::Error> {
             .console_font_px
             .filter(|px| (9.0..=24.0).contains(px))
             .unwrap_or(default.console_font_px),
+        // A file from before the tour existed belongs to someone who already uses TableX.
+        onboarded: file.onboarded.unwrap_or(default.onboarded),
     })
 }

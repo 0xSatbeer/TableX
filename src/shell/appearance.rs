@@ -34,20 +34,24 @@ impl Shell {
         cx.notify();
     }
 
-    /// Applies `<root>/config.toml` and saves every later theme, UI scale or console zoom change there.
+    /// Applies `config.toml` as `load_config` read it from `root`, and saves every later theme, UI
+    /// scale or console zoom change there.
     pub(super) fn persist_config(
         &mut self,
         root: &std::path::Path,
+        (config, notice): (persist::Config, Option<String>),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (config, notice) = persist::load_config(root);
         // A user theme that doesn't exist falls back to Dark once the theme dir is read.
         self.theme = config.theme;
         self.theme.apply(&self.user_themes, window, cx);
         theme::set_ui_scale(config.ui_scale, cx);
         self.console_mono = px(config.console_font_px);
         self.config_root = Some(root.to_path_buf());
+        if !config.onboarded {
+            self.open_welcome(cx);
+        }
         if let Some(notice) = notice {
             // Deferred: this runs while the window is being built, and notifications need its Root.
             cx.defer_in(window, move |_, window, cx| {
@@ -65,6 +69,8 @@ impl Shell {
             theme: self.theme.clone(),
             ui_scale: theme::ui_scale(),
             console_font_px: self.console_mono.into(),
+            // A theme picked mid-tour is saved; the tour still runs next start until it's closed.
+            onboarded: self.welcome.is_none(),
         };
         if let Err(e) = persist::save_config(root, &config) {
             let message = format!("Couldn't save {}: {e}", root.join("config.toml").display());

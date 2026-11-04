@@ -156,23 +156,29 @@ impl Render for ConnectionDialog {
                 .into_any_element(),
             ],
         };
+        let kind = field("kind", "Type", kinds, &errors, cx);
+        let name = field("name", "Name", Input::new(&self.name).small(), &errors, cx);
+        let identity = if self.onboarding {
+            h_flex()
+                .items_start()
+                .gap(theme::space_8())
+                .child(kind.flex_none().w(theme::space_24() * 7.))
+                .child(name)
+        } else {
+            v_flex().gap(theme::space_8()).child(kind).child(name)
+        };
         v_flex()
-            .gap(theme::space_12())
-            .child(field("kind", "Type", kinds, &errors, cx))
-            .child(field(
-                "name",
-                "Name",
-                Input::new(&self.name).small(),
-                &errors,
-                cx,
-            ))
-            .child(field(
-                "color",
-                "Color",
-                h_flex().gap(theme::space_8()).children(swatches),
-                &errors,
-                cx,
-            ))
+            .gap(theme::space_8())
+            .child(identity)
+            .when(!self.onboarding, |d| {
+                d.child(field(
+                    "color",
+                    "Color",
+                    h_flex().gap(theme::space_8()).children(swatches),
+                    &errors,
+                    cx,
+                ))
+            })
             .child(
                 div()
                     .self_start()
