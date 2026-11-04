@@ -63,7 +63,7 @@ pub fn save_config(root: &Path, config: &Config) -> std::io::Result<()> {
 fn config_to_toml(config: &Config) -> String {
     let theme = match &config.theme {
         ThemeChoice::User(name) => format!("{USER}{name}"),
-        builtin => builtin.label().to_lowercase(),
+        builtin => builtin.key().to_string(),
     };
     let file = FileToml {
         version: Some(1),
@@ -84,7 +84,7 @@ fn config_from_toml(text: &str) -> Result<Config, toml::de::Error> {
         }
         Some(name) => ThemeChoice::ALL
             .into_iter()
-            .find(|t| t.label().eq_ignore_ascii_case(name))
+            .find(|t| t.key().eq_ignore_ascii_case(name))
             .unwrap_or(default.theme),
         None => default.theme,
     };

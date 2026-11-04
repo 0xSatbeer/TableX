@@ -97,6 +97,17 @@ impl ThemeChoice {
         }
     }
 
+    /// Stable name saved in config.toml; labels may change, this must not.
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::System => "system",
+            Self::Darcula => "darcula",
+            Self::User(name) => name,
+        }
+    }
+
     pub fn label(&self) -> &str {
         match self {
             Self::Dark => "Midnight",

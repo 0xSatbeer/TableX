@@ -29,14 +29,19 @@ impl Render for Shell {
                 cx.notify();
             }))
             .child(self.tab_bar(cx));
+        let has_connections = !self.workspace.read(cx).connections.is_empty();
         // Every way out of maximize refocuses the content: it is unmounted while maximized, so stay pending.
         if self.layout.panel_maximized {
             self.focus_content = true;
         } else if std::mem::take(&mut self.focus_content)
-            // With no tab open the tree takes focus, so the window's keys still have a target.
-            && let Some(handle) = self
-                .content_focus(cx)
-                .or_else(|| Some(self.explorer.focus_handle(cx)))
+            // With no tab open the tree takes focus, or the root while the tree is hidden, so keys keep a target.
+            && let Some(handle) = self.content_focus(cx).or_else(|| {
+                Some(if has_connections {
+                    self.explorer.focus_handle(cx)
+                } else {
+                    self.focus_handle.clone()
+                })
+            })
         {
             window.focus(&handle, cx);
         }
@@ -61,7 +66,6 @@ impl Render for Shell {
         }
         let theme = cx.theme();
         let viewer_bg = theme.table;
-        let has_connections = !self.workspace.read(cx).connections.is_empty();
         let content = match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Grid(_, Some(s))) => s.clone().into_any_element(),
             Some(TabContent::Grid(grid, None)) => grid.clone().into_any_element(),
@@ -145,10 +149,12 @@ impl Render for Shell {
         v_flex()
             .relative()
             .size_full()
-            // Only while maximized: a tracked root focuses itself on every click on plain chrome.
-            .when(self.layout.panel_maximized, |d| {
+            // Only while maximized or the tree is hidden: a tracked root focuses itself on every click on plain chrome.
+            .when(self.layout.panel_maximized || !has_connections, |d| {
                 d.track_focus(&self.focus_handle)
-                    .key_context(PANEL_MAXIMIZED_CONTEXT)
+            })
+            .when(self.layout.panel_maximized, |d| {
+                d.key_context(PANEL_MAXIMIZED_CONTEXT)
             })
             .bg(theme.background)
             .text_size(theme::ui())
