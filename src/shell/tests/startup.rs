@@ -93,8 +93,8 @@ fn a_normal_start_shows_no_connections_one_empty_console_and_empty_logs(
         "no connections"
     );
     assert!(
-        cx.debug_bounds("explorer-empty").is_some(),
-        "the explorer shows No connections yet"
+        cx.debug_bounds("explorer-empty").is_none(),
+        "the empty workspace hides the explorer"
     );
     let tabs = shell.read_with(&cx, |this, _| {
         this.tabs

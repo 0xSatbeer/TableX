@@ -1,4 +1,9 @@
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::{
+    ActiveTheme as _, Icon,
+    button::{Button, ButtonVariants as _},
+    h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -56,6 +61,7 @@ impl Render for Shell {
         }
         let theme = cx.theme();
         let viewer_bg = theme.table;
+        let has_connections = !self.workspace.read(cx).connections.is_empty();
         let content = match self.tabs.active().map(|t| &t.content) {
             Some(TabContent::Grid(_, Some(s))) => s.clone().into_any_element(),
             Some(TabContent::Grid(grid, None)) => grid.clone().into_any_element(),
@@ -76,6 +82,54 @@ impl Render for Shell {
                     )
                     .into_any_element()
             }
+            None if !has_connections => v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap(theme::space_12())
+                .child(
+                    div()
+                        .size(px(48.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(theme::radius_lg())
+                        .bg(theme.muted)
+                        .text_color(theme::text_secondary(theme))
+                        .child(Icon::new(Lucide::Database).size(px(24.))),
+                )
+                .child(
+                    div()
+                        .text_size(theme::ui_xl())
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.foreground)
+                        .child("Connect a database to get started"),
+                )
+                .child(
+                    div()
+                        .max_w(px(360.))
+                        .text_center()
+                        .text_size(theme::ui())
+                        .text_color(theme::text_secondary(theme))
+                        .child("Add a PostgreSQL or SQLite connection to browse tables and run SQL."),
+                )
+                .mt(theme::space_8())
+                .child(
+                    div()
+                        .debug_selector(|| "workspace-empty-add-connection".into())
+                        .child(
+                            Button::new("workspace-empty-add-connection")
+                                .primary()
+                                .icon(Lucide::Plus)
+                                .label("Add connection")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.explorer.update(cx, |explorer, cx| {
+                                        explorer.add_connection(window, cx)
+                                    });
+                                })),
+                        ),
+                )
+                .into_any_element(),
             None => v_flex()
                 .size_full()
                 .items_center()
@@ -84,12 +138,7 @@ impl Render for Shell {
                 .text_size(theme::ui_sm())
                 .text_color(theme::text_secondary(theme))
                 .child(div().text_size(theme::ui()).text_color(theme.foreground).child("Nothing open."))
-                // With no connections there is no table to pick yet: point at the first step instead.
-                .child(if self.workspace.read(cx).connections.is_empty() {
-                    "Add a connection in the explorer to get started"
-                } else {
-                    "Pick a table in the explorer (Ctrl+Alt+F) · Ctrl+Shift+T brings the last tab back"
-                })
+                .child("Pick a table in the explorer (Ctrl+Alt+F) · Ctrl+Shift+T brings the last tab back")
                 .into_any_element(),
         };
 
@@ -121,7 +170,9 @@ impl Render for Shell {
                     let viewport = window.viewport_size();
                     let explorer_w = self.layout.explorer.shown(viewport.width);
                     let bottom_h = self.layout.bottom.shown(viewport.height);
-                    let maximized = self.layout.panel_maximized;
+                    let explorer_visible = has_connections && self.layout.explorer_visible;
+                    let bottom_visible = has_connections && self.layout.bottom_visible;
+                    let maximized = has_connections && self.layout.panel_maximized;
                     let console = match self.tabs.active().map(|t| &t.content) {
                         Some(TabContent::Console(console)) => Some(console.clone()),
                         _ => None,
@@ -133,7 +184,7 @@ impl Render for Shell {
                         h_flex()
                             .relative()
                             .size_full()
-                            .when(self.layout.explorer_visible, |d| {
+                            .when(explorer_visible, |d| {
                                 // The last 1px column is the splitter line's own.
                                 let pane = div()
                                     .flex_none()
@@ -163,7 +214,7 @@ impl Render for Shell {
                                             ),
                                         )
                                     })
-                                    .when(self.layout.bottom_visible, |d| {
+                                    .when(bottom_visible, |d| {
                                         let panel = div()
                                             .w_full()
                                             .overflow_hidden()
@@ -185,7 +236,7 @@ impl Render for Shell {
                                         }
                                     }),
                             )
-                            .when(self.layout.explorer_visible, |d| {
+                            .when(explorer_visible, |d| {
                                 d.child(self.splitter(Edge::Explorer, explorer_w, cx))
                             }),
                     )
