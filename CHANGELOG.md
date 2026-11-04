@@ -6,6 +6,14 @@ All notable changes to TableX are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-04
+
+### Added
+- A welcome tour on first run: pick a theme and interface size, learn the main shortcuts and add your first connection. Run it again any time with `Welcome` from the command palette.
+
+### Changed
+- With no connections, the workspace shows an Add connection prompt and hides the explorer and bottom panel until there is something to show.
+
 ## [0.1.4] - 2026-11-03
 
 ### Changed
@@ -52,7 +60,8 @@ All notable changes to TableX are listed here. The format follows
 
 First public release.
 
-[Unreleased]: https://github.com/0xSatbeer/TableX/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/0xSatbeer/TableX/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/0xSatbeer/TableX/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/0xSatbeer/TableX/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/0xSatbeer/TableX/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/0xSatbeer/TableX/compare/v0.1.1...v0.1.2

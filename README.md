@@ -4,7 +4,7 @@ TableX is a desktop SQL client for PostgreSQL and SQLite. It's written in Rust o
 
 It uses about 30 MB of RAM and sits at 0% CPU when you're not touching it. Run it with `--demo` to try it on a built-in sample workspace without any database.
 
-TableX is early (0.1.4). Expect breaking changes, and keep backups before pointing it at anything you care about. It's developed and tested on Linux. macOS and Windows builds pass CI but get much less use.
+TableX is early (0.1.5). Expect breaking changes, and keep backups before pointing it at anything you care about. It's developed and tested on Linux. macOS and Windows builds pass CI but get much less use.
 
 ![TableX showing a 1M-row table, the explorer and the query log](.github/screenshot.png)
 
