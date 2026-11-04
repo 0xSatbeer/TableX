@@ -30,7 +30,7 @@ pub(super) struct Welcome {
 }
 
 /// The window's size when it opens for the tour on first run.
-pub(super) const TOUR_WINDOW: Size<Pixels> = size(px(860.), px(640.));
+pub(super) const TOUR_WINDOW: Size<Pixels> = size(px(900.), px(680.));
 
 const STEPS: usize = 4;
 const LAST: usize = STEPS - 1;
@@ -161,7 +161,7 @@ impl Shell {
                 )
                 .into_any_element()
         };
-        let stage_names = ["Welcome", "Theme", "Shortcuts", "Connect"];
+        let stage_names = ["Welcome", "Appearance", "Shortcuts", "Connection"];
         let progress = h_flex()
             .items_center()
             .gap(theme::space_8())
@@ -191,7 +191,7 @@ impl Shell {
                 div()
                     .text_size(theme::ui_sm())
                     .text_color(theme.muted_foreground)
-                    .child(format!("{:02} / {:02}", step + 1, STEPS)),
+                    .child(format!("{} of {}", step + 1, STEPS)),
             );
         let (next_label, next_icon) = match step {
             0 => ("Get started", Some(IconName::ArrowRight)),
@@ -268,7 +268,7 @@ impl Shell {
                                 div()
                                     .text_size(theme::ui_sm())
                                     .text_color(theme.muted_foreground)
-                                    .child("DATABASE WORKSPACE"),
+                                    .child("Database workspace"),
                             ),
                     )
                     .child(skip),
@@ -363,9 +363,9 @@ impl Shell {
                 .child(name)
         };
         let card = page(
-            "Hello",
+            "Welcome to TableX",
             "A clearer view of your data.",
-            "TableX brings your databases, tables and SQL into one focused workspace. Set up your space in a few quick steps.",
+            "Keep your databases, tables and SQL in one focused workspace. We’ll help you make it feel right, then add your first connection.",
             h_flex()
                 .gap(theme::space_8())
                 .child(engine(
@@ -469,7 +469,7 @@ impl Shell {
         });
         let theme = cx.theme();
         page(
-            "Step 1 of 3",
+            "Appearance",
             "Make it yours",
             "Choose a theme and interface size. Changes apply immediately and are easy to revisit in Settings.",
             v_flex()
@@ -691,7 +691,7 @@ fn product_preview(cx: &App) -> AnyElement {
 fn connect_step(form: Option<&Entity<ConnectionDialog>>, cx: &App) -> AnyElement {
     match form {
         Some(form) => page(
-            "Step 3 of 3",
+            "Add a connection",
             "Connect your first database",
             "PostgreSQL by host, or a SQLite file. Passwords go to your system keychain.",
             v_flex()
@@ -706,7 +706,7 @@ fn connect_step(form: Option<&Entity<ConnectionDialog>>, cx: &App) -> AnyElement
             cx,
         ),
         None => page(
-            "Step 3 of 3",
+            "Ready to work",
             "You're all set",
             "Your connections are in the explorer on the left. Pick a table to open it, or start \
              a console to run SQL.",
@@ -757,7 +757,7 @@ fn keys(cx: &App) -> AnyElement {
         )
     });
     page(
-        "Step 2 of 3",
+        "Keyboard shortcuts",
         "Move through TableX faster",
         "These follow your current keymap. Open the shortcut reference to browse the full list.",
         v_flex().w_full().max_w(px(520.)).children(rows),
