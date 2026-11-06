@@ -132,6 +132,8 @@ jobs:
 
   release:
     needs: [linux, build]
+    # the skipped tagged job upstream would skip this too under the implicit success()
+    if: ${{ !cancelled() && needs.linux.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
