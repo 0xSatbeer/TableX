@@ -7,7 +7,7 @@ fn refreshing_a_schema_after_a_table_was_created_elsewhere_shows_it_sorted(
     cx: &mut gpui_kit::TestAppContext,
 ) {
     let (mut cx, explorer, _, fake) = tables_open(cx);
-    assert_eq!(under(&explorer, &cx, "Tables"), ["t", "u"]);
+    assert_eq!(under(&explorer, &cx, "tables"), ["t", "u"]);
     refresh(&explorer, &mut cx, "public");
     assert_eq!(fake.pending(), ["objects app/public"]);
     fake.resolve(
@@ -15,7 +15,7 @@ fn refreshing_a_schema_after_a_table_was_created_elsewhere_shows_it_sorted(
         Ok(vec![table("t"), table("t2"), table("u")]),
     );
     cx.run_until_parked();
-    assert_eq!(under(&explorer, &cx, "Tables"), ["t", "t2", "u"]);
+    assert_eq!(under(&explorer, &cx, "tables"), ["t", "t2", "u"]);
 }
 
 #[gpui_kit::test]
@@ -34,7 +34,7 @@ fn refreshing_a_schema_after_a_table_was_dropped_removes_it_and_forgets_its_expa
         fake.resolve("objects app/public", Ok(vec![table("u")]));
         cx.run_until_parked();
         assert_eq!(
-            under(&explorer, &cx, "Tables"),
+            under(&explorer, &cx, "tables"),
             ["u"],
             "t open {t_open}: t gone"
         );
@@ -44,7 +44,7 @@ fn refreshing_a_schema_after_a_table_was_dropped_removes_it_and_forgets_its_expa
         fake.resolve("objects app/public", Ok(vec![table("t"), table("u")]));
         cx.run_until_parked();
         assert_eq!(
-            under(&explorer, &cx, "Tables"),
+            under(&explorer, &cx, "tables"),
             ["t", "u"],
             "t open {t_open}"
         );
@@ -109,14 +109,14 @@ fn refreshing_a_connection_re_lists_its_databases_and_re_reads_its_expanded_data
                 "analytics",
                 "app",
                 "public",
-                "Tables",
+                "tables",
                 "sibling",
                 "new",
             ],
         ),
         (
             vec!["app"],
-            vec!["pg", "app", "public", "Tables", "sibling"],
+            vec!["pg", "app", "public", "tables", "sibling"],
         ),
     ];
     for (databases, rows) in cases {

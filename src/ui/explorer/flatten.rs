@@ -38,15 +38,15 @@ pub(super) fn part_label(part: Part) -> &'static str {
 
 pub(super) fn group_label(kind: ObjectKind) -> &'static str {
     match kind {
-        ObjectKind::Table => "Tables",
-        ObjectKind::View => "Views",
-        ObjectKind::MaterializedView => "Materialized views",
-        ObjectKind::Sequence => "Sequences",
-        ObjectKind::Function => "Functions",
-        ObjectKind::Procedure => "Procedures",
-        ObjectKind::Type => "Types",
-        ObjectKind::Index => "Indexes",
-        ObjectKind::Trigger => "Triggers",
+        ObjectKind::Table => "tables",
+        ObjectKind::View => "views",
+        ObjectKind::MaterializedView => "materialized views",
+        ObjectKind::Sequence => "sequences",
+        ObjectKind::Function => "functions",
+        ObjectKind::Procedure => "procedures",
+        ObjectKind::Type => "types",
+        ObjectKind::Index => "indexes",
+        ObjectKind::Trigger => "triggers",
     }
 }
 

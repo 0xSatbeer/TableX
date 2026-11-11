@@ -138,7 +138,7 @@ fn cells_format_by_type() {
         format_cell(&Value::Int(-5)),
         ("-5".into(), CellKind::Number)
     );
-    assert_eq!(format_cell(&Value::Text("a\nb".into())).0, "a ↵");
+    assert_eq!(format_cell(&Value::Text("a\r\nb\nc".into())).0, "a↵b↵c");
     assert_eq!(
         format_cell(&Value::Bytes(std::sync::Arc::from(&[0u8; 5][..]))).0,
         "0x00000000… (5 B)"

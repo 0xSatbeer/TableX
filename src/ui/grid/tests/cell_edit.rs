@@ -49,6 +49,13 @@ fn paste_and_set_value_edit_the_selected_cells(cx: &mut gpui_kit::TestAppContext
         "Esc closes the input"
     );
     assert_eq!(cell(&mut cx, 5, 2), Value::Int(1), "Esc applies nothing");
+    cx.simulate_keystrokes("enter shift-enter");
+    assert!(
+        grid.read_with(&cx, |g, cx| g.editing.is_some()
+            && text_input(g).read(cx).value().contains('\n')),
+        "Shift+Enter breaks the line and keeps editing"
+    );
+    cx.simulate_keystrokes("escape");
     cx.simulate_keystrokes("enter");
     grid.update_in(&mut cx, |g, window, cx| {
         text_input(g).update(cx, |i, cx| i.set_value("", window, cx))

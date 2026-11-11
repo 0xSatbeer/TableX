@@ -52,17 +52,30 @@ impl Grid {
         };
         let editor = match editor_kind(meta) {
             EditorKind::Text => {
-                let input = cx.new(|cx| InputState::new(window, cx).placeholder("<null>"));
+                // Enter commits as in a spreadsheet; Shift+Enter breaks the line.
+                let input = cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .auto_grow(1, 8)
+                        .submit_on_enter(true)
+                        .placeholder("<null>")
+                });
                 input.update(cx, |input, cx| {
-                    input.set_value(typed.map_or(text, str::to_string), window, cx);
-                    input.focus(window, cx);
+                    let value = typed.map_or(text, str::to_string);
+                    let last_line = value.matches('\n').count() as u32;
+                    input.set_value(value, window, cx);
+                    // A textarea opens with the cursor at the start; typing should add to the end.
+                    input.set_cursor_position(
+                        gpui_kit::component::input::Position::new(last_line, u32::MAX),
+                        window,
+                        cx,
+                    );
                 });
                 cx.subscribe_in(
                     &input,
                     window,
                     |this, input, ev: &InputEvent, window, cx| match ev {
                         // Clicking elsewhere keeps what was typed, as in a spreadsheet.
-                        InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                        InputEvent::PressEnter { shift: false, .. } | InputEvent::Blur => {
                             _ = this.stop_editing(true, window, cx)
                         }
                         // Once a reason shows, it follows the typing, so it goes away when the text is fixed.

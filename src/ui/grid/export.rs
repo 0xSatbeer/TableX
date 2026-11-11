@@ -306,7 +306,7 @@ impl Grid {
             return Button::new("grid-export")
                 .debug_selector(|| "grid-export".into())
                 .ghost()
-                .small()
+                .with_size(super::toolbar::tool_size())
                 .icon(IconName::Download)
                 .tooltip("Export to a file…")
                 .accessibility_label("Export to a file")

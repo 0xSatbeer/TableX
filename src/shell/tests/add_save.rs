@@ -133,19 +133,25 @@ fn saving_a_valid_form_appends_the_connection_and_selects_its_row(
             name: name.into(),
             color,
             is_production: production,
-            status: ConnectionStatus::Disconnected,
+            // Adding connects: SQLite starts now, Postgres first asks for the unsaved password.
+            status: match params {
+                ConnectionParams::Sqlite { .. } => ConnectionStatus::Connecting,
+                _ => ConnectionStatus::Disconnected,
+            },
             params,
             databases: None,
         };
         assert_eq!(
             added, &want,
-            "{name}: trimmed values, Disconnected, no databases"
+            "{name}: trimmed values, connecting, no databases"
         );
-        assert_eq!(
-            explorer.read_with(&cx, |e, _| e.row_labels().last().cloned()),
-            Some(name.into()),
-            "{name}: last tree row"
-        );
+        // Expanded, a connecting SQLite row has its "Connecting…" child under it.
+        let rows = explorer.read_with(&cx, |e, _| e.row_labels());
+        let last = match added.params {
+            ConnectionParams::Sqlite { .. } => &rows[rows.len() - 2],
+            _ => rows.last().unwrap(),
+        };
+        assert_eq!(last.to_string(), name, "{name}: last connection row");
         assert_eq!(
             explorer.read_with(&cx, |e, _| e.selected_label()),
             Some(name.into()),
@@ -157,7 +163,7 @@ fn saving_a_valid_form_appends_the_connection_and_selects_its_row(
             "{name}: bottom panel knows it"
         );
         assert!(
-            cx.debug_bounds("dialog-layer").is_none(),
+            cx.debug_bounds("field-name").is_none(),
             "{name}: dialog closed"
         );
     }
@@ -191,7 +197,7 @@ fn enter_saves_a_valid_form_and_esc_or_cancel_close_without_changes(
         cx.run_until_parked();
         let label = format!("{:?} {press}", edits.last().unwrap());
         assert_eq!(
-            cx.debug_bounds("dialog-layer").is_some(),
+            cx.debug_bounds("field-name").is_some(),
             open,
             "{label}: dialog open"
         );

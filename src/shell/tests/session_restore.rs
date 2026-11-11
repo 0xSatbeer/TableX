@@ -261,7 +261,7 @@ fn expanded_nodes_restore_by_name_when_the_order_changes(cx: &mut TestAppContext
             "3".into(),
             "3/main".into(),
             "3/main/main".into(),
-            "3/main/main/Tables".into(),
+            "3/main/main/tables".into(),
         ],
         tabs: vec![table(3, "main", "main", "notes")],
         ..SessionFile::default()
@@ -299,7 +299,7 @@ fn expanded_nodes_restore_by_name_when_the_order_changes(cx: &mut TestAppContext
     assert_eq!(
         labels[at..],
         [
-            "local.db", "aux", "main", "temp", "main", "Tables", "zeta", "notes", "alpha"
+            "local.db", "aux", "main", "temp", "main", "tables", "zeta", "notes", "alpha"
         ]
     );
 

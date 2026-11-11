@@ -16,7 +16,7 @@ impl Grid {
         let page_button = |id: &'static str, icon: IconName, tip: &'static str, to: usize| {
             Button::new(id)
                 .ghost()
-                .small()
+                .with_size(tool_size())
                 .icon(icon)
                 .tooltip(tip)
                 .accessibility_label(tip)
@@ -27,13 +27,9 @@ impl Grid {
         let range = if end == 0 {
             "No rows".to_string()
         } else {
-            format!(
-                "{}–{} of {}",
-                grouped(start + 1),
-                grouped(end),
-                grouped(self.all.row_count())
-            )
+            format!("{}–{}", grouped(start + 1), grouped(end))
         };
+        let count = (end > 0).then(|| format!("of {}", grouped(self.all.row_count())));
         let divider = || {
             div()
                 .flex_none()
@@ -46,8 +42,9 @@ impl Grid {
         let pager = grid.clone();
         h_flex()
             .flex_none()
+            // 1.1x the 28px the buttons and padding would give, for a roomier bar.
+            .h(theme::scaled(px(31.)))
             .px(theme::space_4())
-            .py(theme::space_2())
             .gap(theme::space_2())
             .bg(theme.background)
             .border_b_1()
@@ -69,6 +66,7 @@ impl Grid {
                         page.saturating_sub(1),
                     ))
                     .child(local_pager_size(range, size, start, pager))
+                    .children(count)
                     .child(page_button(
                         "grid-next",
                         IconName::ChevronRight,
@@ -93,7 +91,7 @@ impl Grid {
                      run: fn(&mut Self, &mut Context<Self>)| {
                         Button::new(id)
                             .ghost()
-                            .small()
+                            .with_size(tool_size())
                             .icon(icon)
                             .tooltip(format!("{tip} ({key})"))
                             .accessibility_label(tip)
@@ -119,6 +117,16 @@ impl Grid {
                             .accessibility_label("Refresh")
                             .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
                     )
+                    .child(
+                        Button::new("grid-stop")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Square)
+                            .tooltip("Stop loading")
+                            .accessibility_label("Stop loading")
+                            .disabled(!self.loading())
+                            .on_click(cx.listener(|this, _, _, cx| this.stop_load(cx))),
+                    )
                     .child(divider())
                     .children([
                         row_button(
@@ -140,10 +148,22 @@ impl Grid {
                         h_flex()
                             .gap(theme::space_2())
                             .child(
+                                div().debug_selector(|| "grid-revert".into()).child(
+                                    Button::new("grid-revert")
+                                        .ghost()
+                                        .with_size(tool_size())
+                                        .icon(IconName::Undo2)
+                                        .tooltip("Revert changes")
+                                        .accessibility_label("Revert changes")
+                                        .disabled(idle)
+                                        .on_click(cx.listener(|this, _, _, cx| this.revert(cx))),
+                                ),
+                            )
+                            .child(
                                 div().debug_selector(|| "grid-submit".into()).child(
                                     Button::new("grid-submit")
                                         .custom(tinted(theme.success))
-                                        .small()
+                                        .with_size(tool_size())
                                         .icon(IconName::ArrowUp)
                                         .tooltip("Submit changes (Ctrl+Enter)")
                                         .accessibility_label("Submit changes")
@@ -151,18 +171,6 @@ impl Grid {
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.submit(window, cx)
                                         })),
-                                ),
-                            )
-                            .child(
-                                div().debug_selector(|| "grid-revert".into()).child(
-                                    Button::new("grid-revert")
-                                        .ghost()
-                                        .small()
-                                        .icon(IconName::Undo2)
-                                        .tooltip("Revert changes")
-                                        .accessibility_label("Revert changes")
-                                        .disabled(idle)
-                                        .on_click(cx.listener(|this, _, _, cx| this.revert(cx))),
                                 ),
                             ),
                     )
@@ -412,6 +420,11 @@ fn filter_box(
 }
 
 /// The row range, which opens the rows-per-page menu of a result in memory.
+/// Toolbar icon buttons: a 22px square gives a 16.5px icon, 1.2x the small button's.
+pub(super) fn tool_size() -> Pixels {
+    theme::scaled(px(22.))
+}
+
 fn local_pager_size(
     range: String,
     size: usize,

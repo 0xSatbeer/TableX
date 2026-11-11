@@ -32,8 +32,13 @@ fn where_completes_columns_over_the_partial_word() {
 #[test]
 fn order_by_completes_columns_and_keywords() {
     let items = labels("ORDER BY", "c ");
-    assert!(items.iter().any(|i| i.label == "a"));
+    assert!(
+        !items.iter().any(|i| i.label == "a"),
+        "a column follows a comma, not a name"
+    );
     assert!(items.iter().any(|i| i.label.eq_ignore_ascii_case("DESC")));
+    let items = labels("ORDER BY", "c, ");
+    assert!(items.iter().any(|i| i.label == "a"));
 }
 
 #[gpui_kit::test]

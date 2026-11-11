@@ -24,7 +24,7 @@ mod table_page;
 mod values;
 
 /// The open in-cell text input.
-fn text_input(g: &super::Grid) -> gpui_kit::Entity<gpui_kit::component::input::InputState> {
+fn text_input(g: &super::Grid) -> gpui_kit::Entity<gpui_kit::component::input::TextareaState> {
     match &g.editing.as_ref().expect("an editor is open").editor {
         super::Editor::Text(input) => input.clone(),
         _ => panic!("expected the text editor"),

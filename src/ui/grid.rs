@@ -17,7 +17,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
-    input::{EditorState, Input, InputEvent, InputState},
+    input::{EditorState, InputEvent, Textarea, TextareaState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     tooltip::Tooltip,
     v_flex,
@@ -143,8 +143,8 @@ struct Editing {
 }
 
 enum Editor {
-    /// Typed in place of the cell text.
-    Text(Entity<InputState>),
+    /// Typed over the cell; grows down as lines are added (Shift+Enter).
+    Text(Entity<TextareaState>),
     /// A list under the cell; `highlighted` is the row Enter picks.
     Options {
         values: Vec<Arc<str>>,

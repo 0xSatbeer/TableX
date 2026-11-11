@@ -15,6 +15,7 @@ icon_assets!(
         CalendarClock,
         ChevronFirst,
         ChevronLast,
+        ChevronsUpDown,
         ClipboardPaste,
         Clock,
         Code,

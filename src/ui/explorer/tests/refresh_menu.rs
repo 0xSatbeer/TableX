@@ -44,7 +44,7 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
         (true, "pg", true, true, true, false, false),
         (true, "app", false, false, true, true, true),
         (true, "public", false, false, true, true, true),
-        (true, "Tables", false, false, false, false, false),
+        (true, "tables", false, false, false, false, false),
         (true, "t", false, false, true, true, true),
         (true, "Columns", false, false, false, false, false),
         (true, "id", false, false, false, false, false),
@@ -67,11 +67,11 @@ fn only_connection_database_schema_and_table_or_view_rows_offer_refresh_only_the
             "pg",
             "app",
             "public",
-            "Tables",
+            "tables",
             "t",
             "Columns",
-            "Views",
-            "Functions",
+            "views",
+            "functions",
         ] {
             expand(&explorer, &mut cx, step);
         }
@@ -192,7 +192,7 @@ fn copy_qualified_name_puts_the_schema_and_name_quoted_on_the_clipboard_and_sqli
         };
         let conn = loaded(base, "app", "public", vec![table("users")]);
         let (mut cx, explorer, _, _) = open_explorer(cx, vec![conn]);
-        for step in ["pg", "app", "public", "Tables"] {
+        for step in ["pg", "app", "public", "tables"] {
             expand(&explorer, &mut cx, step);
         }
         right_click(&explorer, &mut cx, "users");

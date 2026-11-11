@@ -56,7 +56,7 @@ pub fn complete(sql: &str, offset: usize, dialect: DbKind, snapshot: &SchemaSnap
         Context::Start => ctx.keywords(),
         Context::Objects => ctx.objects(),
         Context::Members(qualifier) => ctx.members(&qualifier),
-        Context::Expression => ctx.expression(),
+        Context::Expression => ctx.expression(expect(&before), partial.is_some()),
     };
     rank(candidates, partial.as_ref().map_or("", |p| p.text.as_str()))
 }
@@ -168,6 +168,40 @@ fn context(before: &[Tok]) -> Context {
         return Context::Objects;
     }
     Context::Expression
+}
+
+/// What an expression waits for after its last token: another operand (`WHERE`, `AND`, `(`),
+/// an operator (after a name, literal or `)`), or the value of a comparison (`=`, `LIKE`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Expect {
+    Operand,
+    Operator,
+    Value,
+}
+
+fn expect(before: &[Tok]) -> Expect {
+    let Some(last) = before.last() else {
+        return Expect::Operand;
+    };
+    let word = last.text.to_ascii_uppercase();
+    let is_not_after_is = word == "NOT"
+        && before
+            .iter()
+            .rev()
+            .nth(1)
+            .is_some_and(|t| t.text.eq_ignore_ascii_case("IS"));
+    match last.kind {
+        TokKind::Quoted | TokKind::Literal | TokKind::Punct(b')') => Expect::Operator,
+        TokKind::Punct(b'=' | b'<' | b'>' | b'!') => Expect::Value,
+        TokKind::Punct(_) => Expect::Operand,
+        TokKind::Word => match word.as_str() {
+            "LIKE" | "ILIKE" | "SIMILAR" | "TO" => Expect::Value,
+            "IS" | "NULL" | "TRUE" | "FALSE" | "END" => Expect::Operator,
+            _ if is_not_after_is => Expect::Operator,
+            w if keywords::is_reserved(w) => Expect::Operand,
+            _ => Expect::Operator,
+        },
+    }
 }
 
 fn is_name(t: &Tok) -> bool {
@@ -295,7 +329,15 @@ impl Ctx<'_> {
             .collect()
     }
 
-    fn expression(&self) -> Vec<Candidate> {
+    /// After an operand only operators fit; after a comparison a literal usually follows, so
+    /// nothing is offered until a word is typed, and then no keywords.
+    fn expression(&self, expect: Expect, typing: bool) -> Vec<Candidate> {
+        if expect == Expect::Operator {
+            return self.keywords();
+        }
+        if expect == Expect::Value && !typing {
+            return Vec::new();
+        }
         let columns = self
             .refs
             .iter()
@@ -308,10 +350,11 @@ impl Ctx<'_> {
         let function = ItemKind::Object(ObjectKind::Function);
         let builtins = keywords::functions(self.dialect)
             .map(|f| (1, item(f, function, "function", f.to_string())));
+        let keywords = (expect == Expect::Operand).then(|| self.keywords());
         columns
             .chain(own_functions.map(|o| (1, self.object(o))))
             .chain(builtins)
-            .chain(self.keywords())
+            .chain(keywords.into_iter().flatten())
             .collect()
     }
 

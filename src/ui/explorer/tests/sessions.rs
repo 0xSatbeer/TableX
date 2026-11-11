@@ -125,10 +125,10 @@ fn a_load_from_before_an_edit_and_reconnect_is_dropped_when_it_lands(
         }
         fake.resolve("objects app/public", Ok(vec![table("new_t")]));
         cx.run_until_parked();
-        expand(&explorer, &mut cx, "Tables");
+        expand(&explorer, &mut cx, "tables");
         assert_eq!(
             labels(&explorer, &cx),
-            ["pg", "app", "public", "Tables", "new_t"],
+            ["pg", "app", "public", "tables", "new_t"],
             "{label}: only the new server's data"
         );
     }

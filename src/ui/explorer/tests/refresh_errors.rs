@@ -132,7 +132,7 @@ fn a_failed_refresh_of_the_connection_sets_status_error_and_shows_the_connection
         cx.run_until_parked();
         assert_eq!(
             labels(&explorer, &cx),
-            ["pg", "app", "public", "Tables", "t", "u", "sibling"],
+            ["pg", "app", "public", "tables", "t", "u", "sibling"],
             "app in flight {app_in_flight}"
         );
     }

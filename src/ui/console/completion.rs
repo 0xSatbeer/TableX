@@ -140,7 +140,7 @@ pub(crate) fn lsp_item(item: Item, range: lsp_types::Range, partial: &str) -> Co
     CompletionItem {
         label: item.label,
         kind: Some(lsp_kind(item.kind)),
-        detail: Some(item.detail),
+        detail: (item.kind != ItemKind::Keyword).then_some(item.detail),
         filter_text: Some(partial.to_string()),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
             range,

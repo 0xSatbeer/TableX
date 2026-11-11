@@ -120,6 +120,28 @@ fn expression_position_offers_scope_columns_then_functions_then_keywords() {
 }
 
 #[test]
+fn expression_follows_the_grammar() {
+    assert!(labels("SELECT * FROM users WHERE name ILIKE |").is_empty());
+    assert!(labels("SELECT * FROM users WHERE name = |").is_empty());
+    assert!(has("SELECT * FROM users WHERE name = e|", &["email"]));
+    assert!(!has("SELECT * FROM users WHERE name = e|", &["EXISTS"]));
+    for sql in [
+        "SELECT * FROM users WHERE name |",
+        "SELECT * FROM users WHERE name ILIKE '%a%' |",
+        "SELECT * FROM users WHERE name IS NOT |",
+        "SELECT name |",
+    ] {
+        assert!(has(sql, &["AND"]), "{sql}");
+        assert!(!has(sql, &["email", "add_tax"]), "{sql}");
+    }
+    assert!(has("SELECT * FROM users WHERE name IS |", &["NULL"]));
+    assert!(has(
+        "SELECT * FROM users WHERE id = 1 AND |",
+        &["email", "AND"]
+    ));
+}
+
+#[test]
 fn keyword_named_tables_resolve() {
     assert!(has("SELECT r.| FROM role r", &["rolname"]));
     assert!(has("SELECT role.| FROM role", &["rolname"]));

@@ -88,12 +88,12 @@ fn star_where_one_load_fails_shows_an_error_row_under_that_node_and_the_others_s
         (
             "objects app/sibling",
             EXPANDED_DB.to_vec(),
-            vec!["public", "Tables", "t", "u", "sibling", error],
+            vec!["public", "tables", "t", "u", "sibling", error],
         ),
         (
             "objects app/public",
             EXPANDED_DB.to_vec(),
-            vec!["public", error, "sibling", "Tables", "t", "u"],
+            vec!["public", error, "sibling", "tables", "t", "u"],
         ),
         ("schemas analytics", vec![error], EXPANDED_DB.to_vec()),
     ];

@@ -20,9 +20,7 @@ pub(super) enum Click {
 pub(super) fn click_action(kind: NodeKind, hit: Hit) -> Click {
     match hit {
         Hit::Chevron => Click::Toggle,
-        Hit::Row { clicks } if opens_tab(kind) => Click::Open {
-            preview: clicks < 2,
-        },
+        Hit::Row { clicks: 2 } if opens_tab(kind) => Click::Open { preview: false },
         Hit::Row { clicks: 2 } => Click::Toggle,
         Hit::Row { .. } => Click::Select,
     }

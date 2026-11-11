@@ -18,7 +18,7 @@
         "border": "#26282E",
         "ring": "#7C8CFF",
         "caret": "#9AA6FF",
-        "selection.background": "#7C8CFF40",
+        "selection.background": "#7C8CFF4D",
         "overlay": "#00000066",
         "window.border": "#26282E",
 

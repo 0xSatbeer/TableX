@@ -147,8 +147,9 @@ fn a_connect_in_flight_finds_its_connection_deleted_and_is_discarded(
     let cases: [(&str, &str, Option<bool>, Option<ConnectionStatus>); 4] = [
         ("local.db", "3", None, None),
         ("staging-pg", r"2/\error", None, None),
-        // local.db has the highest id, so the new connection may get it again.
-        ("local.db", "3", Some(false), Some(Disconnected)),
+        // local.db has the highest id, so the new connection may get it again. Adding connects it,
+        // so it is still on its own connect, not finished by the old one.
+        ("local.db", "3", Some(false), Some(Connecting)),
         ("local.db", "3", Some(true), Some(Connecting)),
     ];
     let latency = Duration::from_millis(1000);

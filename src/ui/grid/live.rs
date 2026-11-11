@@ -160,6 +160,17 @@ impl Grid {
             .is_some_and(|l| l.page.state == PageState::Loading)
     }
 
+    /// Stop: drops the in-flight page read and keeps whatever rows were showing.
+    pub(super) fn stop_load(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = &mut self.live else { return };
+        if live.page.state != PageState::Loading {
+            return;
+        }
+        live._load = None;
+        live.page.state = PageState::Ready;
+        cx.notify();
+    }
+
     /// Reads the current page again (F5, Refresh, Retry), connecting and reading the key first if needed.
     pub fn load(&mut self, cx: &mut Context<Self>) {
         let Some(live) = &mut self.live else { return };
@@ -386,7 +397,7 @@ impl Grid {
         let button = |id: &'static str, icon: IconName, tip: &'static str, to: Option<usize>| {
             Button::new(id)
                 .ghost()
-                .small()
+                .with_size(super::toolbar::tool_size())
                 .icon(icon)
                 .tooltip(tip)
                 .accessibility_label(tip)
@@ -526,11 +537,27 @@ impl Grid {
                     )
                     .into_any_element(),
             ),
+            // The rows stay visible under a veil, so a reload doesn't blank and re-lay the table;
+            // occluding keeps clicks off rows that are about to be replaced.
             PageState::Loading => Some(
                 overlay()
-                    .debug_selector(|| "table-loading".into())
-                    .child(Spinner::new().color(theme.muted_foreground))
-                    .child("Loading…")
+                    .bg(theme.table.opacity(0.5))
+                    .occlude()
+                    .child(
+                        h_flex()
+                            .debug_selector(|| "table-loading".into())
+                            .gap(theme::space_8())
+                            .px(theme::space_12())
+                            .py(theme::space_6())
+                            .rounded(theme::radius_md())
+                            .border_1()
+                            .border_color(theme.border)
+                            .bg(theme.popover)
+                            .text_color(theme.popover_foreground)
+                            .shadow_md()
+                            .child(Spinner::new().small().color(theme.muted_foreground))
+                            .child("Loading…"),
+                    )
                     .into_any_element(),
             ),
             PageState::Failed(reason) => Some(

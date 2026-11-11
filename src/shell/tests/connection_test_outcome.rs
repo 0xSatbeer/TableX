@@ -150,7 +150,7 @@ fn a_running_test_never_shows_its_result_after_a_field_change_save_or_close(
             "{label}: line drawn"
         );
         assert_eq!(
-            cx.debug_bounds("dialog-layer").is_some(),
+            cx.debug_bounds("field-name").is_some(),
             open,
             "{label}: dialog open"
         );
@@ -207,7 +207,7 @@ fn save_works_with_no_test_run_in_the_add_and_edit_dialogs(cx: &mut gpui_kit::Te
         );
         finish(&mut cx, &dialog, edits, press);
         assert!(
-            cx.debug_bounds("dialog-layer").is_none(),
+            cx.debug_bounds("field-name").is_none(),
             "{label}: dialog closed"
         );
         assert!(

@@ -58,11 +58,11 @@ fn group_click_selects_chevron_or_double_click_toggles() {
 }
 
 #[test]
-fn table_click_opens_chevron_shows_structure() {
+fn table_double_click_opens_chevron_shows_structure() {
     for kind in [ObjectKind::Table, ObjectKind::View] {
         let kind = NodeKind::Object(kind);
         let cases = [
-            (Hit::Row { clicks: 1 }, Click::Open { preview: true }),
+            (Hit::Row { clicks: 1 }, Click::Select),
             (Hit::Row { clicks: 2 }, Click::Open { preview: false }),
             (Hit::Chevron, Click::Toggle),
         ];

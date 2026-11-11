@@ -151,7 +151,7 @@ pub(super) fn tables_open(
 ) {
     let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
     connect_answered(&explorer, &fake, &mut cx, &["app"]);
-    for step in ["app", "public", "Tables"] {
+    for step in ["app", "public", "tables"] {
         expand(&explorer, &mut cx, step);
         for pending in fake.pending() {
             answer(&fake, &pending, Ok(()));
@@ -163,4 +163,4 @@ pub(super) fn tables_open(
 
 /// The rows of one database expanded by `*`: its schemas, their object groups and objects.
 pub(super) const EXPANDED_DB: [&str; 8] =
-    ["public", "Tables", "t", "u", "sibling", "Tables", "t", "u"];
+    ["public", "tables", "t", "u", "sibling", "tables", "t", "u"];

@@ -36,9 +36,9 @@ fn each_level_loads_only_when_expanded_and_shows_a_loading_row_meanwhile(
     assert_eq!(under(&explorer, &cx, "public"), ["Loading…"]);
     fake.resolve("objects app/public", Ok(vec![table("t"), view("v")]));
     cx.run_until_parked();
-    assert_eq!(under(&explorer, &cx, "public"), ["Tables", "Views"]);
-    expand(&explorer, &mut cx, "Tables");
-    assert_eq!(under(&explorer, &cx, "Tables"), ["t"]);
+    assert_eq!(under(&explorer, &cx, "public"), ["tables", "views"]);
+    expand(&explorer, &mut cx, "tables");
+    assert_eq!(under(&explorer, &cx, "tables"), ["t"]);
     assert_eq!(
         fake.pending(),
         Vec::<String>::new(),
@@ -103,8 +103,8 @@ fn a_failed_load_shows_could_not_load_with_retry_under_that_node_only(
 ) {
     // (row whose load fails, that load, how Retry is pressed, its rows once Retry succeeds)
     let cases = [
-        ("public", "objects app/public", "enter", vec!["Tables"]),
-        ("public", "objects app/public", "click", vec!["Tables"]),
+        ("public", "objects app/public", "enter", vec!["tables"]),
+        ("public", "objects app/public", "click", vec!["tables"]),
         ("app", "schemas app", "enter", vec!["public", "sibling"]),
         ("t", "columns app/public/t", "click", vec!["Columns"]),
     ];
@@ -113,7 +113,7 @@ fn a_failed_load_shows_could_not_load_with_retry_under_that_node_only(
         let reason = format!("permission denied for {row}");
         let (mut cx, explorer, workspace, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
         connect_answered(&explorer, &fake, &mut cx, &["app"]);
-        for step in ["app", "public", "Tables", "t"] {
+        for step in ["app", "public", "tables", "t"] {
             expand(&explorer, &mut cx, step);
             for pending in fake.pending() {
                 answer(
@@ -190,14 +190,14 @@ fn collapsing_during_a_load_still_stores_its_result_and_the_node_stays_collapsed
 ) {
     // (row collapsed while loading, its load, its rows once expanded again with no new load)
     let cases = [
-        ("public", "objects app/public", vec!["Tables"]),
+        ("public", "objects app/public", vec!["tables"]),
         ("app", "schemas app", vec!["public", "sibling"]),
         ("t", "columns app/public/t", vec!["Columns"]),
     ];
     for (row, call, after) in cases {
         let (mut cx, explorer, _, fake) = open_explorer(cx, vec![pg(1, "pg", "app")]);
         connect_answered(&explorer, &fake, &mut cx, &["app"]);
-        for step in ["app", "public", "Tables", "t"] {
+        for step in ["app", "public", "tables", "t"] {
             expand(&explorer, &mut cx, step);
             if step == row {
                 break;

@@ -145,8 +145,7 @@ impl Grid {
         div()
             .relative()
             .flex_none()
-            // One row tall, like the rows under it.
-            .h(self.row_h())
+            .h(self.header_h())
             .w_full()
             .overflow_hidden()
             .bg(theme.table_head)
@@ -188,10 +187,14 @@ impl Grid {
                             }))
                             .child(
                                 v_flex()
+                                    .id(("header", s))
                                     .flex_1()
                                     .min_w_0()
                                     .h_full()
                                     .justify_center()
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.cycle_sort(s, window, cx)
+                                    }))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(
@@ -210,7 +213,7 @@ impl Grid {
                                         MouseButton::Right,
                                         cx.listener(move |this, _, _, _| this.menu_col = s),
                                     )
-                                    .px(theme::space_6())
+                                    .px(theme::space_8())
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .child({
@@ -230,7 +233,7 @@ impl Grid {
                                             })
                                             .gap(theme::space_4())
                                             .font_family(theme.mono_font_family.clone())
-                                            .text_size(self.mono_px())
+                                            .text_size(self.header_px())
                                             .text_color(theme.foreground)
                                             // Every column has an icon; keys get theirs instead of the type's.
                                             .when(m.pk, |d| {
@@ -291,9 +294,9 @@ impl Grid {
                                     &columns[s].data_type,
                                 );
                                 let glyph = match self.sort {
-                                    Some((sc, true)) if sc == s => "↑",
-                                    Some((sc, false)) if sc == s => "↓",
-                                    _ => "↕",
+                                    Some((sc, true)) if sc == s => Lucide::ArrowUp,
+                                    Some((sc, false)) if sc == s => Lucide::ArrowDown,
+                                    _ => Lucide::ChevronsUpDown,
                                 };
                                 div()
                                     .id(("sort", s))
@@ -302,36 +305,26 @@ impl Grid {
                                     .flex_none()
                                     .w(theme::space_16())
                                     .flex()
+                                    .items_center()
                                     .justify_center()
-                                    .text_size(theme::ui_sm())
                                     // Drag must not start from the sort control.
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                         cx.stop_propagation()
                                     })
                                     .map(|d| match avail {
                                         SortAvail::Enabled => d
-                                            // An unsorted column shows its control only while the header is hovered.
-                                            .when(glyph == "↕", |d| {
-                                                d.text_color(transparent_black()).group_hover(
-                                                    SharedString::from(format!("col-{s}")),
-                                                    |d| d.text_color(theme.muted_foreground),
-                                                )
-                                            })
+                                            .text_color(theme.muted_foreground)
                                             .hover(|d| d.text_color(theme.foreground))
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 this.cycle_sort(s, window, cx)
                                             })),
                                         SortAvail::Disabled(why) => d
-                                            .text_color(transparent_black())
-                                            .group_hover(
-                                                SharedString::from(format!("col-{s}")),
-                                                |d| d.text_color(theme::text_disabled(theme)),
-                                            )
+                                            .text_color(theme::text_disabled(theme))
                                             .tooltip(move |window, cx| {
                                                 Tooltip::new(why).build(window, cx)
                                             }),
                                     })
-                                    .child(glyph)
+                                    .child(Icon::new(glyph).size_3())
                             })
                             // Resize grip on the right edge.
                             .child(

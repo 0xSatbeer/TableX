@@ -150,7 +150,15 @@ fn invalid_values_are_never_saved(cx: &mut gpui_kit::TestAppContext) {
     let (amount, payload) = (4, 6);
     let type_in = |cx: &mut gpui_kit::VisualTestContext, text: &str| {
         grid.update_in(cx, |g, window, cx| {
-            text_input(g).update(cx, |i, cx| i.set_value(text.to_string(), window, cx))
+            text_input(g).update(cx, |i, cx| {
+                i.set_value(text.to_string(), window, cx);
+                // A textarea's set_value leaves the cursor at the start.
+                i.set_cursor_position(
+                    gpui_kit::component::input::Position::new(0, u32::MAX),
+                    window,
+                    cx,
+                )
+            })
         })
     };
     grid.update_in(&mut cx, |g, window, cx| {

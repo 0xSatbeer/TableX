@@ -76,7 +76,11 @@ impl Grid {
         let (key, fks) = self.key_columns();
         let m = super::header::header_model(meta, key, fks);
         let icons = theme::space_16() * (m.pk && m.fk) as u8 as f32 + theme::space_16();
-        let header = advance * meta.name.chars().count() as f32 + icons + theme::space_16();
+        // The header's padding is space_4 wider than a cell's.
+        let header = self.header_px() * 0.6 * meta.name.chars().count() as f32
+            + icons
+            + theme::space_16()
+            + theme::space_4();
         self.widths[c] =
             ((advance * cell_chars as f32).max(header) + theme::space_16() + theme::space_4())
                 .max(MIN_WIDTH);
@@ -167,6 +171,15 @@ impl Grid {
 
     pub(super) fn row_h(&self) -> Pixels {
         theme::scaled(row_height(self.mono))
+    }
+
+    /// The header stands a little taller than a row, in slightly larger text.
+    pub(super) fn header_h(&self) -> Pixels {
+        self.row_h() * 1.2
+    }
+
+    pub(super) fn header_px(&self) -> Pixels {
+        self.mono_px() * 1.1
     }
 
     pub(super) fn zoom(&mut self, step: theme::Zoom, cx: &mut Context<Self>) {

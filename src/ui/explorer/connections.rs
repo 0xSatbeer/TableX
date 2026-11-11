@@ -518,16 +518,21 @@ impl Explorer {
             window,
             cx,
         );
-        cx.subscribe_in(&dialog, window, |this, _, Saved(id), window, cx| {
-            if this
+        cx.subscribe_in(&dialog, window, move |this, _, Saved(id), window, cx| {
+            let Some(ci) = this
                 .workspace
                 .read(cx)
                 .connections
                 .iter()
-                .any(|c| c.id == *id)
-            {
-                this.reveal(&id.0.to_string(), window, cx);
+                .position(|c| c.id == *id)
+            else {
+                return;
+            };
+            // A new connection opens right away: it was added to be browsed.
+            if editing.is_none() {
+                this.connect(ci, false, cx);
             }
+            this.reveal(&id.0.to_string(), window, cx);
         })
         .detach();
     }

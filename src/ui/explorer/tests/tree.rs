@@ -141,7 +141,7 @@ fn keys_are_name_paths_with_slash_and_backslash_escaped(cx: &mut gpui_kit::TestA
         ("pg", r"7"),
         ("my/db", r"7/my\/db"),
         ("s\\1", r"7/my\/db/s\\1"),
-        ("Tables", r"7/my\/db/s\\1/table"),
+        ("tables", r"7/my\/db/s\\1/table"),
         ("users", r"7/my\/db/s\\1/table/users"),
         ("Columns", r"7/my\/db/s\\1/table/users/Columns"),
         ("id", r"7/my\/db/s\\1/table/users/Columns/0"),

@@ -287,7 +287,7 @@ impl Explorer {
 }
 
 impl Explorer {
-    /// The expanded nodes as the session file names them: by name, a group by its label ("Tables").
+    /// The expanded nodes as the session file names them: by name, a group by its label ("tables"; older files say "Tables").
     pub fn expanded_paths(&self) -> Vec<String> {
         let mut paths: Vec<String> = self
             .expanded
@@ -313,7 +313,7 @@ impl Explorer {
                 with_group(path, |s| {
                     ObjectKind::ALL
                         .into_iter()
-                        .find(|k| group_label(*k) == s)
+                        .find(|k| group_label(*k).eq_ignore_ascii_case(s))
                         .map(ObjectKind::as_str)
                 })
             })

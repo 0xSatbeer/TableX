@@ -39,10 +39,14 @@ impl Grid {
         // Unfocused, the selection dims and loses its cursor, so only one pane looks "live".
         let focused = self.focus.is_focused(window);
         let (fill, cursor) = if focused {
-            (theme.table_active, Some(theme.table_active_border))
+            (
+                theme.table_active,
+                Some(theme.table_active_border.opacity(0.55)),
+            )
         } else {
             (theme::selected_inactive(theme), None)
         };
+        let head_row = focused.then_some(self.head.0);
         let offsets = self.offsets();
         let (scroll_x, view) = self.viewport(window);
         let cols = visible_cols(&offsets, scroll_x, view, OVERSCAN);
@@ -83,7 +87,7 @@ impl Grid {
                             })
                             .when(selected, |d| d.bg(fill))
                             .when_some(cursor.filter(|_| self.head == (r, c)), |d, color| {
-                                d.border_1().border_color(color)
+                                d.bg(color)
                             })
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -100,14 +104,78 @@ impl Grid {
                             .when_some(
                                 text_editor.clone().filter(|_| editing_cell == Some((r, c))),
                                 |d, input| {
-                                    d.px_0().child(
-                                        Input::new(&input)
-                                            .small()
-                                            .bordered(false)
-                                            .w_full()
-                                            .h_full()
-                                            .font_family(theme.mono_font_family.clone())
-                                            .text_size(self.mono_px()),
+                                    let longest = input
+                                        .read(cx)
+                                        .value()
+                                        .lines()
+                                        .map(|l| l.chars().count())
+                                        .max()
+                                        .unwrap_or(0);
+                                    let fit = self.mono_px() * 0.6 * longest as f32
+                                        + theme::space_16()
+                                        + theme::space_8();
+                                    // The error goes inside the editor, which would cover a bubble under the cell.
+                                    let why = problem
+                                        .take_if(|(at, _)| *at == (r, c))
+                                        .map(|(_, why)| why);
+                                    d.child(
+                                        div().absolute().top_0().left_0().child(
+                                            deferred(
+                                                anchored()
+                                                    .snap_to_window_with_margin(theme::space_8())
+                                                    .child(
+                                                        v_flex()
+                                                            .id("cell-editor")
+                                                            .occlude()
+                                                            // Enter commits (PressEnter); kept from falling through as typed "\n".
+                                                            .on_key_down(
+                                                                |ev: &KeyDownEvent, _, cx| {
+                                                                    let m = ev.keystroke.modifiers;
+                                                                    if ev.keystroke.key == "enter"
+                                                                        && !m.shift
+                                                                    {
+                                                                        cx.stop_propagation();
+                                                                    }
+                                                                },
+                                                            )
+                                                            // Fits the longest line (0.6em per mono char, as autofit), never narrower than
+                                                            // the column nor past the grid's right edge; narrow leftovers still get typing room.
+                                                            .w(fit
+                                                                .max(self.widths[s])
+                                                                .min(view - offsets[c] + scroll_x)
+                                                                .max(px(200.)))
+                                                            .gap(theme::space_2())
+                                                            .bg(theme.background)
+                                                            .border_1()
+                                                            .border_color(if why.is_some() {
+                                                                theme.danger
+                                                            } else {
+                                                                theme.table_active_border
+                                                            })
+                                                            .child(
+                                                                Textarea::new(&input)
+                                                                    .small()
+                                                                    .bordered(false)
+                                                                    .w_full()
+                                                                    .font_family(
+                                                                        theme
+                                                                            .mono_font_family
+                                                                            .clone(),
+                                                                    )
+                                                                    .text_size(self.mono_px()),
+                                                            )
+                                                            .when_some(why, |d, why| {
+                                                                d.child(
+                                                                    self.problem_bubble(why, cx)
+                                                                        .border_0()
+                                                                        .shadow_none()
+                                                                        .rounded_none(),
+                                                                )
+                                                            }),
+                                                    ),
+                                            )
+                                            .with_priority(1),
+                                        ),
                                     )
                                 },
                             )
@@ -154,6 +222,7 @@ impl Grid {
                         theme.table
                     })
                     .when(added, |d| d.bg(theme::grid_inserted(theme)))
+                    .when(head_row == Some(r), |d| d.bg(fill))
                     .when(self.deleted.contains(&at), |d| {
                         d.debug_selector(move || format!("deleted-row:{at}"))
                             .bg(theme::grid_deleted(theme))
@@ -179,6 +248,7 @@ impl Grid {
                             .items_center()
                             .justify_end()
                             .bg(theme.table_head)
+                            .when(head_row == Some(r), |d| d.bg(fill))
                             .border_r_1()
                             .border_color(theme.border)
                             .text_color(theme.muted_foreground)
@@ -202,8 +272,8 @@ impl Grid {
     }
 
     /// Column lines over the rows: one quad per visible column instead of a border per cell,
-    /// which halved the cost of a scrolled frame. A line breaks where the cursor or a refused
-    /// cell draws its own outline, so that outline stays whole.
+    /// which halved the cost of a scrolled frame. A line breaks where a refused cell draws
+    /// its own outline, so that outline stays whole.
     pub(super) fn render_col_lines(&self, window: &Window, cx: &App) -> impl IntoElement {
         let offsets = self.offsets();
         let (scroll_x, view) = self.viewport(window);
@@ -211,16 +281,11 @@ impl Grid {
         let (gutter, row_h) = (self.gutter(), self.row_h());
         let (bottom_room, right_room) = self.scrollbar_room();
         let outlined: Vec<(usize, usize)> = self
-            .focus
-            .is_focused(window)
-            .then_some(self.head)
+            .editing
+            .as_ref()
+            .filter(|e| e.error.is_some())
+            .map(|e| e.cell)
             .into_iter()
-            .chain(
-                self.editing
-                    .as_ref()
-                    .filter(|e| e.error.is_some())
-                    .map(|e| e.cell),
-            )
             .chain(self.notice.as_ref().map(|(at, _)| *at))
             .collect();
         let lines: Vec<(Pixels, Vec<usize>)> = visible_cols(&offsets, scroll_x, view, OVERSCAN)

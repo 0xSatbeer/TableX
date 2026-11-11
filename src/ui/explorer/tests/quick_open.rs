@@ -66,7 +66,7 @@ fn open_key_reveals_the_object_and_emits_open_object(cx: &mut gpui_kit::TestAppC
         [("1/app/public/table/users".to_string(), false)]
     );
     assert!(
-        is_expanded(&explorer, &cx, "Tables"),
+        is_expanded(&explorer, &cx, "tables"),
         "revealed in the tree"
     );
 }

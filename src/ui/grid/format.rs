@@ -65,14 +65,15 @@ pub(super) fn format_cell(value: &Value) -> (String, CellKind) {
         }
         Value::Json(s) => (truncate(s, 60), CellKind::Text),
         Value::Text(s) => {
-            let mut lines = s.lines();
-            let first = truncate(lines.next().unwrap_or_default(), MAX_CHARS);
-            let text = if lines.next().is_some() {
-                format!("{first} ↵")
-            } else {
-                first
-            };
-            (text, CellKind::Text)
+            // Line breaks become a marker so the row stays one line tall; capped before
+            // collecting so a huge text does not get copied every frame.
+            let head: String = s
+                .chars()
+                .take(MAX_CHARS + 1)
+                .filter(|&c| c != '\r')
+                .map(|c| if c == '\n' { '↵' } else { c })
+                .collect();
+            (truncate(&head, MAX_CHARS), CellKind::Text)
         }
         _ => (value.to_string(), CellKind::Text),
     }

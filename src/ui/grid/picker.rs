@@ -5,8 +5,26 @@ use super::*;
 impl Grid {
     /// Why a cell's text can't be saved, under that cell.
     pub(super) fn render_problem(&self, why: String, cx: &App) -> AnyElement {
+        let bubble = self.problem_bubble(why, cx);
+        div()
+            .absolute()
+            .top_full()
+            .left_0()
+            .child(
+                deferred(
+                    anchored()
+                        .snap_to_window_with_margin(theme::space_8())
+                        .child(bubble),
+                )
+                .with_priority(1),
+            )
+            .into_any_element()
+    }
+
+    /// Why the typed value can't be saved, as a popover-styled note.
+    pub(super) fn problem_bubble(&self, why: String, cx: &App) -> Div {
         let theme = cx.theme();
-        let bubble = div()
+        div()
             .debug_selector(|| "cell-problem".into())
             .occlude()
             .max_w(px(420.))
@@ -21,20 +39,7 @@ impl Grid {
             .font_family(theme.font_family.clone())
             .text_size(theme::ui_sm())
             .whitespace_normal()
-            .child(why);
-        div()
-            .absolute()
-            .top_full()
-            .left_0()
-            .child(
-                deferred(
-                    anchored()
-                        .snap_to_window_with_margin(theme::space_8())
-                        .child(bubble),
-                )
-                .with_priority(1),
-            )
-            .into_any_element()
+            .child(why)
     }
 
     /// The list or calendar under the cell being edited; `None` for text, which is edited in place.

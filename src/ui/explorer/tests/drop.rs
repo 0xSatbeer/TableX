@@ -13,7 +13,7 @@ fn drop_on_production_needs_the_name_typed_then_runs_the_drop_and_refreshes_the_
     conn.is_production = true;
     let (mut cx, explorer, _, fake) = open_explorer(cx, vec![conn]);
     connect_answered(&explorer, &fake, &mut cx, &["app"]);
-    for step in ["app", "public", "Tables"] {
+    for step in ["app", "public", "tables"] {
         expand(&explorer, &mut cx, step);
         for pending in fake.pending() {
             answer(&fake, &pending, Ok(()));

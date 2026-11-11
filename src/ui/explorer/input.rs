@@ -92,7 +92,7 @@ impl Explorer {
             let mut names = vec![node.label.to_string()];
             let mut at = ix;
             while let Some(parent) = parent_of(&self.nodes, at) {
-                // Groups ("Tables") are UI only, not part of the object path.
+                // Groups ("tables") are UI only, not part of the object path.
                 if !matches!(self.nodes[parent].kind, NodeKind::Group(_)) {
                     names.push(self.nodes[parent].label.to_string());
                 }
