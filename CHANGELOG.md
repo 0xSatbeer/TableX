@@ -6,6 +6,22 @@ All notable changes to TableX are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-11
+
+### Added
+- Click a column header to sort by it; the header shows an arrow for the sorted column.
+- Cells edit multi-line text: Enter commits, Shift+Enter adds a line break. Line breaks show as ↵ in the grid.
+- A Stop button cancels a page load that is still running and keeps the rows already shown.
+- Completion items show the explorer's icon for their kind, a column's table and type, and an object's schema.
+
+### Changed
+- Reloading a table dims the current rows instead of blanking the table.
+- Completion follows the SQL grammar: after a column or value it offers operators, and after `=` or `LIKE` it waits until you start typing a name.
+- A connection added from the dialog connects right away.
+
+### Fixed
+- Grid rows update their hover highlight as the mouse moves between rows.
+
 ## [0.1.5] - 2026-11-04
 
 ### Added
@@ -60,7 +76,8 @@ All notable changes to TableX are listed here. The format follows
 
 First public release.
 
-[Unreleased]: https://github.com/0xSatbeer/TableX/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/0xSatbeer/TableX/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/0xSatbeer/TableX/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/0xSatbeer/TableX/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/0xSatbeer/TableX/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/0xSatbeer/TableX/compare/v0.1.2...v0.1.3
