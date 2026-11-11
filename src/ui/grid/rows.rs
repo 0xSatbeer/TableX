@@ -28,7 +28,7 @@ impl Grid {
         range: Range<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Vec<Div> {
+    ) -> Vec<Stateful<Div>> {
         let mut picker = self.render_picker(cx);
         let mut problem = self
             .editing
@@ -204,6 +204,8 @@ impl Grid {
                             )
                     });
                 div()
+                    // Stateful so gpui repaints the hover style as the mouse moves between rows.
+                    .id(("row", r))
                     .relative()
                     .w(self.gutter() + total)
                     .h(self.row_h())
