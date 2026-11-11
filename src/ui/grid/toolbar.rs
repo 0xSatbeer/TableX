@@ -305,6 +305,7 @@ fn filter_input(
     });
     input.update(cx, |e, cx| {
         e.lsp_mut().completion_provider = Some(provider);
+        e.lsp_mut().completion_menu.max_width = theme::COMPLETION_MENU;
         e.set_highlighter_factory(completion::highlighter(clause), cx);
     });
     cx.subscribe_in(

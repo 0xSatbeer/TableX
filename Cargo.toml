@@ -70,3 +70,8 @@ opt-level = 2
 [lints.clippy]
 # Table-driven tests spell their case tuples out inline; aliasing each one would hide the shape.
 type_complexity = "allow"
+
+# The completion menu is restyled in place (vendor/gpui-component/src/input/popovers/completion_menu.rs);
+# the rest of the crate is the published 0.7.0.
+[patch.crates-io]
+gpui-component = { path = "vendor/gpui-component" }

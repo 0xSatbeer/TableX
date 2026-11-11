@@ -54,6 +54,8 @@ const BADGE_LINE: Pixels = px(16.);
 pub const GRID_MONO: Pixels = px(13.);
 pub const GRID_ROW: Pixels = px(22.);
 const TAB: Pixels = px(34.);
+/// Widest the completion menu grows; it sizes to its longest row below that.
+pub const COMPLETION_MENU: Pixels = px(606.);
 /// Connection-color rule on tabs.
 const STRIPE: Pixels = px(2.);
 const TITLEBAR: Pixels = px(38.);

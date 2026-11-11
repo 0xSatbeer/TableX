@@ -5,12 +5,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::FutureExt as _;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::input::{CompletionProvider, Rope};
 use gpui_kit::component::input::RopeExt as _;
+use gpui_kit::component::{ActiveTheme as _, Icon};
 use gpui_kit::*;
 use lsp_types::{
-    CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
-    TextEdit,
+    CompletionContext, CompletionItem, CompletionItemKind, CompletionItemLabelDetails,
+    CompletionResponse, CompletionTextEdit, TextEdit,
 };
 
 use super::{Console, Target};
@@ -18,7 +20,7 @@ use crate::complete::{self, Item, ItemKind, SchemaSnapshot};
 use crate::db::{Driver, Reply, Session};
 use crate::model::{Connection, ConnectionId, DbKind, DbObject, ObjectKind};
 use crate::sessions::Sessions;
-use crate::sql;
+use crate::{assets, sql, theme};
 
 /// Connection, database, schema.
 type Place = (ConnectionId, String, String);
@@ -92,9 +94,10 @@ impl CompletionProvider for Provider {
 }
 
 fn items(target: &Target, text: &Rope, offset: usize, cx: &mut App) -> Vec<CompletionItem> {
-    let Some(dialect) = connection(target, cx).map(Connection::kind) else {
+    let Some(conn) = connection(target, cx) else {
         return Vec::new();
     };
+    let (dialect, place) = (conn.kind(), format!("{} {}", conn.name, target.database));
     let sql = text.to_string();
     let snapshot = snapshot(target, &statement_words(&sql, offset), cx);
     let start = partial_start(&sql, offset);
@@ -104,10 +107,37 @@ fn items(target: &Target, text: &Rope, offset: usize, cx: &mut App) -> Vec<Compl
     };
     let partial = &sql[start..offset];
     let items = complete::complete(&sql, offset, dialect, &snapshot);
+    // Objects say where they live, as the menu's right column, where a column shows its type.
+    let placed = |mut i: Item| {
+        if matches!(i.kind, ItemKind::Object(_) | ItemKind::Schema) {
+            i.detail.clone_from(&place);
+        }
+        i
+    };
     items
         .into_iter()
-        .map(|i| lsp_item(i, range, partial))
+        .map(|i| lsp_item(placed(i), range, partial))
         .collect()
+}
+
+/// The explorer's icon and color for a completion item's kind; keywords have none.
+pub fn icon(item: &CompletionItem, cx: &App) -> Option<Icon> {
+    let theme = cx.theme();
+    let object = |kind: ObjectKind| {
+        Icon::empty()
+            .path(assets::object_icon(kind.as_str(), false))
+            .text_color(theme::object_color(kind, theme))
+    };
+    match item.kind? {
+        CompletionItemKind::STRUCT => Some(object(ObjectKind::Table)),
+        CompletionItemKind::INTERFACE => Some(object(ObjectKind::View)),
+        CompletionItemKind::FUNCTION => Some(object(ObjectKind::Function)),
+        CompletionItemKind::FIELD => {
+            Some(Icon::new(Lucide::Columns3).text_color(theme.muted_foreground))
+        }
+        CompletionItemKind::MODULE => Some(Icon::new(Lucide::Layers).text_color(theme.magenta)),
+        _ => None,
+    }
 }
 
 fn connection<'a>(target: &Target, cx: &'a App) -> Option<&'a Connection> {
@@ -141,6 +171,10 @@ pub(crate) fn lsp_item(item: Item, range: lsp_types::Range, partial: &str) -> Co
         label: item.label,
         kind: Some(lsp_kind(item.kind)),
         detail: (item.kind != ItemKind::Keyword).then_some(item.detail),
+        label_details: Some(CompletionItemLabelDetails {
+            detail: Some(item.qualifier),
+            description: None,
+        }),
         filter_text: Some(partial.to_string()),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
             range,

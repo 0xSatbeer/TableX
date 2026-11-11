@@ -7,7 +7,7 @@ mod keywords;
 use std::collections::HashMap;
 
 use crate::fuzzy;
-use crate::model::{DbKind, DbObject, ObjectKind};
+use crate::model::{Column, DbKind, DbObject, ObjectKind};
 use crate::sql;
 
 /// What completion knows of a connection's metadata; whatever isn't loaded yet is just absent.
@@ -33,6 +33,9 @@ pub struct Item {
     pub kind: ItemKind,
     /// Column type, or "table", "view", "function", "schema", "keyword".
     pub detail: String,
+    /// Shown dim after the label: a column's table `" (t)"`, an object's `" (schema)"`,
+    /// a built-in function's `"()"`; empty otherwise.
+    pub qualifier: String,
     /// The text that replaces the partial word, quoted when the name needs it.
     pub insert: String,
 }
@@ -301,7 +304,7 @@ struct Ctx<'a> {
 impl Ctx<'_> {
     fn keywords(&self) -> Vec<Candidate> {
         keywords::keywords(self.dialect)
-            .map(|k| (2, item(k, ItemKind::Keyword, "keyword", k.to_string())))
+            .map(|k| (2, item(k, ItemKind::Keyword, "keyword", k.to_string(), "")))
             .collect()
     }
 
@@ -310,22 +313,23 @@ impl Ctx<'_> {
         let relations = current.iter().filter(|o| is_relation(o.kind));
         let schemas = self.snapshot.objects.keys();
         relations
-            .map(|o| (0, self.object(o)))
-            .chain(schemas.map(|s| (1, self.named(s, ItemKind::Schema, "schema"))))
+            .map(|o| (0, self.object(o, &self.snapshot.current)))
+            .chain(schemas.map(|s| (1, self.named(s, ItemKind::Schema, "schema", ""))))
             .collect()
     }
 
     fn members(&self, qualifier: &str) -> Vec<Candidate> {
         if let Some(columns) = self.resolve(qualifier).and_then(|o| o.columns.as_ref()) {
+            let of = format!(" ({qualifier})");
             return columns
                 .iter()
-                .map(|c| (0, self.named(&c.name, ItemKind::Column, &c.data_type)))
+                .map(|c| (0, self.named(&c.name, ItemKind::Column, &c.data_type, &of)))
                 .collect();
         }
         self.schema_objects(qualifier)
             .iter()
             .filter(|o| is_relation(o.kind) || o.kind == ObjectKind::Function)
-            .map(|o| (0, self.object(o)))
+            .map(|o| (0, self.object(o, qualifier)))
             .collect()
     }
 
@@ -338,21 +342,26 @@ impl Ctx<'_> {
         if expect == Expect::Value && !typing {
             return Vec::new();
         }
-        let columns = self
-            .refs
-            .iter()
-            .filter_map(|r| self.lookup(r)?.columns.as_ref());
-        let columns = columns
-            .flatten()
-            .map(|c| (0, self.named(&c.name, ItemKind::Column, &c.data_type)));
+        let columns = self.refs.iter().filter_map(|r| {
+            let of = format!(" ({})", r.alias.as_deref().unwrap_or(&r.name));
+            Some((self.lookup(r)?.columns.as_ref()?, of))
+        });
+        let columns = columns.flat_map(|(columns, of)| {
+            let column = move |c: &Column| self.named(&c.name, ItemKind::Column, &c.data_type, &of);
+            columns
+                .iter()
+                .map(column)
+                .map(|i| (0, i))
+                .collect::<Vec<_>>()
+        });
         let current = self.schema_objects(&self.snapshot.current);
         let own_functions = current.iter().filter(|o| o.kind == ObjectKind::Function);
         let function = ItemKind::Object(ObjectKind::Function);
         let builtins = keywords::functions(self.dialect)
-            .map(|f| (1, item(f, function, "function", f.to_string())));
+            .map(|f| (1, item(f, function, "function", f.to_string(), "()")));
         let keywords = (expect == Expect::Operand).then(|| self.keywords());
         columns
-            .chain(own_functions.map(|o| (1, self.object(o))))
+            .chain(own_functions.map(|o| (1, self.object(o, &self.snapshot.current))))
             .chain(builtins)
             .chain(keywords.into_iter().flatten())
             .collect()
@@ -394,12 +403,13 @@ impl Ctx<'_> {
             .map_or(&[], |(_, objects)| objects.as_slice())
     }
 
-    fn object(&self, o: &DbObject) -> Item {
-        self.named(&o.name, ItemKind::Object(o.kind), o.kind.as_str())
+    fn object(&self, o: &DbObject, schema: &str) -> Item {
+        let of = format!(" ({schema})");
+        self.named(&o.name, ItemKind::Object(o.kind), o.kind.as_str(), &of)
     }
 
-    fn named(&self, name: &str, kind: ItemKind, detail: &str) -> Item {
-        item(name, kind, detail, self.insert(name))
+    fn named(&self, name: &str, kind: ItemKind, detail: &str, qualifier: &str) -> Item {
+        item(name, kind, detail, self.insert(name), qualifier)
     }
 
     fn insert(&self, name: &str) -> String {
@@ -430,12 +440,13 @@ fn is_relation(kind: ObjectKind) -> bool {
     )
 }
 
-fn item(label: &str, kind: ItemKind, detail: &str, insert: String) -> Item {
+fn item(label: &str, kind: ItemKind, detail: &str, insert: String, qualifier: &str) -> Item {
     Item {
         label: label.to_string(),
         kind,
         detail: detail.to_string(),
         insert,
+        qualifier: qualifier.to_string(),
     }
 }
 

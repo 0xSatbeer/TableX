@@ -235,7 +235,10 @@ impl Console {
         let provider = Rc::new(completion::Provider {
             console: cx.weak_entity(),
         });
-        editor.update(cx, |e, _| e.lsp_mut().completion_provider = Some(provider));
+        editor.update(cx, |e, _| {
+            e.lsp_mut().completion_provider = Some(provider);
+            e.lsp_mut().completion_menu.max_width = theme::COMPLETION_MENU;
+        });
         cx.subscribe(&editor, |this, _, ev: &InputEvent, cx| {
             if let InputEvent::Change = ev {
                 this.text_changed(cx);

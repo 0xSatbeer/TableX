@@ -189,6 +189,10 @@ fn quoted_identifiers_insert_quoted() {
     assert_eq!(items[0].insert, "email");
     assert_eq!(items[0].detail, "int4");
     assert_eq!(items[0].kind, ItemKind::Column);
+    assert_eq!(
+        items[0].qualifier, " (u)",
+        "a column's qualifier is its alias"
+    );
 }
 
 #[test]

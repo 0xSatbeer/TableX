@@ -18,7 +18,10 @@ mod sql;
 mod theme;
 mod ui;
 
+use std::rc::Rc;
+
 use gpui_kit::component::TitleBar;
+use gpui_kit::component::input::CompletionIcon;
 use gpui_kit::*;
 
 use shell::Mode;
@@ -92,6 +95,7 @@ fn main() {
             gpui_kit::init(cx);
             shell::apply_mock_latency(mode, std::env::var("TABLEX_MOCK_LATENCY_MS").ok());
             theme::init(cx);
+            cx.set_global(CompletionIcon(Rc::new(ui::console::completion::icon)));
             cx.on_action(|_: &Quit, cx| cx.quit());
             let options = WindowOptions {
                 // Restore size is the 1280x800 centered window when unmaximized.
